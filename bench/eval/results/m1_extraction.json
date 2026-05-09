@@ -1,0 +1,1560 @@
+{
+  "metric": "M1 per-relation extraction accuracy",
+  "n_cases": 60,
+  "n_full_match": 54,
+  "n_rel_match_only": 1,
+  "by_relation": {
+    "attribute_of": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "causes": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "contains": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "instance_of": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "measures": {
+      "n_gold": 5,
+      "tp": 1,
+      "fp": 0,
+      "fn": 4,
+      "precision": 1.0,
+      "recall": 0.2,
+      "f1": 0.333
+    },
+    "opposes": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "part_of": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 5,
+      "fn": 0,
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1": 0.667
+    },
+    "reduces_to": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "requires": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "sequence": {
+      "n_gold": 5,
+      "tp": 3,
+      "fp": 0,
+      "fn": 2,
+      "precision": 1.0,
+      "recall": 0.6,
+      "f1": 0.75
+    },
+    "similar_to": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "used_for": {
+      "n_gold": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "_macro": {
+      "precision": 0.958,
+      "recall": 0.9,
+      "f1": 0.896
+    }
+  },
+  "per_case": [
+    {
+      "id": "causes_01",
+      "clause": "Overfitting causes high test error.",
+      "want": {
+        "subject": "overfitting",
+        "object": "high test error",
+        "relation": "causes"
+      },
+      "extracted_edges": [
+        {
+          "from": "overfitting",
+          "to": "high test error",
+          "relation": "causes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "overfitting",
+        "to": "high test error",
+        "relation": "causes"
+      },
+      "latency_ms": 808.465
+    },
+    {
+      "id": "causes_02",
+      "clause": "Rain leads to wet ground.",
+      "want": {
+        "subject": "rain",
+        "object": "wet ground",
+        "relation": "causes"
+      },
+      "extracted_edges": [
+        {
+          "from": "rain",
+          "to": "wet ground",
+          "relation": "causes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "rain",
+        "to": "wet ground",
+        "relation": "causes"
+      },
+      "latency_ms": 2.266
+    },
+    {
+      "id": "causes_03",
+      "clause": "A high learning rate triggers divergence.",
+      "want": {
+        "subject": "high learning rate",
+        "object": "divergence",
+        "relation": "causes"
+      },
+      "extracted_edges": [
+        {
+          "from": "high learning rate",
+          "to": "divergence",
+          "relation": "causes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "high learning rate",
+        "to": "divergence",
+        "relation": "causes"
+      },
+      "latency_ms": 2.041
+    },
+    {
+      "id": "causes_04",
+      "clause": "Regularisation produces a smoother decision boundary.",
+      "want": {
+        "subject": "regularisation",
+        "object": "smoother decision boundary",
+        "relation": "causes"
+      },
+      "extracted_edges": [
+        {
+          "from": "regularisation",
+          "to": "smoother decision boundary",
+          "relation": "causes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "regularisation",
+        "to": "smoother decision boundary",
+        "relation": "causes"
+      },
+      "latency_ms": 2.583
+    },
+    {
+      "id": "causes_05",
+      "clause": "The feedback loop induces amplification.",
+      "want": {
+        "subject": "feedback loop",
+        "object": "amplification",
+        "relation": "causes"
+      },
+      "extracted_edges": [
+        {
+          "from": "feedback loop",
+          "to": "amplification",
+          "relation": "causes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "feedback loop",
+        "to": "amplification",
+        "relation": "causes"
+      },
+      "latency_ms": 2.368
+    },
+    {
+      "id": "sequence_01",
+      "clause": "Wake up then drink coffee.",
+      "want": {
+        "subject": "wake up",
+        "object": "drink coffee",
+        "relation": "sequence"
+      },
+      "extracted_edges": [
+        {
+          "from": "wake up",
+          "to": "drink coffee",
+          "relation": "sequence"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "wake up",
+        "to": "drink coffee",
+        "relation": "sequence"
+      },
+      "latency_ms": 2.04
+    },
+    {
+      "id": "sequence_02",
+      "clause": "Tokenisation precedes embedding.",
+      "want": {
+        "subject": "tokenisation",
+        "object": "embedding",
+        "relation": "sequence"
+      },
+      "extracted_edges": [],
+      "rel_match": false,
+      "full_match": false,
+      "matched_edge": null,
+      "latency_ms": 1.942
+    },
+    {
+      "id": "sequence_03",
+      "clause": "Decoding follows encoding.",
+      "want": {
+        "subject": "encoding",
+        "object": "decoding",
+        "relation": "sequence"
+      },
+      "extracted_edges": [],
+      "rel_match": false,
+      "full_match": false,
+      "matched_edge": null,
+      "latency_ms": 1.904
+    },
+    {
+      "id": "sequence_04",
+      "clause": "Warm up then main run.",
+      "want": {
+        "subject": "warm up",
+        "object": "main run",
+        "relation": "sequence"
+      },
+      "extracted_edges": [
+        {
+          "from": "warm up",
+          "to": "main run",
+          "relation": "sequence"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "warm up",
+        "to": "main run",
+        "relation": "sequence"
+      },
+      "latency_ms": 1.904
+    },
+    {
+      "id": "sequence_05",
+      "clause": "The compile step precedes the test step.",
+      "want": {
+        "subject": "compile step",
+        "object": "test step",
+        "relation": "sequence"
+      },
+      "extracted_edges": [
+        {
+          "from": "compile step",
+          "to": "test step",
+          "relation": "sequence"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "compile step",
+        "to": "test step",
+        "relation": "sequence"
+      },
+      "latency_ms": 2.079
+    },
+    {
+      "id": "part_of_01",
+      "clause": "The arm is part of the body.",
+      "want": {
+        "subject": "arm",
+        "object": "body",
+        "relation": "part_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "arm",
+          "to": "body",
+          "relation": "part_of"
+        },
+        {
+          "from": "part",
+          "to": "body",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "arm",
+        "to": "body",
+        "relation": "part_of"
+      },
+      "latency_ms": 2.003
+    },
+    {
+      "id": "part_of_02",
+      "clause": "The engine is a part of the car.",
+      "want": {
+        "subject": "engine",
+        "object": "car",
+        "relation": "part_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "engine",
+          "to": "car",
+          "relation": "part_of"
+        },
+        {
+          "from": "part",
+          "to": "car",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "engine",
+        "to": "car",
+        "relation": "part_of"
+      },
+      "latency_ms": 2.068
+    },
+    {
+      "id": "part_of_03",
+      "clause": "A leaf is part of the tree.",
+      "want": {
+        "subject": "leaf",
+        "object": "tree",
+        "relation": "part_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "leaf",
+          "to": "tree",
+          "relation": "part_of"
+        },
+        {
+          "from": "part",
+          "to": "tree",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "leaf",
+        "to": "tree",
+        "relation": "part_of"
+      },
+      "latency_ms": 1.982
+    },
+    {
+      "id": "part_of_04",
+      "clause": "The attention head is part of the transformer.",
+      "want": {
+        "subject": "attention head",
+        "object": "transformer",
+        "relation": "part_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "attention head",
+          "to": "transformer",
+          "relation": "part_of"
+        },
+        {
+          "from": "part",
+          "to": "transformer",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "attention head",
+        "to": "transformer",
+        "relation": "part_of"
+      },
+      "latency_ms": 2.053
+    },
+    {
+      "id": "part_of_05",
+      "clause": "The kernel is part of the operating system.",
+      "want": {
+        "subject": "kernel",
+        "object": "operating system",
+        "relation": "part_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "kernel",
+          "to": "operating system",
+          "relation": "part_of"
+        },
+        {
+          "from": "part",
+          "to": "operating system",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "kernel",
+        "to": "operating system",
+        "relation": "part_of"
+      },
+      "latency_ms": 2.078
+    },
+    {
+      "id": "contains_01",
+      "clause": "The box contains a toy.",
+      "want": {
+        "subject": "box",
+        "object": "toy",
+        "relation": "contains"
+      },
+      "extracted_edges": [
+        {
+          "from": "box",
+          "to": "toy",
+          "relation": "contains"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "box",
+        "to": "toy",
+        "relation": "contains"
+      },
+      "latency_ms": 1.824
+    },
+    {
+      "id": "contains_02",
+      "clause": "The library contains many books.",
+      "want": {
+        "subject": "library",
+        "object": "book",
+        "relation": "contains"
+      },
+      "extracted_edges": [
+        {
+          "from": "library",
+          "to": "many book",
+          "relation": "contains"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "library",
+        "to": "many book",
+        "relation": "contains"
+      },
+      "latency_ms": 1.963
+    },
+    {
+      "id": "contains_03",
+      "clause": "The cell contains a nucleus.",
+      "want": {
+        "subject": "cell",
+        "object": "nucleu",
+        "relation": "contains"
+      },
+      "extracted_edges": [
+        {
+          "from": "cell",
+          "to": "nucleu",
+          "relation": "contains"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "cell",
+        "to": "nucleu",
+        "relation": "contains"
+      },
+      "latency_ms": 1.812
+    },
+    {
+      "id": "contains_04",
+      "clause": "The header contains metadata.",
+      "want": {
+        "subject": "header",
+        "object": "metadata",
+        "relation": "contains"
+      },
+      "extracted_edges": [
+        {
+          "from": "header",
+          "to": "metadata",
+          "relation": "contains"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "header",
+        "to": "metadata",
+        "relation": "contains"
+      },
+      "latency_ms": 1.68
+    },
+    {
+      "id": "contains_05",
+      "clause": "The module contains several functions.",
+      "want": {
+        "subject": "module",
+        "object": "function",
+        "relation": "contains"
+      },
+      "extracted_edges": [
+        {
+          "from": "module",
+          "to": "several function",
+          "relation": "contains"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "module",
+        "to": "several function",
+        "relation": "contains"
+      },
+      "latency_ms": 2.349
+    },
+    {
+      "id": "attribute_of_01",
+      "clause": "The body has a heart.",
+      "want": {
+        "subject": "heart",
+        "object": "body",
+        "relation": "attribute_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "heart",
+          "to": "body",
+          "relation": "attribute_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "heart",
+        "to": "body",
+        "relation": "attribute_of"
+      },
+      "latency_ms": 1.83
+    },
+    {
+      "id": "attribute_of_02",
+      "clause": "Each neuron has a weight.",
+      "want": {
+        "subject": "weight",
+        "object": "neuron",
+        "relation": "attribute_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "weight",
+          "to": "neuron",
+          "relation": "attribute_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "weight",
+        "to": "neuron",
+        "relation": "attribute_of"
+      },
+      "latency_ms": 1.806
+    },
+    {
+      "id": "attribute_of_03",
+      "clause": "Light has a wavelength.",
+      "want": {
+        "subject": "wavelength",
+        "object": "light",
+        "relation": "attribute_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "wavelength",
+          "to": "light",
+          "relation": "attribute_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "wavelength",
+        "to": "light",
+        "relation": "attribute_of"
+      },
+      "latency_ms": 1.724
+    },
+    {
+      "id": "attribute_of_04",
+      "clause": "The apple has a colour.",
+      "want": {
+        "subject": "colour",
+        "object": "apple",
+        "relation": "attribute_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "colour",
+          "to": "apple",
+          "relation": "attribute_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "colour",
+        "to": "apple",
+        "relation": "attribute_of"
+      },
+      "latency_ms": 1.791
+    },
+    {
+      "id": "attribute_of_05",
+      "clause": "The input has a size.",
+      "want": {
+        "subject": "size",
+        "object": "input",
+        "relation": "attribute_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "size",
+          "to": "input",
+          "relation": "attribute_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "size",
+        "to": "input",
+        "relation": "attribute_of"
+      },
+      "latency_ms": 1.814
+    },
+    {
+      "id": "similar_to_01",
+      "clause": "A dolphin is similar to a whale.",
+      "want": {
+        "subject": "dolphin",
+        "object": "whale",
+        "relation": "similar_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "dolphin",
+          "to": "whale",
+          "relation": "similar_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "dolphin",
+        "to": "whale",
+        "relation": "similar_to"
+      },
+      "latency_ms": 1.943
+    },
+    {
+      "id": "similar_to_02",
+      "clause": "An RNN resembles a transformer.",
+      "want": {
+        "subject": "rnn",
+        "object": "transformer",
+        "relation": "similar_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "rnn",
+          "to": "transformer",
+          "relation": "similar_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "rnn",
+        "to": "transformer",
+        "relation": "similar_to"
+      },
+      "latency_ms": 2.064
+    },
+    {
+      "id": "similar_to_03",
+      "clause": "Linear regression is similar to logistic regression.",
+      "want": {
+        "subject": "linear regression",
+        "object": "logistic regression",
+        "relation": "similar_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "linear regression",
+          "to": "logistic regression",
+          "relation": "similar_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "linear regression",
+        "to": "logistic regression",
+        "relation": "similar_to"
+      },
+      "latency_ms": 1.983
+    },
+    {
+      "id": "similar_to_04",
+      "clause": "A cat resembles a tiger.",
+      "want": {
+        "subject": "cat",
+        "object": "tiger",
+        "relation": "similar_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "cat",
+          "to": "tiger",
+          "relation": "similar_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "cat",
+        "to": "tiger",
+        "relation": "similar_to"
+      },
+      "latency_ms": 1.824
+    },
+    {
+      "id": "similar_to_05",
+      "clause": "BFS is similar to DFS.",
+      "want": {
+        "subject": "bfs",
+        "object": "dfs",
+        "relation": "similar_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "bfs",
+          "to": "dfs",
+          "relation": "similar_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "bfs",
+        "to": "dfs",
+        "relation": "similar_to"
+      },
+      "latency_ms": 1.827
+    },
+    {
+      "id": "opposes_01",
+      "clause": "Heat opposes cold.",
+      "want": {
+        "subject": "heat",
+        "object": "cold",
+        "relation": "opposes"
+      },
+      "extracted_edges": [
+        {
+          "from": "heat",
+          "to": "cold",
+          "relation": "opposes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "heat",
+        "to": "cold",
+        "relation": "opposes"
+      },
+      "latency_ms": 2.174
+    },
+    {
+      "id": "opposes_02",
+      "clause": "Expansion opposes contraction.",
+      "want": {
+        "subject": "expansion",
+        "object": "contraction",
+        "relation": "opposes"
+      },
+      "extracted_edges": [
+        {
+          "from": "expansion",
+          "to": "contraction",
+          "relation": "opposes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "expansion",
+        "to": "contraction",
+        "relation": "opposes"
+      },
+      "latency_ms": 1.655
+    },
+    {
+      "id": "opposes_03",
+      "clause": "Supply opposes demand.",
+      "want": {
+        "subject": "supply",
+        "object": "demand",
+        "relation": "opposes"
+      },
+      "extracted_edges": [
+        {
+          "from": "supply",
+          "to": "demand",
+          "relation": "opposes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "supply",
+        "to": "demand",
+        "relation": "opposes"
+      },
+      "latency_ms": 1.638
+    },
+    {
+      "id": "opposes_04",
+      "clause": "The north pole opposes the south pole.",
+      "want": {
+        "subject": "north pole",
+        "object": "south pole",
+        "relation": "opposes"
+      },
+      "extracted_edges": [
+        {
+          "from": "north pole",
+          "to": "south pole",
+          "relation": "opposes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "north pole",
+        "to": "south pole",
+        "relation": "opposes"
+      },
+      "latency_ms": 1.935
+    },
+    {
+      "id": "opposes_05",
+      "clause": "Exploration opposes exploitation.",
+      "want": {
+        "subject": "exploration",
+        "object": "exploitation",
+        "relation": "opposes"
+      },
+      "extracted_edges": [
+        {
+          "from": "exploration",
+          "to": "exploitation",
+          "relation": "opposes"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "exploration",
+        "to": "exploitation",
+        "relation": "opposes"
+      },
+      "latency_ms": 1.663
+    },
+    {
+      "id": "instance_of_01",
+      "clause": "A dolphin is an example of a mammal.",
+      "want": {
+        "subject": "dolphin",
+        "object": "mammal",
+        "relation": "instance_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "dolphin",
+          "to": "mammal",
+          "relation": "instance_of"
+        },
+        {
+          "from": "example",
+          "to": "mammal",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "dolphin",
+        "to": "mammal",
+        "relation": "instance_of"
+      },
+      "latency_ms": 2.064
+    },
+    {
+      "id": "instance_of_02",
+      "clause": "Merge sort is an instance of a sorting algorithm.",
+      "want": {
+        "subject": "merge sort",
+        "object": "sorting algorithm",
+        "relation": "instance_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "merge sort",
+          "to": "sorting algorithm",
+          "relation": "instance_of"
+        },
+        {
+          "from": "instance",
+          "to": "sorting algorithm",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "merge sort",
+        "to": "sorting algorithm",
+        "relation": "instance_of"
+      },
+      "latency_ms": 2.436
+    },
+    {
+      "id": "instance_of_03",
+      "clause": "ReLU is a kind of activation function.",
+      "want": {
+        "subject": "relu",
+        "object": "activation function",
+        "relation": "instance_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "relu",
+          "to": "activation function",
+          "relation": "instance_of"
+        },
+        {
+          "from": "kind",
+          "to": "activation function",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "relu",
+        "to": "activation function",
+        "relation": "instance_of"
+      },
+      "latency_ms": 2.112
+    },
+    {
+      "id": "instance_of_04",
+      "clause": "Python is an example of a programming language.",
+      "want": {
+        "subject": "python",
+        "object": "programming language",
+        "relation": "instance_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "python",
+          "to": "programming language",
+          "relation": "instance_of"
+        },
+        {
+          "from": "example",
+          "to": "programming language",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "python",
+        "to": "programming language",
+        "relation": "instance_of"
+      },
+      "latency_ms": 2.171
+    },
+    {
+      "id": "instance_of_05",
+      "clause": "A transformer is a type of neural network.",
+      "want": {
+        "subject": "transformer",
+        "object": "neural network",
+        "relation": "instance_of"
+      },
+      "extracted_edges": [
+        {
+          "from": "transformer",
+          "to": "neural network",
+          "relation": "instance_of"
+        },
+        {
+          "from": "type",
+          "to": "neural network",
+          "relation": "part_of"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "transformer",
+        "to": "neural network",
+        "relation": "instance_of"
+      },
+      "latency_ms": 2.083
+    },
+    {
+      "id": "used_for_01",
+      "clause": "The algorithm uses a binary heap.",
+      "want": {
+        "subject": "algorithm",
+        "object": "binary heap",
+        "relation": "used_for"
+      },
+      "extracted_edges": [
+        {
+          "from": "algorithm",
+          "to": "binary heap",
+          "relation": "used_for"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "algorithm",
+        "to": "binary heap",
+        "relation": "used_for"
+      },
+      "latency_ms": 2.115
+    },
+    {
+      "id": "used_for_02",
+      "clause": "The compiler uses a lexer.",
+      "want": {
+        "subject": "compiler",
+        "object": "lexer",
+        "relation": "used_for"
+      },
+      "extracted_edges": [
+        {
+          "from": "compiler",
+          "to": "lexer",
+          "relation": "used_for"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "compiler",
+        "to": "lexer",
+        "relation": "used_for"
+      },
+      "latency_ms": 1.982
+    },
+    {
+      "id": "used_for_03",
+      "clause": "The model employs an embedding layer.",
+      "want": {
+        "subject": "model",
+        "object": "embedding layer",
+        "relation": "used_for"
+      },
+      "extracted_edges": [
+        {
+          "from": "model",
+          "to": "embedding layer",
+          "relation": "used_for"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "model",
+        "to": "embedding layer",
+        "relation": "used_for"
+      },
+      "latency_ms": 1.977
+    },
+    {
+      "id": "used_for_04",
+      "clause": "The trainer applies stochastic gradient descent.",
+      "want": {
+        "subject": "trainer",
+        "object": "stochastic gradient descent",
+        "relation": "used_for"
+      },
+      "extracted_edges": [
+        {
+          "from": "trainer",
+          "to": "stochastic gradient descent",
+          "relation": "used_for"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "trainer",
+        "to": "stochastic gradient descent",
+        "relation": "used_for"
+      },
+      "latency_ms": 2.246
+    },
+    {
+      "id": "used_for_05",
+      "clause": "The encoder uses self attention.",
+      "want": {
+        "subject": "encoder",
+        "object": "self attention",
+        "relation": "used_for"
+      },
+      "extracted_edges": [
+        {
+          "from": "encoder",
+          "to": "self attention",
+          "relation": "used_for"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "encoder",
+        "to": "self attention",
+        "relation": "used_for"
+      },
+      "latency_ms": 1.889
+    },
+    {
+      "id": "requires_01",
+      "clause": "Merge sort requires additional memory.",
+      "want": {
+        "subject": "merge sort",
+        "object": "additional memory",
+        "relation": "requires"
+      },
+      "extracted_edges": [
+        {
+          "from": "merge sort",
+          "to": "additional memory",
+          "relation": "requires"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "merge sort",
+        "to": "additional memory",
+        "relation": "requires"
+      },
+      "latency_ms": 2.081
+    },
+    {
+      "id": "requires_02",
+      "clause": "Training requires labelled data.",
+      "want": {
+        "subject": "training",
+        "object": "labelled data",
+        "relation": "requires"
+      },
+      "extracted_edges": [
+        {
+          "from": "training",
+          "to": "labelled data",
+          "relation": "requires"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "training",
+        "to": "labelled data",
+        "relation": "requires"
+      },
+      "latency_ms": 1.96
+    },
+    {
+      "id": "requires_03",
+      "clause": "The transformer requires positional encoding.",
+      "want": {
+        "subject": "transformer",
+        "object": "positional encoding",
+        "relation": "requires"
+      },
+      "extracted_edges": [
+        {
+          "from": "transformer",
+          "to": "positional encoding",
+          "relation": "requires"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "transformer",
+        "to": "positional encoding",
+        "relation": "requires"
+      },
+      "latency_ms": 1.81
+    },
+    {
+      "id": "requires_04",
+      "clause": "Compilation needs a linker.",
+      "want": {
+        "subject": "compilation",
+        "object": "linker",
+        "relation": "requires"
+      },
+      "extracted_edges": [
+        {
+          "from": "compilation",
+          "to": "linker",
+          "relation": "requires"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "compilation",
+        "to": "linker",
+        "relation": "requires"
+      },
+      "latency_ms": 1.868
+    },
+    {
+      "id": "requires_05",
+      "clause": "Encryption requires a shared key.",
+      "want": {
+        "subject": "encryption",
+        "object": "shared key",
+        "relation": "requires"
+      },
+      "extracted_edges": [
+        {
+          "from": "encryption",
+          "to": "shared key",
+          "relation": "requires"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "encryption",
+        "to": "shared key",
+        "relation": "requires"
+      },
+      "latency_ms": 2.028
+    },
+    {
+      "id": "reduces_to_01",
+      "clause": "The problem reduces to sorting.",
+      "want": {
+        "subject": "problem",
+        "object": "sorting",
+        "relation": "reduces_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "problem",
+          "to": "sorting",
+          "relation": "reduces_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "problem",
+        "to": "sorting",
+        "relation": "reduces_to"
+      },
+      "latency_ms": 1.991
+    },
+    {
+      "id": "reduces_to_02",
+      "clause": "Shortest path reduces to graph search.",
+      "want": {
+        "subject": "shortest path",
+        "object": "graph search",
+        "relation": "reduces_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "shortest path",
+          "to": "to graph search",
+          "relation": "reduces_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "shortest path",
+        "to": "to graph search",
+        "relation": "reduces_to"
+      },
+      "latency_ms": 2.27
+    },
+    {
+      "id": "reduces_to_03",
+      "clause": "Factoring reduces to a discrete logarithm.",
+      "want": {
+        "subject": "factoring",
+        "object": "discrete logarithm",
+        "relation": "reduces_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "factoring",
+          "to": "logarithm",
+          "relation": "reduces_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "factoring",
+        "to": "logarithm",
+        "relation": "reduces_to"
+      },
+      "latency_ms": 1.998
+    },
+    {
+      "id": "reduces_to_04",
+      "clause": "Vertex cover reduces to independent set.",
+      "want": {
+        "subject": "vertex cover",
+        "object": "independent set",
+        "relation": "reduces_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "vertex cover",
+          "to": "independent set",
+          "relation": "reduces_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "vertex cover",
+        "to": "independent set",
+        "relation": "reduces_to"
+      },
+      "latency_ms": 1.94
+    },
+    {
+      "id": "reduces_to_05",
+      "clause": "Linear programming reduces to a feasibility test.",
+      "want": {
+        "subject": "linear programming",
+        "object": "feasibility test",
+        "relation": "reduces_to"
+      },
+      "extracted_edges": [
+        {
+          "from": "linear programming",
+          "to": "feasibility test",
+          "relation": "reduces_to"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "linear programming",
+        "to": "feasibility test",
+        "relation": "reduces_to"
+      },
+      "latency_ms": 2.028
+    },
+    {
+      "id": "measures_01",
+      "clause": "The perimeter equals four times the side.",
+      "want": {
+        "subject": "perimeter",
+        "object": "four times side",
+        "relation": "measures"
+      },
+      "extracted_edges": [
+        {
+          "from": "perimeter",
+          "to": "four time side",
+          "relation": "measures"
+        }
+      ],
+      "rel_match": true,
+      "full_match": false,
+      "matched_edge": null,
+      "latency_ms": 3.129
+    },
+    {
+      "id": "measures_02",
+      "clause": "A thermometer measures temperature.",
+      "want": {
+        "subject": "thermometer",
+        "object": "temperature",
+        "relation": "measures"
+      },
+      "extracted_edges": [],
+      "rel_match": false,
+      "full_match": false,
+      "matched_edge": null,
+      "latency_ms": 1.917
+    },
+    {
+      "id": "measures_03",
+      "clause": "The loss measures model error.",
+      "want": {
+        "subject": "loss",
+        "object": "model error",
+        "relation": "measures"
+      },
+      "extracted_edges": [
+        {
+          "from": "loss",
+          "to": "model error",
+          "relation": "measures"
+        }
+      ],
+      "rel_match": true,
+      "full_match": true,
+      "matched_edge": {
+        "from": "loss",
+        "to": "model error",
+        "relation": "measures"
+      },
+      "latency_ms": 1.79
+    },
+    {
+      "id": "measures_04",
+      "clause": "Accuracy measures the fraction correct.",
+      "want": {
+        "subject": "accuracy",
+        "object": "fraction correct",
+        "relation": "measures"
+      },
+      "extracted_edges": [],
+      "rel_match": false,
+      "full_match": false,
+      "matched_edge": null,
+      "latency_ms": 1.857
+    },
+    {
+      "id": "measures_05",
+      "clause": "A voltmeter measures voltage.",
+      "want": {
+        "subject": "voltmeter",
+        "object": "voltage",
+        "relation": "measures"
+      },
+      "extracted_edges": [],
+      "rel_match": false,
+      "full_match": false,
+      "matched_edge": null,
+      "latency_ms": 2.162
+    }
+  ],
+  "encoder_mode": "off"
+}

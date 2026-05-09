@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sevim — live canvas</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fafafa;
+    --fg: #222;
+    --muted: #777;
+    --accent: #2a6df4;
+    --highlight: #fbbf24;
+    --border: #e0e0e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1a1a; --fg: #eee; --muted: #888; --border: #333; }
+  }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 1em;
+    padding: 0.5em 1em;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85em;
+  }
+  header .title { font-weight: 600; }
+  header .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  header .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #ccc; transition: background 200ms;
+  }
+  header .dot.live { background: #22c55e; box-shadow: 0 0 6px #22c55e80; }
+  header .dot.disconnected { background: #ef4444; }
+  header button.play-btn {
+    margin-left: auto;
+    padding: 0.4em 0.9em;
+    font-size: 0.9em;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+  }
+  header button.play-btn:disabled { opacity: 0.5; cursor: default; }
+  header button.play-btn.hidden { display: none; }
+  main {
+    display: flex; align-items: center; justify-content: center;
+    height: calc(100vh - 50px);
+    padding: 1em;
+  }
+  #stage {
+    max-width: 100%; max-height: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  #stage svg { display: block; max-width: 100%; height: auto; }
+  .pulse { animation: pulse 400ms ease-out; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(42,109,244,0.5); }
+    100% { box-shadow: 0 0 0 12px rgba(42,109,244,0); }
+  }
+  /* Narration highlight: applied to <g data-nid> or <g data-eid> when
+     the audio cursor is inside that phrase's [start_s, end_s) window. */
+  #stage svg .sevim-highlight {
+    animation: sevim-highlight-pulse 0.9s ease-in-out infinite;
+  }
+  #stage svg .sevim-highlight rect,
+  #stage svg .sevim-highlight circle,
+  #stage svg .sevim-highlight ellipse,
+  #stage svg .sevim-highlight polygon,
+  #stage svg .sevim-highlight path,
+  #stage svg .sevim-highlight line {
+    stroke: var(--highlight) !important;
+    stroke-width: 3 !important;
+  }
+  @keyframes sevim-highlight-pulse {
+    0%, 100% { filter: drop-shadow(0 0 2px rgba(251,191,36,0.6)); }
+    50%      { filter: drop-shadow(0 0 10px rgba(251,191,36,0.95)); }
+  }
+  /* Play overlay shown the first time narration is available — browsers
+     block autoplay of audio without user interaction. */
+  .play-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    cursor: pointer;
+  }
+  .play-overlay .panel {
+    background: white; color: #222;
+    padding: 1.5em 2em;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    text-align: center;
+    max-width: 360px;
+  }
+  .play-overlay .panel button {
+    font-size: 1.1em;
+    padding: 0.6em 1.4em;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+    margin-top: 0.6em;
+  }
+  .play-overlay.hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="status-dot"></span>
+  <span class="title">Sevim canvas</span>
+  <span class="meta" id="cid"></span>
+  <span class="meta">rev <span id="rev">0</span></span>
+  <span class="meta"><span id="nodes">0</span> nodes / <span id="edges">0</span> edges</span>
+  <span class="meta" id="updated"></span>
+  <button class="play-btn hidden" id="play-btn" type="button">▶ Play narration</button>
+</header>
+<main>
+  <div id="stage">
+    <p style="color: var(--muted); padding: 2em; text-align: center;">
+      Waiting for the LLM to add the first node…
+    </p>
+  </div>
+</main>
+<audio id="narration-audio" preload="auto"></audio>
+<div class="play-overlay hidden" id="play-overlay">
+  <div class="panel" onclick="event.stopPropagation()">
+    <h3 style="margin-top:0">Narration ready</h3>
+    <p style="color:#555;margin:0.4em 0 1em">
+      Click below to enable audio playback (browsers block autoplay).
+    </p>
+    <button id="overlay-play" type="button">▶ Play narration</button>
+  </div>
+</div>
+<script>
+  const cid = document.body.dataset.cid || (() => {
+    const m = window.location.pathname.match(/\/canvas\/([^/]+)\/view/);
+    return m ? m[1] : null;
+  })();
+  if (cid) document.getElementById('cid').textContent = cid;
+
+  const stage = document.getElementById('stage');
+  const dot = document.getElementById('status-dot');
+  const revEl = document.getElementById('rev');
+  const nodesEl = document.getElementById('nodes');
+  const edgesEl = document.getElementById('edges');
+  const updatedEl = document.getElementById('updated');
+  const audio = document.getElementById('narration-audio');
+  const playBtn = document.getElementById('play-btn');
+  const overlay = document.getElementById('play-overlay');
+  const overlayPlay = document.getElementById('overlay-play');
+
+  // Narration manifest currently driving the highlight schedule.
+  let narration = null;            // {duration_s, phrases: [...]}
+  let activePhraseIndex = -1;
+  let userInteracted = false;      // tracks whether autoplay is unlocked
+
+  function applyState(state) {
+    if (state.svg) {
+      stage.innerHTML = state.svg;
+      stage.classList.remove('pulse');
+      void stage.offsetWidth;
+      stage.classList.add('pulse');
+      // Re-apply highlight on the (just-replaced) element if narration
+      // is currently playing; the previous highlight reference died with
+      // the old DOM tree.
+      activePhraseIndex = -1;
+      tickHighlight();
+    }
+    if (state.revision !== undefined) revEl.textContent = state.revision;
+    if (state.node_count !== undefined) nodesEl.textContent = state.node_count;
+    if (state.edge_count !== undefined) edgesEl.textContent = state.edge_count;
+    if (state.updated_at) {
+      updatedEl.textContent = new Date(state.updated_at * 1000).toLocaleTimeString();
+    }
+    // Narration arrived (or was updated)?
+    if (state.narration && state.narration.phrases &&
+        state.narration.phrases.length > 0) {
+      onNarrationReady(state.narration);
+    }
+  }
+
+  function onNarrationReady(manifest) {
+    const sameAsCurrent = (
+      narration &&
+      narration.phrases.length === manifest.phrases.length &&
+      narration.duration_s === manifest.duration_s
+    );
+    narration = manifest;
+    if (!sameAsCurrent) {
+      // Cache-bust the audio src so the browser refetches when a new
+      // narration is generated mid-session.
+      audio.src = `/canvas/${cid}/narration.wav?t=${Date.now()}`;
+      audio.load();
+    }
+    playBtn.classList.remove('hidden');
+    playBtn.disabled = false;
+    if (!userInteracted) {
+      // Try silent autoplay first; if it fails, surface the overlay.
+      audio.play().then(() => {
+        userInteracted = true;
+      }).catch(() => {
+        overlay.classList.remove('hidden');
+      });
+    } else if (audio.paused) {
+      // We previously got user consent; resume right away.
+      audio.play().catch(() => {});
+    }
+  }
+
+  function clearHighlight() {
+    stage.querySelectorAll('.sevim-highlight').forEach(el => {
+      el.classList.remove('sevim-highlight');
+    });
+  }
+
+  function applyHighlight(targetId) {
+    if (!targetId) { clearHighlight(); return; }
+    clearHighlight();
+    const sel = `[data-nid="${cssEscape(targetId)}"], [data-eid="${cssEscape(targetId)}"]`;
+    const elems = stage.querySelectorAll(sel);
+    elems.forEach(el => el.classList.add('sevim-highlight'));
+  }
+
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return s.replace(/(["\\])/g, '\\$1');
+  }
+
+  function tickHighlight() {
+    if (!narration || !narration.phrases) return;
+    const t = audio.currentTime;
+    let idx = -1;
+    for (let i = 0; i < narration.phrases.length; i++) {
+      const p = narration.phrases[i];
+      if (t >= p.start_s && t < p.end_s) { idx = i; break; }
+    }
+    if (idx === activePhraseIndex) return;
+    activePhraseIndex = idx;
+    applyHighlight(idx >= 0 ? narration.phrases[idx].highlight : null);
+  }
+
+  audio.addEventListener('timeupdate', tickHighlight);
+  audio.addEventListener('ended', () => {
+    activePhraseIndex = -1;
+    clearHighlight();
+  });
+
+  // Manual play controls
+  function userStart() {
+    userInteracted = true;
+    overlay.classList.add('hidden');
+    audio.play().catch(err => console.error('audio play failed', err));
+  }
+  playBtn.addEventListener('click', userStart);
+  overlayPlay.addEventListener('click', userStart);
+  overlay.addEventListener('click', userStart);
+
+  // Initial state load + SSE stream
+  async function loadInitial() {
+    if (!cid) return;
+    try {
+      const r = await fetch(`/canvas/${cid}/state`);
+      if (r.ok) applyState(await r.json());
+    } catch (e) { /* SSE will catch up */ }
+  }
+
+  function connectSSE() {
+    if (!cid) return;
+    const es = new EventSource(`/canvas/${cid}/events`);
+    es.addEventListener('open', () => dot.className = 'dot live');
+    es.addEventListener('error', () => dot.className = 'dot disconnected');
+    es.addEventListener('render', (ev) => {
+      try { applyState(JSON.parse(ev.data)); }
+      catch (e) { console.error('bad SSE payload', e); }
+    });
+  }
+
+  loadInitial().then(connectSSE);
+</script>
+</body>
+</html>

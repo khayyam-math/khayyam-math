@@ -1,0 +1,500 @@
+{
+  "spent_usd": 1.007388,
+  "calls": 60,
+  "by_model": {
+    "claude-haiku-4-5": {
+      "calls": 48,
+      "spent_usd": 0.563783,
+      "input_tokens": 114680,
+      "output_tokens": 85233
+    },
+    "claude-sonnet-4-6": {
+      "calls": 12,
+      "spent_usd": 0.443604,
+      "input_tokens": 24,
+      "output_tokens": 17450
+    }
+  },
+  "log": [
+    {
+      "ts": 1777939616.3879347,
+      "label": "m2_raw_llm:Overfitting causes high test error.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.009675,
+      "input_tokens": 2397,
+      "output_tokens": 1363
+    },
+    {
+      "ts": 1777939644.8811684,
+      "label": "m2_raw_llm:Overfitting causes high test error.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.027694999999999997,
+      "input_tokens": 2397,
+      "output_tokens": 4964
+    },
+    {
+      "ts": 1777939660.5228584,
+      "label": "m2_raw_llm:Overfitting causes high test error.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.014405000000000001,
+      "input_tokens": 2397,
+      "output_tokens": 2305
+    },
+    {
+      "ts": 1777939671.4853172,
+      "label": "m2_raw_llm:Wake up then drink coffee.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.011309,
+      "input_tokens": 2394,
+      "output_tokens": 1686
+    },
+    {
+      "ts": 1777939686.681591,
+      "label": "m2_raw_llm:Wake up then drink coffee.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.013504,
+      "input_tokens": 2394,
+      "output_tokens": 2125
+    },
+    {
+      "ts": 1777939693.1960351,
+      "label": "m2_raw_llm:Wake up then drink coffee.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.005819,
+      "input_tokens": 2394,
+      "output_tokens": 588
+    },
+    {
+      "ts": 1777939705.1913018,
+      "label": "m2_raw_llm:The arm is part of the body.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.010438000000000001,
+      "input_tokens": 2396,
+      "output_tokens": 1512
+    },
+    {
+      "ts": 1777939713.6463358,
+      "label": "m2_raw_llm:The arm is part of the body.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.007323000000000001,
+      "input_tokens": 2396,
+      "output_tokens": 892
+    },
+    {
+      "ts": 1777939727.6864576,
+      "label": "m2_raw_llm:The arm is part of the body.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.014088000000000002,
+      "input_tokens": 2396,
+      "output_tokens": 2245
+    },
+    {
+      "ts": 1777939735.8073113,
+      "label": "m2_raw_llm:The box contains a toy.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.007174,
+      "input_tokens": 2394,
+      "output_tokens": 861
+    },
+    {
+      "ts": 1777939743.2223446,
+      "label": "m2_raw_llm:The box contains a toy.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.006893999999999999,
+      "input_tokens": 2394,
+      "output_tokens": 806
+    },
+    {
+      "ts": 1777939752.6203258,
+      "label": "m2_raw_llm:The box contains a toy.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.008859,
+      "input_tokens": 2394,
+      "output_tokens": 1198
+    },
+    {
+      "ts": 1777939760.6842182,
+      "label": "m2_raw_llm:The body has a heart.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.007324,
+      "input_tokens": 2394,
+      "output_tokens": 890
+    },
+    {
+      "ts": 1777939769.162546,
+      "label": "m2_raw_llm:The body has a heart.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.007889,
+      "input_tokens": 2394,
+      "output_tokens": 1003
+    },
+    {
+      "ts": 1777939778.929198,
+      "label": "m2_raw_llm:The body has a heart.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.008473999999999999,
+      "input_tokens": 2394,
+      "output_tokens": 1120
+    },
+    {
+      "ts": 1777939797.18011,
+      "label": "m2_raw_llm:A dolphin is similar to a whale.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.01681,
+      "input_tokens": 2397,
+      "output_tokens": 2785
+    },
+    {
+      "ts": 1777939817.0455184,
+      "label": "m2_raw_llm:A dolphin is similar to a whale.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.01654,
+      "input_tokens": 2397,
+      "output_tokens": 2731
+    },
+    {
+      "ts": 1777939828.356295,
+      "label": "m2_raw_llm:A dolphin is similar to a whale.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.00989,
+      "input_tokens": 2397,
+      "output_tokens": 1401
+    },
+    {
+      "ts": 1777939851.4255931,
+      "label": "m2_raw_llm:Heat opposes cold.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.020232,
+      "input_tokens": 2393,
+      "output_tokens": 3472
+    },
+    {
+      "ts": 1777939864.654814,
+      "label": "m2_raw_llm:Heat opposes cold.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.011621999999999999,
+      "input_tokens": 2393,
+      "output_tokens": 1751
+    },
+    {
+      "ts": 1777939890.5236099,
+      "label": "m2_raw_llm:Heat opposes cold.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.025796999999999997,
+      "input_tokens": 2393,
+      "output_tokens": 4585
+    },
+    {
+      "ts": 1777939907.2596512,
+      "label": "m2_raw_llm:A dolphin is an example of a mammal.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.016663999999999998,
+      "input_tokens": 2399,
+      "output_tokens": 2754
+    },
+    {
+      "ts": 1777939918.909372,
+      "label": "m2_raw_llm:A dolphin is an example of a mammal.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.008314,
+      "input_tokens": 2399,
+      "output_tokens": 1084
+    },
+    {
+      "ts": 1777939941.1432278,
+      "label": "m2_raw_llm:A dolphin is an example of a mammal.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.018483999999999997,
+      "input_tokens": 2399,
+      "output_tokens": 3118
+    },
+    {
+      "ts": 1777939950.681282,
+      "label": "m2_raw_llm:The algorithm uses a binary heap.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.008566,
+      "input_tokens": 2395,
+      "output_tokens": 1138
+    },
+    {
+      "ts": 1777939962.9975371,
+      "label": "m2_raw_llm:The algorithm uses a binary heap.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.011486,
+      "input_tokens": 2395,
+      "output_tokens": 1721
+    },
+    {
+      "ts": 1777939972.7536423,
+      "label": "m2_raw_llm:The algorithm uses a binary heap.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.008721,
+      "input_tokens": 2395,
+      "output_tokens": 1172
+    },
+    {
+      "ts": 1777940004.3077352,
+      "label": "m2_raw_llm:Merge sort requires additional memory.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.027001,
+      "input_tokens": 2395,
+      "output_tokens": 4828
+    },
+    {
+      "ts": 1777940022.354782,
+      "label": "m2_raw_llm:Merge sort requires additional memory.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.016565999999999997,
+      "input_tokens": 2395,
+      "output_tokens": 2740
+    },
+    {
+      "ts": 1777940044.3368514,
+      "label": "m2_raw_llm:Merge sort requires additional memory.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.018816000000000003,
+      "input_tokens": 2395,
+      "output_tokens": 3191
+    },
+    {
+      "ts": 1777940054.6376395,
+      "label": "m2_raw_llm:The problem reduces to sorting.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.010254000000000001,
+      "input_tokens": 2394,
+      "output_tokens": 1480
+    },
+    {
+      "ts": 1777940060.3498926,
+      "label": "m2_raw_llm:The problem reduces to sorting.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.004993999999999999,
+      "input_tokens": 2394,
+      "output_tokens": 429
+    },
+    {
+      "ts": 1777940071.5654297,
+      "label": "m2_raw_llm:The problem reduces to sorting.",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.010789,
+      "input_tokens": 2394,
+      "output_tokens": 1588
+    },
+    {
+      "ts": 1777940081.4616792,
+      "label": "m2_raw_llm:The perimeter equals four times the side",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.00901,
+      "input_tokens": 2397,
+      "output_tokens": 1222
+    },
+    {
+      "ts": 1777940094.266426,
+      "label": "m2_raw_llm:The perimeter equals four times the side",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.012405000000000001,
+      "input_tokens": 2397,
+      "output_tokens": 1904
+    },
+    {
+      "ts": 1777940105.8556821,
+      "label": "m2_raw_llm:The perimeter equals four times the side",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.01089,
+      "input_tokens": 2397,
+      "output_tokens": 1601
+    },
+    {
+      "ts": 1777940118.6385708,
+      "label": "m4_raw_llm:causes_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.005595,
+      "input_tokens": 2372,
+      "output_tokens": 549
+    },
+    {
+      "ts": 1777940131.201234,
+      "label": "m4_raw_llm:sequence_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.011519,
+      "input_tokens": 2369,
+      "output_tokens": 1734
+    },
+    {
+      "ts": 1777940139.2176135,
+      "label": "m4_raw_llm:part_of_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.007467999999999999,
+      "input_tokens": 2371,
+      "output_tokens": 926
+    },
+    {
+      "ts": 1777940145.8457346,
+      "label": "m4_raw_llm:contains_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.005639,
+      "input_tokens": 2369,
+      "output_tokens": 560
+    },
+    {
+      "ts": 1777940152.1082382,
+      "label": "m4_raw_llm:attribute_of_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.005469000000000001,
+      "input_tokens": 2369,
+      "output_tokens": 524
+    },
+    {
+      "ts": 1777940161.4027195,
+      "label": "m4_raw_llm:similar_to_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.00786,
+      "input_tokens": 2372,
+      "output_tokens": 1000
+    },
+    {
+      "ts": 1777940173.4757915,
+      "label": "m4_raw_llm:opposes_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.011902000000000001,
+      "input_tokens": 2368,
+      "output_tokens": 1812
+    },
+    {
+      "ts": 1777940182.6736362,
+      "label": "m4_raw_llm:instance_of_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.007928999999999999,
+      "input_tokens": 2374,
+      "output_tokens": 1013
+    },
+    {
+      "ts": 1777940190.7224307,
+      "label": "m4_raw_llm:used_for_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.0075509999999999996,
+      "input_tokens": 2370,
+      "output_tokens": 942
+    },
+    {
+      "ts": 1777940210.8457208,
+      "label": "m4_raw_llm:requires_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.019240999999999998,
+      "input_tokens": 2370,
+      "output_tokens": 3280
+    },
+    {
+      "ts": 1777940219.4442782,
+      "label": "m4_raw_llm:reduces_to_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.008224,
+      "input_tokens": 2369,
+      "output_tokens": 1079
+    },
+    {
+      "ts": 1777940230.8078213,
+      "label": "m4_raw_llm:measures_01",
+      "model": "claude-haiku-4-5",
+      "cost_usd": 0.010665000000000001,
+      "input_tokens": 2372,
+      "output_tokens": 1561
+    },
+    {
+      "ts": 1777940289.403889,
+      "label": "m4_judge:causes_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.057305999999999996,
+      "input_tokens": 2,
+      "output_tokens": 2827
+    },
+    {
+      "ts": 1777940313.1477356,
+      "label": "m4_judge:sequence_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.03545999999999999,
+      "input_tokens": 2,
+      "output_tokens": 1370
+    },
+    {
+      "ts": 1777940328.3687663,
+      "label": "m4_judge:part_of_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.027961250000000003,
+      "input_tokens": 2,
+      "output_tokens": 833
+    },
+    {
+      "ts": 1777940352.9689722,
+      "label": "m4_judge:contains_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.03317225,
+      "input_tokens": 2,
+      "output_tokens": 1200
+    },
+    {
+      "ts": 1777940379.8785543,
+      "label": "m4_judge:attribute_of_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.033244749999999997,
+      "input_tokens": 2,
+      "output_tokens": 1222
+    },
+    {
+      "ts": 1777940419.8646884,
+      "label": "m4_judge:similar_to_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.04578825,
+      "input_tokens": 2,
+      "output_tokens": 2043
+    },
+    {
+      "ts": 1777940458.4662437,
+      "label": "m4_judge:opposes_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.04247575000000001,
+      "input_tokens": 2,
+      "output_tokens": 1845
+    },
+    {
+      "ts": 1777940488.8816786,
+      "label": "m4_judge:instance_of_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.03727075,
+      "input_tokens": 2,
+      "output_tokens": 1427
+    },
+    {
+      "ts": 1777940511.0132053,
+      "label": "m4_judge:used_for_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.03077225,
+      "input_tokens": 2,
+      "output_tokens": 1048
+    },
+    {
+      "ts": 1777940534.5254436,
+      "label": "m4_judge:requires_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.03192825,
+      "input_tokens": 2,
+      "output_tokens": 1088
+    },
+    {
+      "ts": 1777940560.7162955,
+      "label": "m4_judge:reduces_to_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.032395,
+      "input_tokens": 2,
+      "output_tokens": 1153
+    },
+    {
+      "ts": 1777940593.2894707,
+      "label": "m4_judge:measures_01",
+      "model": "claude-sonnet-4-6",
+      "cost_usd": 0.03583025,
+      "input_tokens": 2,
+      "output_tokens": 1394
+    }
+  ]
+}
