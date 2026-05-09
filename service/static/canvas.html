@@ -66,7 +66,9 @@
     100% { box-shadow: 0 0 0 12px rgba(42,109,244,0); }
   }
   /* Narration highlight: applied to <g data-nid> or <g data-eid> when
-     the audio cursor is inside that phrase's [start_s, end_s) window. */
+     the audio cursor is inside that phrase's [start_s, end_s) window.
+     Designed to be unmistakable even on tiny point dots — thick yellow
+     stroke + pulsing drop-shadow halo. */
   #stage svg .sevim-highlight {
     animation: sevim-highlight-pulse 0.9s ease-in-out infinite;
   }
@@ -77,11 +79,24 @@
   #stage svg .sevim-highlight path,
   #stage svg .sevim-highlight line {
     stroke: var(--highlight) !important;
-    stroke-width: 3 !important;
+    stroke-width: 5 !important;
+  }
+  /* Tiny point circles have radius ~4-5 px — a 5 px stroke can swallow
+     them.  Override fill to bright yellow on circles inside .sevim-highlight
+     so the dot itself glows. */
+  #stage svg .sevim-highlight circle {
+    fill: var(--highlight) !important;
+  }
+  /* Edges (paths/lines) get a thicker, fully opaque highlight stroke
+     so they remain visible against the background. */
+  #stage svg .sevim-highlight path,
+  #stage svg .sevim-highlight line {
+    stroke-width: 4 !important;
+    stroke-opacity: 1 !important;
   }
   @keyframes sevim-highlight-pulse {
-    0%, 100% { filter: drop-shadow(0 0 2px rgba(251,191,36,0.6)); }
-    50%      { filter: drop-shadow(0 0 10px rgba(251,191,36,0.95)); }
+    0%, 100% { filter: drop-shadow(0 0 4px rgba(251,191,36,0.8)); }
+    50%      { filter: drop-shadow(0 0 14px rgba(251,191,36,1.0)); }
   }
   /* Audio-unlock hint — non-blocking corner pill instead of a modal.
      Any click or keypress on the page unlocks autoplay; the hint
@@ -178,7 +193,18 @@
       const utt = new SpeechSynthesisUtterance(text);
       utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
       utt.onstart = () => { webSpeakerActive = true; };
-      utt.onend = () => { webSpeakerActive = false; introPlayed = true; };
+      utt.onend = () => {
+        webSpeakerActive = false;
+        introPlayed = true;
+        // Chain into narration once the intro has finished speaking.
+        // Without this, the narration <audio> stays paused after Web
+        // Speech ends — the user thinks the narration is running but
+        // no timeupdate events fire, so no highlights ever appear.
+        if (narration && audio.src && audio.paused) {
+          audio.play().then(() => { userInteracted = true; })
+                      .catch(() => overlay.classList.remove('hidden'));
+        }
+      };
       synth.speak(utt);
       return true;
     } catch (e) {
@@ -195,11 +221,19 @@
     if (userInteracted) return;
     userInteracted = true;
     overlay.classList.add('hidden');
-    // Try to start whichever audio is currently waiting.
+    // If Web Speech is still talking the intro, do nothing — its
+    // 'onend' will start the narration audio.  Avoids double-intro
+    // playback (Web Speech intro + piper intro WAV).
+    if (webSpeakerActive) return;
+    // If narration is queued and ready, start it.  This is the
+    // common case: user clicked after intro was already done.
+    if (audio.src && audio.paused) {
+      audio.play().catch(() => {});
+      return;
+    }
+    // Fall back to the piper intro WAV if it hasn't played yet.
     if (intro.src && intro.paused && !introPlayed) {
       intro.play().catch(() => {});
-    } else if (audio.src && audio.paused) {
-      audio.play().catch(() => {});
     }
   }
   document.addEventListener('click', unlockAudio, { once: false });
