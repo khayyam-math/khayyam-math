@@ -52,16 +52,24 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "sevim_open",
         "description": (
-            "Open a new diagram canvas.  Pass intro=... so the user "
-            "hears a 1-2 sentence introduction immediately while you "
-            "write the build calls."
+            "Open a new diagram canvas.  Set prelude=... to the FULL "
+            "verbal problem-and-solution definition (50-150 words); "
+            "the canvas speaks it via piper TTS the moment it opens, "
+            "while you write the figure-build calls.  Set animate=True "
+            "for a self-playing whiteboard.  After the prelude, the "
+            "viewer auto-speaks the transition phrase 'And now please "
+            "look at the diagram.' before sevim_narrate's walkthrough "
+            "starts — you don't write the transition yourself."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "math_mode": {"type": "boolean"},
                 "animate": {"type": "boolean"},
-                "intro": {"type": "string"},
+                "prelude": {"type": "string",
+                            "description": "Full 50-150 word problem+solution speech."},
+                "transition": {"type": "string",
+                               "description": "Optional transition phrase override."},
                 "width": {"type": "integer"},
                 "height": {"type": "integer"},
             },
@@ -118,19 +126,24 @@ def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             width=int(args.get("width", 700)),
             height=int(args.get("height", 440)),
         )
-        intro = (args.get("intro") or "").strip()
-        if intro:
+        prelude = (args.get("prelude") or args.get("intro") or "").strip()
+        transition = (args.get("transition") or "").strip()
+        if prelude or transition:
             with c.lock:
-                c.intro_text = intro
+                if prelude:
+                    c.intro_text = prelude
+                if transition:
+                    c.transition_text = transition
                 c.revision += 1
+        if prelude:
             try:
-                c.intro(intro)
-            except Exception:  # noqa: BLE001 — Web Speech still covers
+                c.intro(prelude)
+            except Exception:  # noqa: BLE001 — viewer falls back gracefully
                 pass
         return {
             "canvas_id": c.canvas_id,
             "view_url": f"/canvas/{c.canvas_id}/view",
-            "intro_started": bool(intro),
+            "prelude_started": bool(prelude),
         }
     if name == "sevim_apply":
         cid = args.get("canvas_id")
@@ -186,17 +199,31 @@ class ChatReq(BaseModel):
 
 
 SYSTEM_PROMPT = (
-    "You are a real-time visual tutor.  The user is watching a live "
-    "Sevim canvas in their browser; you build figures on it via the "
-    "sevim_* tools.\n\n"
-    "BATCH AGGRESSIVELY.  Use sevim_apply with all ops in a single "
-    "call rather than many add_node/add_edge calls.  A typical "
-    "figure should be 1-3 tool calls total.\n\n"
-    "On the FIRST response, ALWAYS call sevim_open with intro=... "
-    "so the user hears 1-2 sentences immediately while you write "
-    "the build calls.\n\n"
-    "Carry canvas_id explicitly through every tool call.\n\n"
-    "End with sevim_narrate for the phrase-timed walk-through."
+    "You are a real-time visual tutor.  The user watches the Sevim "
+    "canvas in their browser; you build figures via the sevim_* tools.\n"
+    "\n"
+    "Your chat-side text reply is for visual reference only — it is "
+    "NOT spoken aloud.  ALL audio comes from the canvas: piper TTS "
+    "speaks the prelude on sevim_open, then the transition, then the "
+    "phrase-timed walkthrough on sevim_narrate.  So write the actual "
+    "lesson into the prelude and narration script — keep your chat "
+    "reply terse (one or two acknowledgement sentences).\n"
+    "\n"
+    "Standard 3-call workflow:\n"
+    "  1. sevim_open(math_mode=True, animate=True, prelude=\"…\") "
+    "with the FULL 50-150 word problem-and-solution definition in "
+    "prelude.  Canvas starts speaking immediately.\n"
+    "  2. sevim_apply(canvas_id=…, ops=[…]) — ALL nodes, edges, AND "
+    "captions in one batched call.  Captions go in the same list:\n"
+    "       {\"op\":\"add_caption\",\"text\":…,\"x\":…,\"y\":…,\"anchor\":…}\n"
+    "  3. sevim_narrate(canvas_id=…, script=[…]) — phrase-timed "
+    "walk-through.  Each phrase highlights one element.  The viewer "
+    "auto-prepends the transition phrase ('And now please look at "
+    "the diagram.') — start the script with the first observation "
+    "about the figure, not with a transition.\n"
+    "\n"
+    "Carry canvas_id explicitly through every tool call after the "
+    "first sevim_open."
 )
 
 
