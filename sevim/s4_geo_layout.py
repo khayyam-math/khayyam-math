@@ -335,22 +335,29 @@ def _place_captions_in_margins(
     label_strip_h: float,
     to_canvas,
 ) -> list[tuple[VisualShape, float, float]]:
-    """Place captions in canvas margins so they never cover the figure.
+    """Place captions in canvas margins so they never cover the figure
+    AND never overlap each other.
 
     Strategy
     --------
-    Each caption has an ``anchor`` meta (one of ``above`` / ``below`` /
+    Each caption has an ``anchor`` meta (``above`` / ``below`` /
     ``left`` / ``right`` / ``auto`` / ``overlay``).  The anchor selects
-    which canvas margin the caption goes into.  ``auto`` picks the
-    margin with the most free room.  ``overlay`` keeps the legacy
-    in-figure placement for the rare case the LLM really wants it.
+    a preferred margin; ``auto`` picks the margin with most free pixels.
 
-    Within a margin, captions stack without overlap (horizontally for
-    top/bottom; vertically for left/right).  A leader line is recorded
-    in ``meta["leader_from_canvas"]`` / ``meta["leader_to_canvas"]`` so
-    ``_render_caption`` can draw a thin line back to the math anchor.
+    Placement uses a 2-D occupancy model: a list of every rectangle
+    already on the canvas (figure shapes, point labels, prior captions).
+    For each new caption we walk a row × column lattice in the chosen
+    margin starting from the math-anchor's projection, taking the first
+    spot that doesn't overlap any blocked rect.  When a row/column is
+    full we wrap deeper into the margin (further from the figure).
+    When no row fits, we try alternative margins.  Only as a last resort
+    do we shrink the caption — and we keep searching after shrinking.
+    Final fallback places at a canvas corner.
+
+    This replaces the prior 1-D cursor model whose canvas-edge clamp
+    silently piled later captions on top of earlier ones.
     """
-    # Figure bounding box (canvas-px) — captions are pushed outside this.
+    # Figure bounding box (canvas-px).
     if geom_bboxes:
         fig_xmin = min(b[0] for b in geom_bboxes)
         fig_xmax = max(b[0] + b[2] for b in geom_bboxes)
@@ -360,58 +367,31 @@ def _place_captions_in_margins(
         fig_xmin, fig_xmax = pad, canvas_w - pad
         fig_ymin, fig_ymax = pad + label_strip_h, canvas_h - pad
 
-    # Stacking cursors per margin; updated as each caption is placed.
-    cursors = {
-        "top":    pad,                       # x advancing rightward in top strip
-        "bottom": pad,                       # x advancing rightward in bottom strip
-        "left":   pad + label_strip_h,       # y advancing downward in left strip
-        "right":  pad + label_strip_h,       # y advancing downward in right strip
-    }
-    # Pixel separation between the figure bbox and a caption stacked in
-    # a margin.  Bumped from 8 → 18 so labels and captions never visually
-    # touch even with tight margins.
+    # Pixel separation between figure and a caption stacked next to it.
     gap = 18.0
+    # Pixel separation between two stacked caption rows / columns.
+    intra_gap = 6.0
 
-    # Decide auto-margin once for the whole batch — captions on the same
-    # figure should cluster on the same side rather than ping-ponging.
     auto_margin = _pick_auto_margin(
         canvas_w, canvas_h, fig_xmin, fig_xmax, fig_ymin, fig_ymax, label_strip_h, pad,
     )
 
-    # Available pixel space in each canvas margin, computed once so we
-    # can reroute captions whose requested anchor doesn't fit.
-    margin_space = {
-        "above":  max(0.0, fig_ymin - (pad + label_strip_h)),
-        "below":  max(0.0, (canvas_h - pad) - fig_ymax),
-        "left":   max(0.0, fig_xmin - pad),
-        "right":  max(0.0, (canvas_w - pad) - fig_xmax),
-    }
+    # Blocked rects: anything we must not overlap.  Seed with figure
+    # geometry; append every caption as we place it.
+    blocked: list[tuple[float, float, float, float]] = list(geom_bboxes)
+    # Treat the entire figure rect as a single forbidden zone too —
+    # belt-and-braces against captions slipping through gaps in the
+    # geom_bboxes coverage.
+    blocked.append((fig_xmin, fig_ymin, fig_xmax - fig_xmin, fig_ymax - fig_ymin))
 
-    def _anchor_fits(anc: str, vs: VisualShape) -> bool:
-        """True iff caption fits in this margin WITHOUT being clamped
-        into the figure."""
-        if anc in ("above", "top", "below", "bottom"):
-            # Vertical margin — caption height must fit.
-            return margin_space[anc.replace("top", "above").replace("bottom", "below")] >= vs.height + gap
-        if anc in ("left", "right"):
-            # Horizontal margin — caption width must fit.
-            return margin_space[anc] >= vs.width + gap
-        return True
-
-    def _best_alt_anchor(vs: VisualShape) -> str:
-        """When the requested anchor doesn't fit, pick the largest
-        margin that does."""
-        order = ["below", "above", "right", "left"]
-        candidates = [a for a in order if _anchor_fits(a, vs)]
-        if candidates:
-            # Prefer the one with most room.
-            return max(candidates, key=lambda a: margin_space[
-                "above" if a in ("above", "top") else
-                "below" if a in ("below", "bottom") else a
-            ])
-        # No margin can hold it — return the largest one and let the
-        # caller shrink the caption to fit.
-        return max(margin_space.keys(), key=lambda k: margin_space[k])
+    # The renderer (_render_caption in s5_render) grows the caption rect
+    # to fit wrapped text: ``h = max(vs.height, needed_h)``.  If layout
+    # uses the unmodified vs.height it reserves too small a slot and the
+    # rendered rect spills over into the next caption.  Reconcile here:
+    # update vs.height in-place to the actual rendered height before any
+    # placement decisions are made.
+    for vs in captions:
+        vs.height = _caption_rendered_height(vs)
 
     out: list[tuple[VisualShape, float, float]] = []
     for vs in captions:
@@ -420,91 +400,90 @@ def _place_captions_in_margins(
         if anchor == "auto":
             anchor = auto_margin
 
-        # Reroute when the requested anchor would force the caption
-        # to overlap the figure (i.e. canvas would clamp it inward).
-        if anchor not in ("overlay",) and not _anchor_fits(anchor, vs):
-            new_anchor = _best_alt_anchor(vs)
-            # If still doesn't fit, shrink width so the caption
-            # *does* fit and just wraps to more lines.
-            if not _anchor_fits(new_anchor, vs):
-                avail = margin_space[
-                    "above" if new_anchor in ("above", "top") else
-                    "below" if new_anchor in ("below", "bottom") else new_anchor
-                ]
-                if new_anchor in ("left", "right"):
-                    vs.width = max(80.0, avail - gap - 4)
-                else:
-                    # Top/bottom: cut height by halving the displayed
-                    # text — render layer wraps the long string.
-                    vs.height = max(28.0, avail - gap - 4)
-            anchor = new_anchor
-
-        # Math anchor → canvas-px (used as leader endpoint).
+        # Math anchor → canvas-px (used as leader endpoint and as the
+        # ideal in-margin position the search prefers).
         if "x" in m and "y" in m:
-            ax, ay = to_canvas(float(m["x"]), float(m["y"]))
+            ax_px, ay_px = to_canvas(float(m["x"]), float(m["y"]))
         else:
-            ax, ay = (fig_xmin + fig_xmax) / 2, (fig_ymin + fig_ymax) / 2
+            ax_px = (fig_xmin + fig_xmax) / 2
+            ay_px = (fig_ymin + fig_ymax) / 2
 
         if anchor == "overlay":
-            # Legacy in-figure placement — the LLM has explicitly asked
-            # for this and accepts that overlap may occur.
-            ps_x = ax - vs.width / 2
-            ps_y = ay - vs.height / 2
-            ps_x = max(pad, min(canvas_w - vs.width - pad, ps_x))
-            ps_y = max(pad, min(canvas_h - vs.height - pad, ps_y))
+            # Legacy in-figure placement — explicit LLM opt-in.
+            ps_x = max(pad, min(canvas_w - vs.width - pad, ax_px - vs.width / 2))
+            ps_y = max(pad, min(canvas_h - vs.height - pad, ay_px - vs.height / 2))
             out.append((vs, ps_x, ps_y))
+            blocked.append((ps_x, ps_y, vs.width, vs.height))
             continue
 
-        if anchor == "above" or anchor == "top":
-            ps_y = max(pad, fig_ymin - vs.height - gap)
-            ideal_x = ax - vs.width / 2
-            ps_x = max(cursors["top"], ideal_x)
-            ps_x = max(pad, min(canvas_w - vs.width - pad, ps_x))
-            cursors["top"] = ps_x + vs.width + gap
-            leader_from = (ps_x + vs.width / 2, ps_y + vs.height)
-        elif anchor == "below" or anchor == "bottom":
-            ps_y = min(canvas_h - vs.height - pad, fig_ymax + gap)
-            ideal_x = ax - vs.width / 2
-            ps_x = max(cursors["bottom"], ideal_x)
-            ps_x = max(pad, min(canvas_w - vs.width - pad, ps_x))
-            cursors["bottom"] = ps_x + vs.width + gap
-            leader_from = (ps_x + vs.width / 2, ps_y)
-        elif anchor == "right":
-            ps_x = min(canvas_w - vs.width - pad, fig_xmax + gap)
-            ideal_y = ay - vs.height / 2
-            ps_y = max(cursors["right"], ideal_y)
-            ps_y = max(pad, min(canvas_h - vs.height - pad, ps_y))
-            cursors["right"] = ps_y + vs.height + gap
-            leader_from = (ps_x, ps_y + vs.height / 2)
-        elif anchor == "left":
-            ps_x = max(pad, fig_xmin - vs.width - gap)
-            ideal_y = ay - vs.height / 2
-            ps_y = max(cursors["left"], ideal_y)
-            ps_y = max(pad, min(canvas_h - vs.height - pad, ps_y))
-            cursors["left"] = ps_y + vs.height + gap
-            leader_from = (ps_x + vs.width, ps_y + vs.height / 2)
-        else:
-            # Unknown anchor — fall back to the auto pick.
-            ps_y = min(canvas_h - vs.height - pad, fig_ymax + gap)
-            ps_x = max(pad, min(canvas_w - vs.width - pad, ax - vs.width / 2))
-            leader_from = (ps_x + vs.width / 2, ps_y)
+        # Search order: requested anchor first, then alternatives sorted
+        # by free pixel area in each margin.
+        margin_space = {
+            "above": max(0.0, fig_ymin - (pad + label_strip_h)) * canvas_w,
+            "below": max(0.0, (canvas_h - pad) - fig_ymax) * canvas_w,
+            "left":  max(0.0, fig_xmin - pad) * canvas_h,
+            "right": max(0.0, (canvas_w - pad) - fig_xmax) * canvas_h,
+        }
+        norm = lambda a: ("above" if a in ("above", "top") else
+                          "below" if a in ("below", "bottom") else a)
+        first = norm(anchor)
+        rest = sorted(
+            (a for a in ("above", "below", "left", "right") if a != first),
+            key=lambda a: -margin_space[a],
+        )
+        search_order = [first] + rest
 
-        # Stash leader endpoints so _render_caption can draw the tether.
-        # Skip the leader when the math anchor is essentially inside the
-        # caption box (e.g. the LLM didn't pass coords) — drawing a
-        # zero-length line just looks like a stray dot.
-        if not _point_inside((ax, ay), ps_x, ps_y, vs.width, vs.height):
+        placed = None
+        for try_anchor in search_order:
+            placed = _try_place_in_margin(
+                vs, try_anchor, blocked,
+                fig_xmin=fig_xmin, fig_xmax=fig_xmax,
+                fig_ymin=fig_ymin, fig_ymax=fig_ymax,
+                canvas_w=canvas_w, canvas_h=canvas_h,
+                pad=pad, label_strip_h=label_strip_h,
+                gap=gap, intra_gap=intra_gap,
+                ax_px=ax_px, ay_px=ay_px,
+            )
+            if placed:
+                break
+
+        # Last resort: shrink the caption width and try again.  Re-render
+        # then wraps to more lines — better than overlapping anything.
+        if placed is None:
+            original_w = vs.width
+            vs.width = max(60.0, original_w * 0.5)
+            for try_anchor in search_order:
+                placed = _try_place_in_margin(
+                    vs, try_anchor, blocked,
+                    fig_xmin=fig_xmin, fig_xmax=fig_xmax,
+                    fig_ymin=fig_ymin, fig_ymax=fig_ymax,
+                    canvas_w=canvas_w, canvas_h=canvas_h,
+                    pad=pad, label_strip_h=label_strip_h,
+                    gap=gap, intra_gap=intra_gap,
+                    ax_px=ax_px, ay_px=ay_px,
+                )
+                if placed:
+                    break
+
+        if placed is None:
+            # Truly out of room — drop into a canvas corner; this WILL
+            # overlap, but at a deterministic spot so the failure is
+            # obvious in screenshots and the regression test will catch
+            # it instead of a random pile in the middle of the figure.
+            ps_x = max(pad, canvas_w - vs.width - pad)
+            ps_y = max(pad, canvas_h - vs.height - pad)
+            placed = (ps_x, ps_y, (ps_x, ps_y))
+
+        ps_x, ps_y, leader_from = placed
+
+        if not _point_inside((ax_px, ay_px), ps_x, ps_y, vs.width, vs.height):
             vs.meta["leader_from_canvas"] = leader_from
-            vs.meta["leader_to_canvas"] = (ax, ay)
+            vs.meta["leader_to_canvas"] = (ax_px, ay_px)
 
+        blocked.append((ps_x, ps_y, vs.width, vs.height))
         out.append((vs, ps_x, ps_y))
 
-    # Post-pass: when caption A's leader endpoint would land *inside*
-    # another caption B's box (common when several captions stack in
-    # the same margin), the small filled dot at the leader end shows
-    # up as a stray dot inside B's text.  Suppress those endpoints —
-    # the leader line still points the way; only the redundant marker
-    # is dropped.
+    # Post-pass: leader-endpoint dot suppression (kept from prior fix).
     for i, (vs_a, _, _) in enumerate(out):
         endpoint = vs_a.meta.get("leader_to_canvas")
         if not (isinstance(endpoint, (tuple, list)) and len(endpoint) == 2):
@@ -518,6 +497,149 @@ def _place_captions_in_margins(
                 break
 
     return out
+
+
+def _caption_rendered_height(vs: VisualShape) -> float:
+    """Predict the actual rendered height of a caption.
+
+    s5_render._render_caption sets ``h = max(vs.height, needed_h)`` where
+    ``needed_h`` depends on how many lines the wrapped label takes.  This
+    helper mirrors that calculation so layout can reserve the correct
+    vertical slot up-front.  Without this, captions whose text wraps to
+    multiple lines silently overflow into adjacent caption slots.
+    """
+    from .s5_render import _wrap_label
+    pad = 6.0
+    lines, eff_fs = _wrap_label(
+        vs.label or "",
+        node_width=max(40.0, vs.width - 2 * pad),
+        font_size=(vs.font_size or 14.0) * 0.95,
+    )
+    line_h = eff_fs * 1.25
+    needed_h = line_h * len(lines) + 2 * pad
+    return max(vs.height, needed_h)
+
+
+def _try_place_in_margin(
+    vs: VisualShape,
+    anchor: str,
+    blocked: list[tuple[float, float, float, float]],
+    *,
+    fig_xmin: float, fig_xmax: float,
+    fig_ymin: float, fig_ymax: float,
+    canvas_w: float, canvas_h: float,
+    pad: float, label_strip_h: float,
+    gap: float, intra_gap: float,
+    ax_px: float, ay_px: float,
+) -> tuple[float, float, tuple[float, float]] | None:
+    """Search for a non-overlapping (x, y) for ``vs`` in ``anchor`` margin.
+
+    Returns ``(ps_x, ps_y, leader_from)`` on success, ``None`` if no row
+    in this margin can hold the caption without overlapping ``blocked``.
+    Walks rows (or columns for left/right) starting from the edge nearest
+    the figure and stepping deeper.
+    """
+    w, h = vs.width, vs.height
+
+    if anchor in ("above", "top"):
+        # Rows go upward from fig_ymin.
+        row = 0
+        while True:
+            ps_y = fig_ymin - gap - h - row * (h + intra_gap)
+            if ps_y < pad + label_strip_h:
+                return None
+            x = _find_x_for_row(w, h, ps_y, blocked, canvas_w, pad, ax_px)
+            if x is not None:
+                return (x, ps_y, (x + w / 2, ps_y + h))
+            row += 1
+
+    if anchor in ("below", "bottom"):
+        row = 0
+        while True:
+            ps_y = fig_ymax + gap + row * (h + intra_gap)
+            if ps_y + h > canvas_h - pad:
+                return None
+            x = _find_x_for_row(w, h, ps_y, blocked, canvas_w, pad, ax_px)
+            if x is not None:
+                return (x, ps_y, (x + w / 2, ps_y))
+            row += 1
+
+    if anchor == "left":
+        col = 0
+        while True:
+            ps_x = fig_xmin - gap - w - col * (w + intra_gap)
+            if ps_x < pad:
+                return None
+            y = _find_y_for_col(w, h, ps_x, blocked, canvas_h, pad, label_strip_h, ay_px)
+            if y is not None:
+                return (ps_x, y, (ps_x + w, y + h / 2))
+            col += 1
+
+    if anchor == "right":
+        col = 0
+        while True:
+            ps_x = fig_xmax + gap + col * (w + intra_gap)
+            if ps_x + w > canvas_w - pad:
+                return None
+            y = _find_y_for_col(w, h, ps_x, blocked, canvas_h, pad, label_strip_h, ay_px)
+            if y is not None:
+                return (ps_x, y, (ps_x, y + h / 2))
+            col += 1
+
+    return None
+
+
+def _find_x_for_row(
+    w: float, h: float, y: float,
+    blocked: list[tuple[float, float, float, float]],
+    canvas_w: float, pad: float, ideal_anchor_x: float,
+) -> float | None:
+    """Find an x in [pad, canvas_w-w-pad] s.t. (x, y, w, h) doesn't overlap
+    ``blocked``.  Prefer x centred on ``ideal_anchor_x``; if that collides,
+    walk in increasing distance from the ideal."""
+    x_min = pad
+    x_max = canvas_w - w - pad
+    if x_max < x_min:
+        return None
+    ideal_x = max(x_min, min(x_max, ideal_anchor_x - w / 2))
+    step = 8.0
+    candidates = [ideal_x]
+    cx = x_min
+    while cx <= x_max:
+        candidates.append(cx)
+        cx += step
+    candidates.append(x_max)
+    candidates.sort(key=lambda c: abs(c - ideal_x))
+    for x in candidates:
+        if not any(_rects_overlap((x, y, w, h), b) for b in blocked):
+            return x
+    return None
+
+
+def _find_y_for_col(
+    w: float, h: float, x: float,
+    blocked: list[tuple[float, float, float, float]],
+    canvas_h: float, pad: float, label_strip_h: float, ideal_anchor_y: float,
+) -> float | None:
+    """Find a y in [pad+label_strip_h, canvas_h-h-pad] s.t. (x, y, w, h)
+    doesn't overlap ``blocked``.  Prefer y centred on ``ideal_anchor_y``."""
+    y_min = pad + label_strip_h
+    y_max = canvas_h - h - pad
+    if y_max < y_min:
+        return None
+    ideal_y = max(y_min, min(y_max, ideal_anchor_y - h / 2))
+    step = 8.0
+    candidates = [ideal_y]
+    cy = y_min
+    while cy <= y_max:
+        candidates.append(cy)
+        cy += step
+    candidates.append(y_max)
+    candidates.sort(key=lambda c: abs(c - ideal_y))
+    for y in candidates:
+        if not any(_rects_overlap((x, y, w, h), b) for b in blocked):
+            return y
+    return None
 
 
 def _pick_auto_margin(

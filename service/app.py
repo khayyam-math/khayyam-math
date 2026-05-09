@@ -30,26 +30,21 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from dataclasses import asdict
 from pathlib import Path
-from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
-from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sevim.ir import SceneGraph  # noqa: E402
-from sevim.pipeline import run_pipeline  # noqa: E402
 from sevim.s3_map import _RELATION_PATTERN  # noqa: E402
 
 from .canvas import REGISTRY  # noqa: E402
 
-# Studio router (Tier 2): direct-to-Anthropic voice tutor surface.
-# Imported lazily after REGISTRY so the studio module sees the same
-# singleton as the MCP path.
+# Studio router: direct-to-LLM voice tutor surface (Anthropic / OpenAI /
+# local vLLM).  Imported lazily after REGISTRY so the studio module sees
+# the same singleton as the MCP path.
 try:
     from studio.app import router as _studio_router
     _STUDIO_AVAILABLE = True
@@ -61,10 +56,10 @@ except Exception as _exc:  # noqa: BLE001 — studio is optional
 
 app = FastAPI(
     title="SeVim",
-    description="Deterministic semantic-to-visual mapping. "
-                "Hosts both the legacy /render API and the /canvas/* "
-                "surface used by the MCP plugin's live viewer.",
-    version="0.2.0",
+    description="Figure runtime: structured spec → live canvas + audio "
+                "narration.  Drive via the MCP tools or the Studio chat "
+                "surface; this app exposes the /canvas/* viewer endpoints.",
+    version="0.3.0",
 )
 
 if _STUDIO_AVAILABLE:
@@ -72,43 +67,10 @@ if _STUDIO_AVAILABLE:
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-# ---------------------------------------------------------------------------
-# Legacy session-based render API (preserved for backward compatibility).
-# ---------------------------------------------------------------------------
-
-_sessions: dict[str, SceneGraph] = {}
-_sessions_lock = Lock()
-
-
-class RenderReq(BaseModel):
-    text: str
-    utterance_id: str = "u0"
-
-
-class RenderResp(BaseModel):
-    svg: str
-    ir: dict
-    trace: list[dict]
-
-
-def _serialize(result) -> RenderResp:
-    return RenderResp(
-        svg=result.svg,
-        ir={
-            "revision": result.graph.revision,
-            "nodes": [asdict(n) for n in result.graph.nodes],
-            "edges": [asdict(e) for e in result.graph.edges],
-        },
-        trace=[
-            {"stage": t.stage, "message": t.message, "refs": t.refs}
-            for t in result.trace
-        ],
-    )
-
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "sessions": len(_sessions), "canvases": len(REGISTRY.list())}
+    return {"status": "ok", "canvases": len(REGISTRY.list())}
 
 
 @app.get("/ontology")
@@ -120,33 +82,6 @@ def ontology():
             for rel, pat in _RELATION_PATTERN.items()
         ],
     }
-
-
-@app.post("/render", response_model=RenderResp)
-def render(req: RenderReq):
-    if not req.text.strip():
-        raise HTTPException(400, "text must be non-empty")
-    result = run_pipeline(req.text, utterance_id=req.utterance_id)
-    return _serialize(result)
-
-
-@app.post("/render/session/{sid}", response_model=RenderResp)
-def render_session(sid: str, req: RenderReq):
-    if not req.text.strip():
-        raise HTTPException(400, "text must be non-empty")
-    with _sessions_lock:
-        prev = _sessions.get(sid)
-    result = run_pipeline(req.text, utterance_id=sid, graph=prev)
-    with _sessions_lock:
-        _sessions[sid] = result.graph
-    return _serialize(result)
-
-
-@app.delete("/session/{sid}")
-def clear_session(sid: str):
-    with _sessions_lock:
-        existed = _sessions.pop(sid, None) is not None
-    return {"cleared": existed, "sid": sid}
 
 
 # ---------------------------------------------------------------------------

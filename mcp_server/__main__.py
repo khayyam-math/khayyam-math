@@ -89,20 +89,12 @@ def _preheat_heavy_modules() -> None:
 
     Why each one matters
     --------------------
-    * spaCy ``en_core_web_sm`` (~50–150 ms): used by ``_extract_dep`` in
-      sevim/s2_extract.py.  Loaded the first time the LLM calls
-      ``sevim_describe``.
     * piper voice (~200–400 ms): mmaps the ONNX file in
       sevim/narrate.py.  Loaded the first time the LLM calls
       ``sevim_narrate``.
     * cairosvg (~150 ms): SVG → PNG for ``sevim_review`` vision feedback.
       Imported lazily inside mcp_server/server.py.
     """
-    try:
-        from sevim.s2_extract import _get_nlp
-        _get_nlp()
-    except Exception:  # noqa: BLE001 — keep going on partial environments
-        pass
     try:
         from sevim.narrate import voice_available, _load_voice
         if voice_available():
