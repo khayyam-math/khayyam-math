@@ -349,6 +349,12 @@ class Canvas:
         The audio + manifest are stored on this canvas; the FastAPI service
         serves them at ``/canvas/<id>/narration.wav`` and ``.json``.
 
+        If ``self.transition_text`` is set, it is **prepended as the first
+        phrase** of the synthesized WAV (no highlight target).  This way
+        the same piper voice speaks the transition between the prelude
+        and the figure walkthrough — no voice mismatch, no client-side
+        chaining, no separate audio element to manage.
+
         Validates that every ``highlight`` target actually exists in the
         graph — surfaces a ``warnings`` entry rather than failing silently
         if the LLM points at a missing id.
@@ -363,10 +369,18 @@ class Canvas:
             tgt = entry.get("highlight")
             if tgt and tgt not in existing_ids:
                 unknown.append(tgt)
+        # Prepend the transition phrase (same voice = same speaker).
+        full_script: list[dict] = []
+        if self.transition_text:
+            full_script.append({
+                "speak": self.transition_text,
+                "highlight": None,
+            })
+        full_script.extend(script)
         narr_dir = _narration_dir(self.canvas_id)
         narr_dir.mkdir(parents=True, exist_ok=True)
         wav_path = narr_dir / "narration.wav"
-        manifest = synthesize_script(script, str(wav_path))
+        manifest = synthesize_script(full_script, str(wav_path))
         with self.lock:
             self.narration_wav = str(wav_path)
             self.narration_manifest = manifest

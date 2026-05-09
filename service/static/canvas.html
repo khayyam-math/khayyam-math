@@ -134,7 +134,7 @@
   <span class="meta">rev <span id="rev">0</span></span>
   <span class="meta"><span id="nodes">0</span> nodes / <span id="edges">0</span> edges</span>
   <span class="meta" id="updated"></span>
-  <button class="play-btn hidden" id="play-btn" type="button">▶ Play narration</button>
+  <button class="play-btn hidden" id="play-btn" type="button" style="display:none">▶ Play narration</button>
 </header>
 <main>
   <div id="stage">
@@ -176,146 +176,75 @@
   let introLoaded = null;          // url of currently-loaded intro audio
   let introPlayed = false;         // already finished one intro this session
 
-  // ── Web Speech API path ──────────────────────────────────────────────
-  // The browser's built-in TTS has *zero* synthesis delay and uses a
-  // separate autoplay path that's typically more permissive than <audio>.
-  // We use it for the intro (low-stakes, time-critical) so the user
-  // hears something within 100 ms of the canvas opening.  Piper
-  // takes over once it finishes synthesising the higher-quality voice.
-  const synth = window.speechSynthesis || null;
-  let webSpeakerActive = false;
-  let lastSpokenIntro = null;
+  // ── All-piper audio: one voice for prelude AND walkthrough ───────────
+  // Web Speech was producing a robotic, too-fast voice that didn't match
+  // piper's Lessac-medium voice used for the main narration.  Drop it
+  // entirely — we now wait the ~1-2 s for piper to synthesise the
+  // prelude, and play one consistent voice through the whole session.
 
-  // Default transition phrase spoken between the prelude and the
-  // figure-aligned narration.  Configurable via state.transition_text.
-  const DEFAULT_TRANSITION = "And now please look at the diagram.";
+  // Aggressive autoplay strategy:
+  //   1. Try audio.play() / intro.play() the moment the source is loaded.
+  //   2. Try again on every state update from SSE.
+  //   3. Listen for ANY user interaction (click / keydown / scroll /
+  //      mousemove / touchstart) and retry on first gesture.
+  // Browsers grant per-origin autoplay after a small amount of user
+  // engagement, so once the user has interacted with localhost:7777
+  // (or whichever port we landed on) once, every subsequent session
+  // autoplays without any click.
 
-  // Split long text into utterance-sized chunks so Chrome doesn't
-  // cut off after ~250 chars.  We split on sentence boundaries; if
-  // a single sentence is still too long, we hard-split at clause
-  // boundaries (commas).
-  function chunkForSpeech(text, maxLen = 220) {
-    const out = [];
-    const sentences = text.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [text];
-    for (const s of sentences) {
-      const trimmed = s.trim();
-      if (!trimmed) continue;
-      if (trimmed.length <= maxLen) {
-        out.push(trimmed);
-      } else {
-        // Long sentence — split on commas as fallback.
-        const clauses = trimmed.split(/, +/);
-        let buf = '';
-        for (const cl of clauses) {
-          if ((buf + ', ' + cl).length > maxLen && buf) {
-            out.push(buf);
-            buf = cl;
-          } else {
-            buf = buf ? (buf + ', ' + cl) : cl;
-          }
-        }
-        if (buf) out.push(buf);
-      }
-    }
-    return out;
-  }
-
-  // Speak a queue of chunks sequentially.  When the last chunk ends,
-  // call ``onAllDone``.  Tracks webSpeakerActive across the whole queue.
-  function speakChunkedViaWebSpeech(chunks, onAllDone) {
-    if (!synth || !chunks.length) {
-      if (onAllDone) onAllDone();
-      return false;
-    }
-    try {
-      synth.cancel();
-    } catch (e) {}
-
-    let i = 0;
-    webSpeakerActive = true;
-    const speakNext = () => {
-      if (i >= chunks.length) {
-        webSpeakerActive = false;
-        introPlayed = true;
-        if (onAllDone) onAllDone();
-        return;
-      }
-      const utt = new SpeechSynthesisUtterance(chunks[i]);
-      utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
-      utt.onend = () => { i += 1; speakNext(); };
-      utt.onerror = () => { i += 1; speakNext(); };
-      synth.speak(utt);
-    };
-    speakNext();
-    return true;
-  }
-
-  // Public: speak the prelude, then a short transition phrase, then
-  // hand off to the narration <audio>.  All in Web Speech so the
-  // prelude/transition autoplay (Chrome generally allows Web Speech
-  // on localhost without a gesture, even when <audio> is blocked).
-  function speakViaWebSpeech(text, transitionText) {
-    if (!synth || !text) return false;
-    const chunks = chunkForSpeech(text);
-    return speakChunkedViaWebSpeech(chunks, () => {
-      const t = (transitionText || DEFAULT_TRANSITION).trim();
-      if (!t || !narration) {
-        // No narration ready (yet) — try to start the audio anyway.
-        if (narration && audio.src && audio.paused) {
-          audio.play().then(() => { userInteracted = true; })
-                      .catch(() => overlay.classList.remove('hidden'));
-        }
-        return;
-      }
-      // Speak the transition phrase, then hand off to narration WAV.
-      webSpeakerActive = true;
-      const utt = new SpeechSynthesisUtterance(t);
-      utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
-      utt.onend = () => {
-        webSpeakerActive = false;
-        if (audio.src && audio.paused) {
-          audio.play().then(() => { userInteracted = true; })
-                      .catch(() => overlay.classList.remove('hidden'));
-        }
-      };
-      utt.onerror = utt.onend;
-      synth.speak(utt);
-    });
-  }
-
-  // ── Click-anywhere autoplay unlock ────────────────────────────────────
-  // Browsers require a user gesture before <audio>.play() succeeds.
-  // Instead of a blocking modal, attach a one-shot handler to the whole
-  // document — *any* click or keypress unlocks audio for this origin.
-  function unlockAudio() {
-    if (userInteracted) return;
-    userInteracted = true;
-    overlay.classList.add('hidden');
-    // If Web Speech is still talking the intro, do nothing — its
-    // 'onend' will start the narration audio.  Avoids double-intro
-    // playback (Web Speech intro + piper intro WAV).
-    if (webSpeakerActive) return;
-    // If narration is queued and ready, start it.  This is the
-    // common case: user clicked after intro was already done.
-    if (audio.src && audio.paused) {
-      audio.play().catch(() => {});
+  function tryPlayChain() {
+    // Plays whichever element is next in the chain that has a src.
+    if (intro.src && intro.paused && !introPlayed) {
+      intro.play().then(() => { userInteracted = true; })
+                  .catch(() => overlay.classList.remove('hidden'));
       return;
     }
-    // Fall back to the piper intro WAV if it hasn't played yet.
-    if (intro.src && intro.paused && !introPlayed) {
-      intro.play().catch(() => {});
+    if (audio.src && audio.paused) {
+      audio.play().then(() => { userInteracted = true; })
+                  .catch(() => overlay.classList.remove('hidden'));
     }
   }
-  document.addEventListener('click', unlockAudio, { once: false });
-  document.addEventListener('keydown', unlockAudio, { once: false });
 
-  // When the piper-synthesised intro finishes, hand off to narration.
-  intro.addEventListener('ended', () => {
-    introPlayed = true;
-    if (narration && audio.paused && audio.src) {
-      audio.play().catch(() => {});
+  function unlockAudio() {
+    if (userInteracted) {
+      overlay.classList.add('hidden');
+      return;
+    }
+    userInteracted = true;
+    overlay.classList.add('hidden');
+    tryPlayChain();
+  }
+  // Any interaction unlocks — broader than just click/keydown.
+  ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(ev => {
+    document.addEventListener(ev, unlockAudio, { once: false, passive: true });
+  });
+
+  // Try to autoplay the prelude as soon as the audio element finishes
+  // loading the WAV.  In Chrome this succeeds when the origin has
+  // accumulated enough media-engagement (effectively: user has played
+  // audio on this exact origin before).
+  intro.addEventListener('canplay', () => {
+    if (!introPlayed && intro.paused) {
+      intro.play().then(() => {
+        userInteracted = true;
+        overlay.classList.add('hidden');
+      }).catch(() => overlay.classList.remove('hidden'));
     }
   });
+
+  // Prelude finished → start the narration WAV (which begins with
+  // the transition phrase server-side).
+  intro.addEventListener('ended', () => {
+    introPlayed = true;
+    if (audio.src && audio.paused) {
+      audio.play().then(() => {
+        overlay.classList.add('hidden');
+      }).catch(() => overlay.classList.remove('hidden'));
+    }
+  });
+
+  // When narration starts playing, the corner pill is irrelevant.
+  audio.addEventListener('play', () => overlay.classList.add('hidden'));
 
   function applyState(state) {
     if (state.svg) {
@@ -335,18 +264,24 @@
     if (state.updated_at) {
       updatedEl.textContent = new Date(state.updated_at * 1000).toLocaleTimeString();
     }
-    // ── Prelude → transition → narration pipeline ────────────────────
-    // The prelude (= state.intro_text) is the LONG problem+solution
-    // statement spoken via Web Speech immediately.  We chunk it into
-    // sentence-sized utterances (Chrome cuts off >250 chars).  After
-    // the last chunk, a transition phrase ("And now please look at
-    // the diagram.") plays, then the narration WAV takes over with
-    // phrase-aligned highlights.  The whole chain is autoplay-safe
-    // because Web Speech generally bypasses Chrome's <audio> block.
-    if (state.intro_text && state.intro_text !== lastSpokenIntro && !webSpeakerActive) {
-      const ok = speakViaWebSpeech(state.intro_text, state.transition_text);
-      if (ok) lastSpokenIntro = state.intro_text;
+    // ── Prelude → narration pipeline (all piper, one voice) ──────────
+    // The prelude WAV is synthesised by piper server-side from
+    // sevim_open(prelude=...).  The transition phrase is server-side
+    // prepended to the narration WAV (Canvas.narrate prepends it from
+    // self.transition_text), so the *same* voice speaks the transition
+    // — no client-side chaining of separate utterances, no voice mismatch.
+    if (state.has_intro) {
+      const url = `/canvas/${cid}/intro.wav`;
+      if (introLoaded !== url) {
+        intro.src = `${url}?t=${Date.now()}`;
+        intro.load();
+        introLoaded = url;
+        introPlayed = false;
+      }
     }
+    // Whenever state changes, try to start the chain — browsers may
+    // grant autoplay later (e.g. after the user has interacted).
+    tryPlayChain();
     // Narration arrived (or was updated)?
     if (state.narration && state.narration.phrases &&
         state.narration.phrases.length > 0) {
@@ -367,24 +302,18 @@
       audio.src = `/canvas/${cid}/narration.wav?t=${Date.now()}`;
       audio.load();
     }
-    playBtn.classList.remove('hidden');
-    playBtn.disabled = false;
-    // If the intro is still playing, defer narration until intro
-    // finishes — the 'ended' listener picks it up there.
+    // playBtn is permanently hidden now that everything autoplays.
+    // If the prelude is still playing, defer narration until the
+    // intro <audio> element fires 'ended' — that listener auto-plays
+    // narration.  This keeps a single chain.
     const introBusy = !intro.paused && !intro.ended && intro.src;
-    if (introBusy) {
-      return;
-    }
-    if (!userInteracted) {
-      // Try silent autoplay first; if it fails, surface the overlay.
+    if (introBusy) return;
+    // Otherwise try to play immediately.
+    if (audio.paused) {
       audio.play().then(() => {
         userInteracted = true;
-      }).catch(() => {
-        overlay.classList.remove('hidden');
-      });
-    } else if (audio.paused) {
-      // We previously got user consent; resume right away.
-      audio.play().catch(() => {});
+        overlay.classList.add('hidden');
+      }).catch(() => overlay.classList.remove('hidden'));
     }
   }
 
