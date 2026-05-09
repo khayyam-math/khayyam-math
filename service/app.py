@@ -187,6 +187,19 @@ def canvas_narration_wav(cid: str):
     return FileResponse(wav_path, media_type="audio/wav")
 
 
+@app.get("/canvas/{cid}/intro.wav")
+def canvas_intro_wav(cid: str):
+    try:
+        c = REGISTRY.get(cid)
+    except KeyError:
+        raise HTTPException(404, f"canvas {cid!r} not found")
+    with c.lock:
+        wav_path = c.intro_wav
+    if not wav_path or not Path(wav_path).is_file():
+        raise HTTPException(404, "no intro generated yet")
+    return FileResponse(wav_path, media_type="audio/wav")
+
+
 @app.get("/canvas/{cid}/narration.json")
 def canvas_narration_manifest(cid: str):
     try:
@@ -219,6 +232,8 @@ def canvas_state(cid: str):
             "svg": c.svg,
             "narration": c.narration_manifest,
             "has_narration": c.narration_wav is not None,
+            "has_intro": c.intro_wav is not None,
+            "intro_duration_s": c.intro_duration_s,
         }
 
 
@@ -248,6 +263,8 @@ async def canvas_events(cid: str, request: Request):
                         "svg": c.svg,
                         "narration": c.narration_manifest,
                         "has_narration": c.narration_wav is not None,
+                        "has_intro": c.intro_wav is not None,
+                        "intro_duration_s": c.intro_duration_s,
                     }
             if payload is not None:
                 last_rev = rev

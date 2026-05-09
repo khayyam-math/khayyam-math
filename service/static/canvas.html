@@ -130,6 +130,7 @@
     </p>
   </div>
 </main>
+<audio id="intro-audio" preload="auto"></audio>
 <audio id="narration-audio" preload="auto"></audio>
 <div class="play-overlay hidden" id="play-overlay">
   <div class="panel" onclick="event.stopPropagation()">
@@ -153,6 +154,7 @@
   const nodesEl = document.getElementById('nodes');
   const edgesEl = document.getElementById('edges');
   const updatedEl = document.getElementById('updated');
+  const intro = document.getElementById('intro-audio');
   const audio = document.getElementById('narration-audio');
   const playBtn = document.getElementById('play-btn');
   const overlay = document.getElementById('play-overlay');
@@ -162,6 +164,16 @@
   let narration = null;            // {duration_s, phrases: [...]}
   let activePhraseIndex = -1;
   let userInteracted = false;      // tracks whether autoplay is unlocked
+  let introLoaded = null;          // url of currently-loaded intro audio
+  let introPlayed = false;         // already finished one intro this session
+
+  // When the intro finishes, hand off to narration if it has arrived.
+  intro.addEventListener('ended', () => {
+    introPlayed = true;
+    if (narration && audio.paused && audio.src) {
+      audio.play().catch(() => {});
+    }
+  });
 
   function applyState(state) {
     if (state.svg) {
@@ -180,6 +192,23 @@
     if (state.edge_count !== undefined) edgesEl.textContent = state.edge_count;
     if (state.updated_at) {
       updatedEl.textContent = new Date(state.updated_at * 1000).toLocaleTimeString();
+    }
+    // Intro arrived (or was updated)?  Play it immediately so the
+    // user has audio while the LLM is still writing build calls.
+    if (state.has_intro) {
+      const url = `/canvas/${cid}/intro.wav`;
+      // Only (re)load when it's a different audio or first time.
+      if (introLoaded !== url || (introPlayed && state.intro_duration_s > 0)) {
+        intro.src = `${url}?t=${Date.now()}`;
+        intro.load();
+        introLoaded = url;
+        introPlayed = false;
+        // Try to autoplay; fall back to the user-gesture overlay if blocked.
+        intro.play().then(() => { userInteracted = true; }).catch(() => {
+          // The narration "Play" overlay also unlocks the intro.
+          overlay.classList.remove('hidden');
+        });
+      }
     }
     // Narration arrived (or was updated)?
     if (state.narration && state.narration.phrases &&
@@ -203,6 +232,12 @@
     }
     playBtn.classList.remove('hidden');
     playBtn.disabled = false;
+    // If the intro is still playing, defer narration until intro
+    // finishes — the 'ended' listener picks it up there.
+    const introBusy = !intro.paused && !intro.ended && intro.src;
+    if (introBusy) {
+      return;
+    }
     if (!userInteracted) {
       // Try silent autoplay first; if it fails, surface the overlay.
       audio.play().then(() => {
@@ -258,6 +293,12 @@
   function userStart() {
     userInteracted = true;
     overlay.classList.add('hidden');
+    // Unlock intro first if it hasn't played; narration's 'ended'
+    // listener on intro will hand off to the main narration audio.
+    if (intro.src && !introPlayed && intro.paused) {
+      intro.play().catch(() => {});
+      return;
+    }
     audio.play().catch(err => console.error('audio play failed', err));
   }
   playBtn.addEventListener('click', userStart);
