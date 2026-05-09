@@ -110,6 +110,22 @@ def _preheat_heavy_modules() -> None:
         pass
 
 
+def _open_studio_when_ready(host: str, port: int) -> None:
+    """Wait for uvicorn to accept connections, then open the Studio URL."""
+    import socket
+    import time
+    import webbrowser
+
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.3):
+                break
+        except OSError:
+            time.sleep(0.1)
+    webbrowser.open(f"http://{host}:{port}/studio", new=2)
+
+
 def _start_uvicorn(host: str, port: int) -> threading.Thread:
     """Start uvicorn (the canvas viewer) in a daemon thread."""
     config = uvicorn.Config(
@@ -171,6 +187,24 @@ def main() -> None:
         f"[sevim-mcp] live viewer at http://{viewer_host}:{viewer_port}/canvas/<id>/view",
         file=sys.stderr,
     )
+
+    # Optional: auto-open the Sevim Studio tutor surface in the user's
+    # browser the moment the MCP subprocess is up.  Off by default so
+    # Claude-Code workflows aren't disrupted; opt in with
+    # SEVIM_AUTO_STUDIO=1 (and SEVIM_NO_BROWSER=1 still suppresses it).
+    if (os.environ.get("SEVIM_AUTO_STUDIO") == "1"
+            and os.environ.get("SEVIM_NO_BROWSER") != "1"):
+        threading.Thread(
+            target=_open_studio_when_ready,
+            args=(viewer_host, viewer_port),
+            name="sevim-studio-open",
+            daemon=True,
+        ).start()
+        print(
+            f"[sevim-mcp] auto-opening Studio at "
+            f"http://{viewer_host}:{viewer_port}/studio",
+            file=sys.stderr,
+        )
 
     # Warm heavy modules in a parallel daemon thread so the first
     # sevim_describe / sevim_narrate / sevim_review doesn't pay an
