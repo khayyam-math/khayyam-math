@@ -1,7 +1,73 @@
 # SeVim plugin — session state
 
-**Last update:** 2026-05-08
-**Status:** MCP plugin layer functional; geometric layout, captions in
+**Last update:** 2026-05-09
+**Status:** Heavy iteration day on perf + UX + Studio.  Repo now hosted
+at `git@github.com:arashkermaniprojects/sevim-plugin.git`; rollback
+tag `success_1` marks the morning's known-good baseline.
+
+---
+
+## 2026-05-09 session — what landed
+
+Commits (newest first):
+
+* `a6f1302` — viewer: narration-synced fade-in (elements appear at
+  their phrase's start_s, not on a fixed 0.4 s SMIL stagger) + MCP
+  tool descriptions push toward sevim_apply
+* `ae7f090` — studio: stream Anthropic so chat fills incrementally
+* `b220967` — studio: bump max_tokens 4096 → 16384, surface max_tokens
+* `6bbde91` — fix: sevim_apply now handles add_caption ops
+* `b32a226` — fix: default transition phrase even when sevim_open omits it
+* `2291656` — studio: defensive init so localStorage replay can't break send button
+* `761a7dc` — studio: unify TTS, accept prelude/transition, persist conversation
+* `6ed4268` — all-piper audio: one voice, autoplay-aggressive, no Play button
+* `b779217` — fix: caption reroute when requested margin is too narrow
+* `593a1dc` — fix: regression in T1 — port-stability change broke MCP startup
+* `bd890c7` — T2.1: auto-open Studio in the browser
+* `fa0510b` — T3: realtime bridge stub + canvas-state digest
+* `e01bdc5` — T2: Sevim Studio — direct-to-Anthropic voice tutor (skeleton)
+* `42b1c65` — T1: stable port, intro-in-open, Web Speech, click-anywhere unlock
+* `b7fe880` — D: route missing canvas_id to most-recent user canvas
+* `ae2dd8d` — C: prevent point-label and caption overlaps in math figures
+* `47f64ff` — B: preheat spaCy + piper + cairosvg on a background thread
+* `1e58ccf` — A: stop blink-cascade on every re-render
+* `d26e8ac` — success_1: working baseline before perf tuning
+
+Architectural new piece: **`studio/`** — a standalone tutor surface
+that talks directly to the Anthropic Messages API with sevim tools
+wired as function-call definitions.  Bypasses Claude Code's giant
+system prompt; TTFT drops from ~100 s to ~1-3 s.  Runs as a separate
+process via `sevim-studio` (or `python -m studio`).  **Currently OFF**
+per user instruction — see *Open work* below.
+
+---
+
+## Open work — what's next
+
+1. **Test the latest fix** (commit a6f1302) end-to-end via Claude Code:
+   in the test window, `/exit` then `claude`, send a sevim-using
+   prompt (e.g. *"reduce 3SAT to hamiltonian path"*).  Two things to
+   verify:
+   * Tool call sequence has NO trailing `sevim_add_caption` stragglers
+     — captions should land in `sevim_apply`'s ops list.
+   * Canvas elements with a narration phrase pointing at them stay
+     hidden until that phrase plays — figure builds synchronized with
+     the audio.
+2. **Studio is off.** User said "stop using anthropic API for now."  Do
+   NOT relaunch `sevim-studio`.  Studio code is intact and ready for
+   future use; just don't spawn a new process.
+3. Possible follow-ups (not urgent):
+   * Edge-through-label collisions (edges crossing point labels) —
+     out-of-scope for fix C; would need an edge-routing pass.
+   * Autoplay reliability on fresh ports — Chrome MEI improves over
+     time; can also try AudioContext.resume() for more permissive
+     gating.
+
+---
+
+## Earlier status (preserved from 2026-05-08)
+
+MCP plugin layer functional; geometric layout, captions in
 margins, fade-in animation, browser auto-open, and voice narration all
 end-to-end verified. Local Claude Code integration registered and
 healthy. claude.ai web (HTTP transport) code-ready, awaiting tunnel.
