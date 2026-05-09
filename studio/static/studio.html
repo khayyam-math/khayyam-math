@@ -64,6 +64,8 @@
     <div class="chat-header">
       <span class="title">Sevim Studio</span>
       <span class="status" id="status">connecting…</span>
+      <span id="canvas-badge" style="margin-left:0.5em;font-size:0.7em;color:var(--muted);
+                                     font-family:monospace;"></span>
       <button id="clear-btn" type="button" title="Clear conversation"
               style="margin-left:auto;background:transparent;border:1px solid var(--border);
                      color:var(--muted);border-radius:4px;padding:0.2em 0.5em;
@@ -84,27 +86,21 @@
   </main>
 </div>
 <script>
-  // ── State (persisted in localStorage so page reload keeps the conversation) ──
-  const STORAGE_KEY = 'sevim_studio_state_v1';
+  // ── State (in-memory only; reload starts fresh) ──
+  // localStorage persistence was removed: each page load should give a
+  // clean conversation and a clean canvas slot, so the user never gets
+  // an old figure replayed silently.
   let canvasId = null;
   let history = [];           // [{role, content}, ...]
-
-  function loadPersistedState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      if (Array.isArray(s.history)) history = s.history;
-      if (typeof s.canvasId === 'string' && s.canvasId) canvasId = s.canvasId;
-    } catch (e) { console.warn('persist load failed', e); }
-  }
-  function persistHistory() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({history, canvasId}));
-    } catch (e) { /* quota/private mode — ignore */ }
-  }
+  // Canvas IDs the user has pinned with the 📌 button on prior asst
+  // messages.  Sent to Studio with each new prompt so gpt-4o sees the
+  // pinned figures' PNG snapshots as conversational context.
+  let pinnedCanvasIds = [];
+  function persistHistory() { /* no-op: memory removed */ }
   function clearPersistedState() {
-    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    // Best-effort wipe of any leftover state from older builds that
+    // did persist to localStorage.
+    try { localStorage.removeItem('sevim_studio_state_v1'); } catch (e) {}
   }
 
   // Element refs first — these are the ones the click handlers need.
@@ -115,32 +111,13 @@
   const micBtn = document.getElementById('mic-btn');
   const frame = document.getElementById('canvas-frame');
   const placeholder = document.getElementById('placeholder');
+  const canvasBadge = document.getElementById('canvas-badge');
   const clearBtn = document.getElementById('clear-btn');
 
-  // Persisted-state replay is BEST-EFFORT: any failure must not block
-  // the rest of the page from binding event handlers.
-  try {
-    loadPersistedState();
-    for (const turn of (history || [])) {
-      if (!turn || typeof turn.content !== 'string') continue;
-      const role = turn.role === 'user' ? 'user' : 'asst';
-      const el = document.createElement('div');
-      el.className = 'msg ' + role;
-      el.textContent = turn.content;
-      log.appendChild(el);
-    }
-    if (canvasId) {
-      placeholder.style.display = 'none';
-      frame.style.display = 'block';
-      frame.src = '/canvas/' + canvasId + '/view';
-    }
-    log.scrollTop = log.scrollHeight;
-  } catch (e) {
-    console.error('[studio] replay failed; clearing persisted state', e);
-    try { clearPersistedState(); } catch (_) {}
-    history = [];
-    canvasId = null;
-  }
+  // Best-effort: wipe any leftover localStorage from older builds.
+  // Each page load starts with an empty conversation and an empty
+  // canvas slot — no replay of prior figures.
+  clearPersistedState();
 
   clearBtn.addEventListener('click', () => {
     if (!confirm('Clear conversation?')) return;
@@ -155,7 +132,19 @@
 
   // ── Health check ─────────────────────────────────────────────────────
   fetch('/studio/health').then(r => r.json()).then(h => {
-    if (!h.api_key_configured) {
+    if (h.backend === 'vllm') {
+      // h.remote is 'openai' (api.openai.com) or 'local' (local vLLM).
+      const tag = h.remote === 'openai' ? 'openai' : 'local';
+      if (!h.vllm_reachable) {
+        status.textContent = tag === 'openai' ? 'openai unreachable' : 'vllm unreachable';
+        status.style.color = '#ef4444';
+      } else if (tag === 'openai' && !h.api_key_configured) {
+        status.textContent = 'no OPENAI_API_KEY';
+        status.style.color = '#ef4444';
+      } else {
+        status.textContent = h.model + ' (' + tag + ')';
+      }
+    } else if (!h.api_key_configured) {
       status.textContent = 'no API key';
       status.style.color = '#ef4444';
     } else {
@@ -228,16 +217,22 @@
     sendBtn.disabled = true;
     appendMsg('user', user);
 
-    const asstEl = appendMsg('asst', '');
+    const asstEl = appendMsg('asst', '…');
+    asstEl.style.opacity = '0.5';
     let asstText = '';
 
     // Stream from /studio/chat
+    console.log('[studio] POST /studio/chat — sending', {user, canvasId});
     try {
       const resp = await fetch('/studio/chat', {
         method: 'POST',
         headers: {'content-type': 'application/json'},
-        body: JSON.stringify({history, user, canvas_id: canvasId}),
+        body: JSON.stringify({
+          history, user, canvas_id: canvasId,
+          prior_canvas_ids: pinnedCanvasIds.slice(),
+        }),
       });
+      console.log('[studio] response', resp.status, 'has body?', !!resp.body);
       if (!resp.ok || !resp.body) {
         asstEl.textContent = '(error: ' + resp.status + ')';
         return;
@@ -245,15 +240,22 @@
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
+      let chunkCount = 0;
       while (true) {
         const {value, done} = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, {stream: true});
-        // SSE parser: split on "\n\n", parse "event: X\ndata: Y"
-        let parts = buf.split('\n\n');
+        if (done) { console.log('[studio] stream ended after', chunkCount, 'chunks'); break; }
+        chunkCount++;
+        const text = decoder.decode(value, {stream: true});
+        console.log('[studio] chunk', chunkCount, text.slice(0, 200));
+        buf += text;
+        // SSE parser: split on event boundary.  sse-starlette emits
+        // CRLF (`\r\n\r\n`), not LF — splitting on `\n\n` matched
+        // nothing and the entire stream stayed buffered, which made
+        // the chat panel look frozen.  Tolerate both CRLF and LF.
+        let parts = buf.split(/\r?\n\r?\n/);
         buf = parts.pop();
         for (const part of parts) {
-          const lines = part.split('\n');
+          const lines = part.split(/\r?\n/);
           let evt = 'message', data = '';
           for (const ln of lines) {
             if (ln.startsWith('event:')) evt = ln.slice(6).trim();
@@ -265,25 +267,87 @@
           if (evt === 'text') {
             asstText += payload.text;
             asstEl.textContent = asstText;
+            asstEl.style.opacity = '1';
             // Visual streaming only — audio is the canvas's job.
           } else if (evt === 'tool_call') {
             const tEl = document.createElement('div');
             tEl.className = 'msg tool';
-            tEl.textContent = '→ ' + payload.name + '(' + payload.args_keys.join(',') + ')';
+            tEl.textContent = '→ ' + payload.name + '(' + (payload.args_keys || []).join(',') + ') …';
+            tEl.dataset.tool = payload.name;
             log.insertBefore(tEl, asstEl);
             log.scrollTop = log.scrollHeight;
           } else if (evt === 'tool_result') {
+            // Find the most-recent in-flight tool_call line and decorate
+            // it with a success/failure summary so the user sees that
+            // each call resolved, even when the model emits no chat text.
+            const pending = log.querySelectorAll('.msg.tool[data-tool]');
+            const last = pending[pending.length - 1];
             try {
               const r = JSON.parse(data);
+              let summary = ' ✓';
+              if (r.error) {
+                summary = ' ✗ ' + String(r.error).slice(0, 80);
+              } else if (Array.isArray(r.results)) {
+                const ok = r.results.filter(x => !x.error).length;
+                const err = r.results.length - ok;
+                summary = err ? ` ⚠ ${ok} ok, ${err} err` : ` ✓ ${ok} ops`;
+              } else if (r.duration_s) {
+                summary = ` ✓ ${r.phrase_count || '?'} phrases, ${r.duration_s.toFixed(1)}s`;
+              } else if (r.canvas_id) {
+                summary = ' ✓ ' + r.canvas_id;
+              }
+              if (last) {
+                last.textContent = last.textContent.replace(/ …$/, '') + summary;
+                delete last.dataset.tool;
+              }
               if (r.canvas_id && r.canvas_id !== canvasId) {
                 canvasId = r.canvas_id;
                 placeholder.style.display = 'none';
                 frame.style.display = 'block';
                 frame.src = '/canvas/' + canvasId + '/view';
+                if (canvasBadge) canvasBadge.textContent = canvasId;
+                // Stash the canvasId on the assistant element so the pin
+                // button (added on 'done') knows which canvas to pin.
+                asstEl.dataset.canvasId = canvasId;
                 persistHistory();
               }
             } catch {}
           } else if (evt === 'done') {
+            if (!asstText) {
+              asstEl.textContent = '(figure built — see canvas →)';
+              asstEl.style.opacity = '0.6';
+            }
+            // If this asst turn produced a canvas, attach a 📌 pin
+            // button.  Clicking it adds the canvas to pinnedCanvasIds
+            // so the next prompt's express call sees it as context.
+            if (asstEl.dataset.canvasId) {
+              const pinId = asstEl.dataset.canvasId;
+              const pinBtn = document.createElement('button');
+              pinBtn.type = 'button';
+              pinBtn.style.cssText =
+                'margin-left:0.5em;font-size:0.7em;padding:0.1em 0.45em;' +
+                'border:1px solid var(--border);border-radius:999px;' +
+                'background:transparent;color:var(--muted);cursor:pointer;';
+              const refreshLabel = () => {
+                pinBtn.textContent = pinnedCanvasIds.includes(pinId)
+                  ? '📌 pinned (click to unpin)'
+                  : '📌 pin for next prompt';
+              };
+              refreshLabel();
+              pinBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const i = pinnedCanvasIds.indexOf(pinId);
+                if (i >= 0) {
+                  pinnedCanvasIds.splice(i, 1);
+                } else {
+                  pinnedCanvasIds.push(pinId);
+                  // Cap at 3 to bound LLM cost.
+                  if (pinnedCanvasIds.length > 3) pinnedCanvasIds.shift();
+                }
+                refreshLabel();
+              });
+              asstEl.appendChild(pinBtn);
+            }
             history.push({role: 'user', content: user});
             history.push({role: 'assistant', content: asstText});
             persistHistory();

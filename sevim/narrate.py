@@ -81,7 +81,11 @@ class PhraseTiming:
     text: str
     start_s: float
     end_s: float
-    highlight: str | None  # canvas node id ('n_x') or edge id ('e_…') or None
+    # Element id(s) to highlight while this phrase plays.  The viewer
+    # accepts either a single string or a list of strings, so a phrase
+    # that mentions multiple things can spotlight all of them at once.
+    # ``None`` / empty list means "highlight nothing for this phrase".
+    highlight: str | list[str] | None
 
 
 def synthesize_script(

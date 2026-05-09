@@ -1,19 +1,17 @@
 """Canvas state for the MCP plugin layer.
 
 A *canvas* is a long-lived SceneGraph that the host LLM (Claude / ChatGPT /
-Gemini) builds up incrementally across many tool calls. It supports two
-construction modes that can be freely intermixed:
+Gemini / local Qwen) builds up incrementally via structured tool calls
+(``add_node``, ``add_edge``, ``add_caption``, ``remove``).  The LLM
+constructs the IR directly using Sevim's closed primitive/relation
+vocabulary; Sevim handles layout (S3→S4) and SVG serialisation (S5).
 
-  - **NL pass-through** (`describe`): the LLM hands a sentence to Sevim's
-    S1→S5 pipeline; nodes/edges extracted from the text are merged into the
-    canvas's existing graph.
-
-  - **Structured construction** (`add_node`, `add_edge`, `remove`): the LLM
-    builds the IR directly using Sevim's closed primitive/relation
-    vocabulary, bypassing the S2 extractor.
-
-After every mutation the graph is re-rendered (S3→S5) and `revision` is
-bumped so SSE viewers can pick up the change.
+After every mutation the graph is re-rendered (S3→S5) and ``revision``
+is bumped so SSE viewers can pick up the change.  Canvases live only in
+memory — restarting Studio wipes the registry, which is the intended
+behavior (each session starts fresh).  Audio WAVs are written to disk
+because the FastAPI viewer streams them by file path, but the canvas
+state itself is not persisted.
 
 Threading model
 ---------------
@@ -36,7 +34,6 @@ from typing import Any, Iterable
 from sevim.ir import (
     PlacedGraph, SceneEdge, SceneGraph, SceneNode, SpanRef, TraceEvent,
 )
-from sevim.pipeline import run_pipeline
 from sevim.s3_map import map_visual
 from sevim.s4_layout import layout
 from sevim.s4_geo_layout import geometric_layout
@@ -45,7 +42,7 @@ from sevim.geo_check import check as geo_check
 
 
 # ---------------------------------------------------------------------------
-# ID helpers (mirroring sevim.s2_extract conventions so structured-mode IDs
+# ID helpers (n_<slug> for nodes, e_<rel>_<src>_<dst> for edges so
 # collide cleanly with NL-mode IDs when the labels match).
 # ---------------------------------------------------------------------------
 
@@ -91,6 +88,18 @@ _VALID_KINDS: frozenset[str] = frozenset({
     "pdf_curve", "plate", "error_bar", "proof_node",
     # narration
     "caption",
+})
+
+
+# Closed vocabulary for the caption ``anchor`` parameter.  The layout pass
+# in s4_geo_layout silently falls back to an alternate margin when given
+# an unknown anchor, but that masks the model's mistake — better to reject
+# at the tool boundary so the LLM gets immediate feedback and learns the
+# correct anchor names ("middle"/"center" are common LLM hallucinations).
+VALID_ANCHORS: frozenset[str] = frozenset({
+    "auto", "above", "below", "left", "right", "overlay",
+    # accepted aliases — normalised to canonical names by the layout pass
+    "top", "bottom",
 })
 
 
@@ -146,12 +155,31 @@ class Canvas:
     # listener gets a clear cue to look at the canvas.  Override per
     # canvas; viewer falls back to a default English phrase.
     transition_text: str | None = None
+    # When True, this canvas's SVG was injected wholesale via set_raw_svg
+    # (the sevim_express path) and the structured render pipeline (S3→S5)
+    # is skipped on every mutation.  The narration validator also skips
+    # the "highlight target must be a known node id" check for raw-svg
+    # canvases — the targets are SVG element ids the LLM chose, not
+    # SceneGraph node ids.
+    is_raw_svg: bool = False
+    raw_svg_ids: set[str] = field(default_factory=set, repr=False)
+    # The user-facing prompt that generated this canvas.  Set by
+    # sevim_express; used by the conversational-context layer so a
+    # follow-up turn can attach this canvas as "prior figure for
+    # context" along with the prompt that produced it.
+    genesis_prompt: str | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # ---------- internal: re-run S3→S5 and bump revision ----------
     last_error: str | None = None
 
     def _rerender_locked(self) -> None:
+        # Express-mode canvases have an LLM-emitted SVG injected via
+        # set_raw_svg(); the structural pipeline (S3→S5) doesn't apply.
+        if getattr(self, "is_raw_svg", False):
+            self.revision += 1
+            self.updated_at = time.time()
+            return
         if not self.graph.nodes:
             self.svg = _empty_svg(self.width, self.height)
             self.placed = None
@@ -194,60 +222,33 @@ class Canvas:
         self.revision += 1
         self.updated_at = time.time()
 
-    # ---------- mutation: NL pass-through ----------
-    def describe(self, text: str, utterance_id: str | None = None) -> dict[str, Any]:
-        """Run S1→S5 on ``text`` and merge into this canvas's graph."""
-        if not text.strip():
-            raise ValueError("text must be non-empty")
-        with self.lock:
-            n_before, e_before = len(self.graph.nodes), len(self.graph.edges)
-            uid = utterance_id or f"u{self.revision}"
-            try:
-                result = run_pipeline(text, utterance_id=uid, graph=self.graph)
-                self.graph = result.graph
-                self.placed = result.placed
-                self.svg = result.svg
-                self.trace = result.trace
-                self.last_error = None
-            except Exception as e:
-                # Keep the prior good state; report the failure.
-                self.last_error = f"{type(e).__name__}: {e}"
-            self.revision += 1
-            self.updated_at = time.time()
-            added_nodes = [n.id for n in self.graph.nodes[n_before:]]
-            added_edges = [e.id for e in self.graph.edges[e_before:]]
-            if self.animate:
-                batch_t = time.time()
-                step = 0
-                for nid in added_nodes:
-                    if nid not in self.appear_meta:
-                        self.appear_meta[nid] = (batch_t, step)
-                        step += 1
-                for eid in added_edges:
-                    if eid not in self.appear_meta:
-                        self.appear_meta[eid] = (batch_t, step)
-                        step += 1
-            return self._with_error({
-                "canvas_id": self.canvas_id,
-                "revision": self.revision,
-                "added_nodes": added_nodes,
-                "added_edges": added_edges,
-                "node_count": len(self.graph.nodes),
-                "edge_count": len(self.graph.edges),
-            })
-
     # ---------- mutation: structured ----------
     def add_node(
         self,
         label: str,
         kind: str | None = None,
         meta_extras: dict[str, Any] | None = None,
+        node_id: str | None = None,
     ) -> dict[str, Any]:
-        """Append (or update) a node directly, bypassing S2 extraction."""
+        """Append (or update) a node directly, bypassing S2 extraction.
+
+        ``node_id`` overrides the default label-slugged id.  Use it when
+        several nodes share the same display label (e.g. nine literal
+        nodes ``x_1`` repeated across three clauses) — without an
+        explicit id, slugging collapses them all into one node.
+        """
         if not label.strip():
             raise ValueError("label must be non-empty")
         primitive = _resolve_kind(kind) if kind else None
-        nid = slug_nid(label)
+        if node_id is not None and node_id.strip():
+            # Sanitise to the slug alphabet so downstream id-string handling
+            # (CSS data attributes, edge id concatenation) stays well-formed.
+            cleaned = re.sub(r"[^a-z0-9]+", "_", node_id.strip().lower()).strip("_")
+            if not cleaned:
+                raise ValueError(f"node_id {node_id!r} sanitises to empty string")
+            nid = cleaned if cleaned.startswith("n_") else f"n_{cleaned}"
+        else:
+            nid = slug_nid(label)
         meta: dict[str, Any] = dict(meta_extras or {})
         if primitive:
             meta.setdefault("kind", primitive)
@@ -341,6 +342,30 @@ class Canvas:
             self._rerender_locked()
             return {"revision": self.revision}
 
+    # ---------- express-mode SVG injection ----------
+    def set_raw_svg(self, svg: str) -> dict[str, Any]:
+        """Inject an SVG string directly, bypassing the S3→S5 pipeline.
+
+        Used by the ``sevim_express`` path where the LLM produces a
+        complete figure as one SVG document.  Extracts every element
+        ``id="…"`` so the narration validator knows what targets are
+        valid for highlighting.
+        """
+        if not svg or "<svg" not in svg:
+            raise ValueError("set_raw_svg requires a valid SVG string")
+        ids = set(re.findall(r'\bid="([^"]+)"', svg))
+        with self.lock:
+            self.is_raw_svg = True
+            self.raw_svg_ids = ids
+            self.svg = svg
+            self.revision += 1
+            self.updated_at = time.time()
+        return {
+            "canvas_id": self.canvas_id,
+            "revision": self.revision,
+            "n_elements_indexed": len(ids),
+        }
+
     # ---------- narration ----------
     def narrate(self, script: list[dict]) -> dict[str, Any]:
         """Generate voice narration with a phrase-timed highlight schedule.
@@ -361,14 +386,26 @@ class Canvas:
         """
         from sevim.narrate import synthesize_script
         # Validate highlight targets up front so the LLM gets a clean error.
-        existing_ids = {n.id for n in self.graph.nodes} | {
-            e.id for e in self.graph.edges
-        }
+        # Express-mode canvases hold an LLM-emitted SVG: highlight targets
+        # are SVG element ids the LLM picked, recorded in raw_svg_ids when
+        # the SVG was injected.  Otherwise targets must match graph node/
+        # edge ids produced by the structured pipeline.
+        if self.is_raw_svg:
+            existing_ids = set(self.raw_svg_ids)
+        else:
+            existing_ids = {n.id for n in self.graph.nodes} | {
+                e.id for e in self.graph.edges
+            }
         unknown: list[str] = []
         for entry in script:
             tgt = entry.get("highlight")
-            if tgt and tgt not in existing_ids:
-                unknown.append(tgt)
+            # ``highlight`` may be a single id string OR a list of ids
+            # (multi-element spotlight).  Walk both.  None / empty list
+            # means "no highlight for this phrase".
+            tgt_list = tgt if isinstance(tgt, list) else ([tgt] if tgt else [])
+            for one in tgt_list:
+                if one and one not in existing_ids:
+                    unknown.append(one)
         # Prepend the transition phrase (same voice = same speaker).
         # Defaults to a sensible English phrase if neither sevim_open
         # nor the canvas was set with one.

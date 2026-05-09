@@ -1,20 +1,25 @@
 """Sevim MCP tool surface.
 
-A *hybrid* surface: the host LLM can either describe a clause in natural
-language and let Sevim's S2 extractor build the graph, or construct the
-graph directly with structured ``add_node`` / ``add_edge`` calls.  Both
-modes mutate the same long-lived canvas and can be freely intermixed.
+The host LLM constructs canvas figures via structured tool calls;
+Sevim handles deterministic layout, SVG rendering, and audio narration.
+The legacy NL pipeline (``sevim_describe``) was removed in v0.3 — modern
+tool-using LLMs produce structural specs directly with higher quality
+than the in-house extractor delivered.
 
 Tool list
 ---------
   sevim_open           — create/get a canvas, return a live view URL
-  sevim_describe       — NL pass-through (one clause → S1→S5 → merged)
-  sevim_add_node       — structured: append a node directly
-  sevim_add_edge       — structured: append a directed edge directly
+  sevim_plan           — compute math-coord positions for a structured graph
+  sevim_add_node       — append a node directly
+  sevim_add_edge       — append a directed edge directly
+  sevim_add_caption    — append a margin caption with leader line
   sevim_remove         — drop nodes/edges by id
   sevim_apply          — batched: many mutations atomically (low-latency)
+  sevim_intro          — synthesise an intro audio (prelude)
+  sevim_narrate        — phrase-timed narration with highlight schedule
+  sevim_review         — vision-feedback PNG of the current canvas
   sevim_render         — return the current SVG explicitly
-  sevim_vocabulary     — list supported relations, primitives, kinds, shapes
+  sevim_vocabulary     — list supported relations, primitives, kinds, anchors
   sevim_list_canvases  — enumerate open canvases
   sevim_close          — discard a canvas
 
@@ -79,8 +84,8 @@ class _Config:
         return f"http://{cls.host}:{cls.port}/canvas/{canvas_id}/view"
 
 
-# A "default" canvas is opened lazily on first use so the LLM can call
-# sevim_describe without an explicit sevim_open round-trip.
+# A "default" canvas is opened lazily so tool calls without an explicit
+# canvas_id always have somewhere to land.
 _DEFAULT_CANVAS_ID = "default"
 
 
@@ -89,14 +94,9 @@ def _get_or_default(canvas_id: str | None) -> Canvas:
 
     Order of resolution when ``canvas_id`` is None:
       1. Most-recently-active *user-opened* canvas (excludes "default").
-         This catches the "LLM forgot to thread canvas_id" case.  Without
-         this, a tool call after ``sevim_open(math_mode=True)`` that
-         omits canvas_id would silently land on a fresh "default"
-         canvas with math_mode=False, and the LLM would only notice
-         when it called ``sevim_review`` and got the wrong shape.
+         Catches the "LLM forgot to thread canvas_id" case.
       2. Existing "default" canvas if one was previously created.
-      3. Lazily create "default" so ``sevim_describe`` still works
-         without an explicit ``sevim_open`` round-trip.
+      3. Lazily create "default".
 
     When ``canvas_id`` is explicitly provided, behaviour is unchanged
     (get-or-create with that id).
@@ -138,8 +138,8 @@ mcp = FastMCP(
         "Sevim is a live diagram canvas.  When the user asks anything that "
         "benefits from a visual — math, geometry, set theory, system "
         "diagrams, causal chains, equations — open a canvas with sevim_open "
-        "and either describe sentences (sevim_describe) or build the graph "
-        "directly (sevim_add_node + sevim_add_edge).  sevim_open spawns "
+        "and build the graph with sevim_plan + sevim_apply (sevim_add_node "
+        "+ sevim_add_edge for one-off additions).  sevim_open spawns "
         "the user's browser onto the canvas automatically (auto_open=True "
         "by default), so DO NOT tell the user to click the view_url — it "
         "is already opening for them.  You may still mention the URL once "
@@ -357,24 +357,56 @@ def _synth_intro_in_background(canvas, text: str) -> None:
 
 
 @mcp.tool()
-def sevim_describe(text: str, canvas_id: str | None = None) -> dict[str, Any]:
-    """Hand a natural-language clause to Sevim's S1→S5 pipeline and merge
-    the extracted nodes/edges into the canvas.
+def sevim_plan(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]] | None = None,
+    layout: str = "auto",
+    canvas_w: float = 900,
+    canvas_h: float = 620,
+) -> dict[str, Any]:
+    """Compute math-coordinate positions for a math-mode figure BEFORE
+    you commit any nodes to the canvas.
 
-    Best for "translate this sentence into a diagram fragment".  For
-    fine-grained control over node kinds and exact relations, prefer
-    sevim_add_node + sevim_add_edge instead.
+    Use this whenever you'd otherwise have to invent coordinates for a
+    structured figure — graphs with clusters, K_n, cycle graphs, any
+    figure where the layout is non-obvious.  Sevim picks coordinates
+    that respect the cluster topology; you then thread the returned
+    positions into ``add_node(meta_extras={"x":..., "y":...})``.
+
+    The standard 4-call workflow that uses this:
+      1. sevim_open(math_mode=True, animate=True, prelude="…")
+      2. sevim_plan(nodes=[…], edges=[…])    ← NEW: get coordinates
+      3. sevim_apply(canvas_id=…, ops=[…])   with x/y from step 2
+      4. sevim_narrate(canvas_id=…, script=[…])
 
     Args:
-        text: A single clause (e.g. "Decision trees partition the feature
-            space recursively.").  Multiple clauses work but extraction
-            quality is best one clause at a time.
-        canvas_id: Target canvas.  Omit to use the default canvas.
+        nodes: List of structural node descriptions, each
+            ``{"node_id": str, "label": str, "cluster": str?, "kind": str?}``.
+            ``node_id`` is required; pass distinct ids when several nodes
+            share the same display label (e.g. literal "x1" appearing in
+            multiple clauses).  Set ``cluster`` to a clause/group label
+            so members are placed in their own region.
+        edges: Optional list of ``{"src": node_id, "dst": node_id,
+            "relation": str?}``.  Used only for warnings about edge
+            density; not committed to any canvas.
+        layout: ``"auto"`` (default — picks based on whether clusters
+            exist), ``"constraint_clusters"`` (outer ring of cluster
+            centres + inner ring of members), ``"radial"`` (single ring
+            of all nodes around the origin).
+        canvas_w / canvas_h: Hints used when scaling math coords.
+
+    Returns:
+        ``{"layout_chosen": str, "node_positions": {node_id: {"x", "y"}},
+           "math_bounds": {...}, "warnings": [str]}``.
     """
-    c = _get_or_default(canvas_id)
-    result = c.describe(text)
-    result["view_url"] = _Config.view_url(c.canvas_id)
-    return result
+    from sevim.plan import plan_layout
+    return plan_layout(
+        nodes=nodes,
+        edges=edges or [],
+        layout=layout,
+        canvas_w=canvas_w,
+        canvas_h=canvas_h,
+    )
 
 
 @mcp.tool()
@@ -383,6 +415,7 @@ def sevim_add_node(
     kind: str | None = None,
     canvas_id: str | None = None,
     meta_extras: dict[str, Any] | None = None,
+    node_id: str | None = None,
 ) -> dict[str, Any]:
     """Append ONE node.  Prefer ``sevim_apply`` with batched ops when adding
     more than one node in this turn — every individual call costs you
@@ -393,9 +426,19 @@ def sevim_add_node(
     the next ``sevim_apply`` call as ``{"op":"add_node", "label":..., ...}``.
 
     Args:
-        label: Display label.  IDs are derived from this (slugified) so
-            re-using a label updates the existing node instead of creating
-            a duplicate.
+        label: Display label.  When ``node_id`` is omitted, the id is
+            derived from this (slugified), so re-using a label updates
+            the existing node instead of creating a duplicate.  When
+            several nodes need the same display label (e.g. literal
+            nodes "x₁" repeated across multiple clauses in a 3SAT
+            figure), pass an explicit ``node_id`` per call to keep them
+            distinct.
+        node_id: Optional explicit id for this node.  Use whenever two
+            or more nodes would otherwise collide on slugged-label.
+            Sanitised to ``[a-z0-9_]`` and prefixed with ``n_`` if not
+            already.  Example: nine literal nodes labelled "x₁" / "x₂"
+            / "x₃" across three clauses → pass ``node_id="c1_a"``,
+            ``"c1_b"``, ..., ``"c3_c"``.
         kind: Visual primitive.  Aliases: "concept" (rect, default for
             general nouns), "attribute" (ellipse), "parameter" (diamond),
             "architecture" (hexagon), "layer" (parallelogram).  Math
@@ -430,7 +473,7 @@ def sevim_add_node(
             point nodes.  Sevim will draw the actual line in math_mode.
     """
     c = _get_or_default(canvas_id)
-    result = c.add_node(label=label, kind=kind, meta_extras=meta_extras)
+    result = c.add_node(label=label, kind=kind, meta_extras=meta_extras, node_id=node_id)
     result["canvas_id"] = c.canvas_id
     result["view_url"] = _Config.view_url(c.canvas_id)
     return result
@@ -451,7 +494,7 @@ def sevim_add_edge(
     next ``sevim_apply`` call as ``{"op":"add_edge", "src_id":..., "dst_id":..., "relation":...}``.
 
     Args:
-        src_id: Source node id (from sevim_add_node or sevim_describe).
+        src_id: Source node id (returned by a prior sevim_add_node or sevim_apply).
         dst_id: Destination node id.
         relation: One of the 30 closed relations.  Concept-diagram set:
             "causes", "part_of", "contains", "sequence", "attribute_of",
@@ -518,6 +561,7 @@ def sevim_add_caption(
                           inside the figure (rare).
         canvas_id: Target canvas.  Omit to use the default canvas.
     """
+    _validate_anchor(anchor)
     c = _get_or_default(canvas_id)
     meta_extras: dict[str, Any] = {"anchor": anchor}
     if x is not None and y is not None:
@@ -527,6 +571,24 @@ def sevim_add_caption(
     result["canvas_id"] = c.canvas_id
     result["view_url"] = _Config.view_url(c.canvas_id)
     return result
+
+
+def _validate_anchor(anchor: str) -> None:
+    """Reject anchor names outside the closed vocabulary.
+
+    Common LLM hallucinations like ``"middle"``, ``"center"``, ``"top-left"``
+    used to silently fall through to the layout's default — the user saw
+    captions misplaced and the model never learned the correct names.
+    Raising here surfaces the mistake in the tool result so the model
+    self-corrects on the next call.
+    """
+    from service.canvas import VALID_ANCHORS
+    if (anchor or "").lower() not in VALID_ANCHORS:
+        valid = sorted(VALID_ANCHORS)
+        raise ValueError(
+            f"anchor {anchor!r} is not in the closed vocabulary. "
+            f"Use one of: {valid}.  Default is 'auto'."
+        )
 
 
 @mcp.tool()
@@ -552,7 +614,9 @@ def sevim_apply(ops: list[dict[str, Any]], canvas_id: str | None = None) -> dict
     diagram with several related pieces.
 
     Each op is one of:
-      {"op": "add_node",    "label": "...", "kind": "...", "meta_extras": {...}}
+      {"op": "add_node",    "label": "...", "kind": "...", "meta_extras": {...},
+                            "node_id": "..." (optional, required when same label
+                                              repeats — see sevim_add_node)}
       {"op": "add_edge",    "src_id": "...", "dst_id": "...", "relation": "..."}
       {"op": "add_caption", "text": "...", "x": ..., "y": ..., "anchor": "..."}
       {"op": "describe",    "text": "..."}
@@ -574,6 +638,7 @@ def sevim_apply(ops: list[dict[str, Any]], canvas_id: str | None = None) -> dict
                     label=op["label"],
                     kind=op.get("kind"),
                     meta_extras=op.get("meta_extras"),
+                    node_id=op.get("node_id"),
                 ))
             elif kind == "add_edge":
                 results.append(c.add_edge(
@@ -584,6 +649,8 @@ def sevim_apply(ops: list[dict[str, Any]], canvas_id: str | None = None) -> dict
             elif kind == "add_caption":
                 # Captions are nodes with kind="caption"; the layout
                 # pass routes them to a margin via the anchor meta.
+                if "anchor" in op:
+                    _validate_anchor(op["anchor"])
                 meta = {
                     k: op[k] for k in ("x", "y", "anchor")
                     if k in op

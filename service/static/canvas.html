@@ -145,7 +145,7 @@
 </main>
 <audio id="intro-audio" preload="auto"></audio>
 <audio id="narration-audio" preload="auto"></audio>
-<div class="play-overlay hidden" id="play-overlay">
+<div class="play-overlay" id="play-overlay">
   <div class="panel">
     <button id="overlay-play" type="button">▶ tap anywhere for sound</button>
   </div>
@@ -193,29 +193,53 @@
   // autoplays without any click.
 
   function tryPlayChain() {
-    // Plays whichever element is next in the chain that has a src.
+    console.log('[viewer] tryPlayChain', {
+      introSrc: !!intro.src, introPaused: intro.paused, introPlayed,
+      audioSrc: !!audio.src, audioPaused: audio.paused,
+    });
     if (intro.src && intro.paused && !introPlayed) {
-      intro.play().then(() => { userInteracted = true; })
-                  .catch(() => overlay.classList.remove('hidden'));
+      intro.play().then(() => {
+        console.log('[viewer] intro.play() resolved');
+        userInteracted = true;
+      }).catch((e) => {
+        console.warn('[viewer] intro.play() rejected:', e.name, e.message);
+        overlay.classList.remove('hidden');
+      });
+      return;
+    }
+    // Don't start narration while intro is still queued.  The intro
+    // 'ended' handler is the *only* place that hands off to narration —
+    // otherwise an SSE state-update mid-intro would land here, fire
+    // audio.play(), and the mutual-exclusion safety net would silence
+    // the intro that was already speaking.
+    if (intro.src && !introPlayed) {
+      console.log('[viewer] tryPlayChain: intro queued, deferring narration');
       return;
     }
     if (audio.src && audio.paused) {
-      audio.play().then(() => { userInteracted = true; })
-                  .catch(() => overlay.classList.remove('hidden'));
+      audio.play().then(() => {
+        console.log('[viewer] audio.play() resolved');
+        userInteracted = true;
+      }).catch((e) => {
+        console.warn('[viewer] audio.play() rejected:', e.name, e.message);
+        overlay.classList.remove('hidden');
+      });
     }
   }
 
   function unlockAudio() {
-    if (userInteracted) {
-      overlay.classList.add('hidden');
-      return;
-    }
+    // Mark interaction so future autoplay attempts succeed.  Do NOT
+    // hide the overlay here — only an actual audio 'play' event hides
+    // it (handlers below).  Otherwise a stray mousemove dismisses the
+    // pill before audio has loaded, and the user gets neither the
+    // visual cue nor sound.
     userInteracted = true;
-    overlay.classList.add('hidden');
     tryPlayChain();
   }
-  // Any interaction unlocks — broader than just click/keydown.
-  ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(ev => {
+  // Click / keydown / touchstart count as user gestures for autoplay
+  // grants on every browser.  Mousemove and scroll are excluded — they
+  // were dismissing the pill silently before audio had a chance to load.
+  ['click', 'keydown', 'touchstart'].forEach(ev => {
     document.addEventListener(ev, unlockAudio, { once: false, passive: true });
   });
 
@@ -243,8 +267,20 @@
     }
   });
 
-  // When narration starts playing, the corner pill is irrelevant.
-  audio.addEventListener('play', () => overlay.classList.add('hidden'));
+  // Hide the corner pill the moment ANY audio actually starts playing —
+  // intro WAV first (when present), narration WAV after.  This is the
+  // only signal that proves audio reached the user.
+  audio.addEventListener('play', () => {
+    overlay.classList.add('hidden');
+    // Mutual-exclusion safety net: if intro somehow ended up playing
+    // alongside narration, silence it.  The race fixed in onNarrationReady
+    // should prevent this from happening, but the pause is cheap.
+    if (!intro.paused) intro.pause();
+  });
+  intro.addEventListener('play', () => {
+    overlay.classList.add('hidden');
+    if (!audio.paused) audio.pause();
+  });
 
   function applyState(state) {
     if (state.svg) {
@@ -307,12 +343,15 @@
       audio.src = `/canvas/${cid}/narration.wav?t=${Date.now()}`;
       audio.load();
     }
-    // playBtn is permanently hidden now that everything autoplays.
-    // If the prelude is still playing, defer narration until the
-    // intro <audio> element fires 'ended' — that listener auto-plays
-    // narration.  This keeps a single chain.
-    const introBusy = !intro.paused && !intro.ended && intro.src;
-    if (introBusy) return;
+    // Defer narration whenever an intro WAV exists and hasn't finished
+    // playing.  ``introPlayed`` is the only reliable indicator — checking
+    // ``intro.paused`` was racy because intro.play() returns a Promise
+    // that resolves *after* the next microtask, so right after a click
+    // ``intro.paused`` reads true even though playback is queued, and
+    // narration would start in parallel.  The intro 'ended' handler
+    // takes over and starts narration when the time comes.
+    const introQueued = intro.src && !introPlayed;
+    if (introQueued) return;
     // Otherwise try to play immediately.
     if (audio.paused) {
       audio.play().then(() => {
@@ -349,7 +388,7 @@
     // revealed yet.  Reset on every SVG re-render (innerHTML replace).
     for (const id of Object.keys(revealAt)) {
       if (revealed[id]) continue;
-      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"]`;
+      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"], [id="${cssEscape(id)}"]`;
       stage.querySelectorAll(sel).forEach(el => {
         el.style.opacity = '0';
         el.style.transition = 'opacity 0.35s ease-out';
@@ -366,7 +405,7 @@
       if (revealed[id]) continue;
       if (t < start) continue;
       revealed[id] = true;
-      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"]`;
+      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"], [id="${cssEscape(id)}"]`;
       stage.querySelectorAll(sel).forEach(el => {
         el.style.opacity = '1';
       });
@@ -379,12 +418,20 @@
     });
   }
 
-  function applyHighlight(targetId) {
-    if (!targetId) { clearHighlight(); return; }
+  function applyHighlight(target) {
+    // ``target`` accepts either a single id (string) or a list of ids
+    // (array of strings) so a single narration phrase can spotlight
+    // multiple elements at once (e.g. "clause C1 contains x1 and ¬x2"
+    // → highlight n_c1, n_x1, n_not_x2 simultaneously).
     clearHighlight();
-    const sel = `[data-nid="${cssEscape(targetId)}"], [data-eid="${cssEscape(targetId)}"]`;
-    const elems = stage.querySelectorAll(sel);
-    elems.forEach(el => el.classList.add('sevim-highlight'));
+    if (!target) return;
+    const ids = Array.isArray(target) ? target : [target];
+    for (const id of ids) {
+      if (!id) continue;
+      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"], [id="${cssEscape(id)}"]`;
+      const elems = stage.querySelectorAll(sel);
+      elems.forEach(el => el.classList.add('sevim-highlight'));
+    }
   }
 
   function cssEscape(s) {
@@ -446,6 +493,32 @@
       catch (e) { console.error('bad SSE payload', e); }
     });
   }
+
+  // ── Backend-side preferences (highlight color, audio speed/volume) ──
+  // These are set by the chat pre-router when the user asks for a UI
+  // change ('use red for highlight').  We poll on load and every few
+  // seconds so changes from a sibling chat tab propagate to this view
+  // without needing an SSE connection just for settings.
+  async function applyPreferences() {
+    try {
+      const r = await fetch('/studio/preferences');
+      if (!r.ok) return;
+      const p = await r.json();
+      if (p.highlight_color) {
+        document.documentElement.style.setProperty('--highlight', p.highlight_color);
+      }
+      if (typeof p.audio_speed === 'number') {
+        audio.playbackRate = p.audio_speed;
+        intro.playbackRate = p.audio_speed;
+      }
+      if (typeof p.audio_volume === 'number') {
+        audio.volume = p.audio_volume;
+        intro.volume = p.audio_volume;
+      }
+    } catch (e) { /* preferences endpoint optional */ }
+  }
+  applyPreferences();
+  setInterval(applyPreferences, 3000);
 
   loadInitial().then(connectSSE);
 </script>
