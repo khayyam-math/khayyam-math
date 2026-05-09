@@ -133,6 +133,14 @@ class Canvas:
     # endpoints.  ``None`` while no narration has been generated.
     narration_wav: str | None = None
     narration_manifest: dict | None = None
+    # Intro narration: a single short audio that the viewer plays
+    # *immediately* on canvas open, while the LLM is still busy
+    # generating the figure-build calls.  Covers the silent dead-air
+    # the user otherwise watches.  When the figure is ready, the main
+    # ``narration_wav`` takes over (viewer chains intro -> narration).
+    intro_wav: str | None = None
+    intro_duration_s: float = 0.0
+    intro_text: str | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # ---------- internal: re-run S3→S5 and bump revision ----------
@@ -365,6 +373,41 @@ class Canvas:
             "phrase_count": len(manifest["phrases"]),
             "wav_path": str(wav_path),
             "unknown_highlight_targets": unknown,
+        }
+
+    # ---------- intro narration ----------
+    def intro(self, text: str) -> dict[str, Any]:
+        """Synthesise a short intro audio that the viewer plays immediately.
+
+        Designed to fill the dead time while the host LLM is still
+        writing build calls.  The browser plays the intro on canvas
+        open; when ``narrate(...)`` is later called, the viewer chains
+        from intro to main narration.  Calling ``intro`` again replaces
+        the previous intro audio.
+        """
+        from sevim.narrate import synthesize_script
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("intro text must be non-empty")
+        narr_dir = _narration_dir(self.canvas_id)
+        narr_dir.mkdir(parents=True, exist_ok=True)
+        wav_path = narr_dir / "intro.wav"
+        # synthesize_script wants a list of phrase dicts.  One phrase,
+        # no highlight target — pure speech.
+        manifest = synthesize_script(
+            [{"speak": text, "highlight": None}],
+            str(wav_path),
+        )
+        with self.lock:
+            self.intro_wav = str(wav_path)
+            self.intro_duration_s = float(manifest.get("duration_s", 0.0))
+            self.intro_text = text
+            self.revision += 1
+            self.updated_at = time.time()
+        return {
+            "canvas_id": self.canvas_id,
+            "duration_s": self.intro_duration_s,
+            "wav_path": self.intro_wav,
         }
 
     # ---------- internal: result decoration ----------
