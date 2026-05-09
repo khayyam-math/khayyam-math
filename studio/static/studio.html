@@ -107,8 +107,7 @@
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   }
 
-  loadPersistedState();
-
+  // Element refs first — these are the ones the click handlers need.
   const log = document.getElementById('log');
   const status = document.getElementById('status');
   const input = document.getElementById('input');
@@ -118,24 +117,30 @@
   const placeholder = document.getElementById('placeholder');
   const clearBtn = document.getElementById('clear-btn');
 
-  // Replay persisted history into the chat log so the user sees it.
-  for (const turn of history) {
-    appendMsgInit(turn.role === 'user' ? 'user' : 'asst', turn.content);
+  // Persisted-state replay is BEST-EFFORT: any failure must not block
+  // the rest of the page from binding event handlers.
+  try {
+    loadPersistedState();
+    for (const turn of (history || [])) {
+      if (!turn || typeof turn.content !== 'string') continue;
+      const role = turn.role === 'user' ? 'user' : 'asst';
+      const el = document.createElement('div');
+      el.className = 'msg ' + role;
+      el.textContent = turn.content;
+      log.appendChild(el);
+    }
+    if (canvasId) {
+      placeholder.style.display = 'none';
+      frame.style.display = 'block';
+      frame.src = '/canvas/' + canvasId + '/view';
+    }
+    log.scrollTop = log.scrollHeight;
+  } catch (e) {
+    console.error('[studio] replay failed; clearing persisted state', e);
+    try { clearPersistedState(); } catch (_) {}
+    history = [];
+    canvasId = null;
   }
-  if (canvasId) {
-    placeholder.style.display = 'none';
-    frame.style.display = 'block';
-    frame.src = '/canvas/' + canvasId + '/view';
-  }
-  function appendMsgInit(role, text) {
-    // Helper used during boot, before appendMsg is available.
-    const el = document.createElement('div');
-    el.className = 'msg ' + role;
-    el.textContent = text;
-    log.appendChild(el);
-  }
-  // Scroll to bottom after replay.
-  log.scrollTop = log.scrollHeight;
 
   clearBtn.addEventListener('click', () => {
     if (!confirm('Clear conversation?')) return;
@@ -304,6 +309,10 @@
     }
   });
   input.focus();
+
+  // One-line "page is alive" log so it's obvious in DevTools whether
+  // the bottom of the script ran (i.e. all listeners are bound).
+  console.log('[studio] ready — chat handler bound, history len', history.length);
 </script>
 </body>
 </html>
