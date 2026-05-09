@@ -44,32 +44,37 @@ import uvicorn
 from .server import configure, get_default_host, get_default_port, mcp, run_stdio
 
 
-def _pick_port(host: str, preferred: int) -> int:
-    """Return ``preferred`` if free; refuse with an actionable message otherwise.
+def _pick_port(host: str, preferred: int, scan: int = 16) -> int:
+    """Return ``preferred`` if free, else the next free port in the same
+    small range.
 
-    Why we don't fall back to a random port any more:
-    Chrome's autoplay permission is per-origin.  ``127.0.0.1:7777`` and
-    ``127.0.0.1:33629`` are *different* origins as far as the browser
-    is concerned, so a fresh random port forces the user to click the
-    "Play narration" overlay every session.  Pinning the port lets the
-    browser remember the permission once.
+    Why a deterministic scan instead of random fallback:
+    Chrome's autoplay permission is per-origin, so a *random* port
+    each session means the user grants permission again every time.
+    Scanning ``preferred .. preferred+scan-1`` keeps each new session
+    on a small predictable set (typically 7777, 7778, 7779) — once
+    the user grants autoplay for those, no more overlay clicks.
 
-    Override the preferred port via ``SEVIM_HTTP_PORT`` if you really
-    need a different one — but use a stable value, not 0.
+    Why not refuse-and-die on conflict:
+    Two MCP subprocesses must coexist while the user transitions from
+    one Claude Code session to the next.  Refusing leaves the new
+    session with no Sevim tools and the model falls back to ASCII art.
+
+    Override the preferred port via ``SEVIM_HTTP_PORT`` if you need
+    a different one — use a stable value, not 0.
     """
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        s.bind((host, preferred))
-        s.close()
-        return preferred
-    except OSError:
-        s.close()
+    for port in range(preferred, preferred + scan):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind((host, port))
+            s.close()
+            return port
+        except OSError:
+            s.close()
     raise SystemExit(
-        f"[sevim-mcp] viewer port {preferred} on {host} is already bound.\n"
-        f"  Another Sevim MCP subprocess is probably still running.  "
-        f"Kill it with:  pkill -f 'python -m mcp_server'  "
-        f"or set SEVIM_HTTP_PORT to a different stable port and restart."
+        f"[sevim-mcp] no free port in {preferred}..{preferred + scan - 1} "
+        f"on {host}.  Old MCP subprocesses may be lingering — clean up "
+        f"with:  pkill -f 'python -m mcp_server'  or set SEVIM_HTTP_PORT."
     )
 
 
