@@ -531,10 +531,11 @@ def sevim_apply(ops: list[dict[str, Any]], canvas_id: str | None = None) -> dict
     diagram with several related pieces.
 
     Each op is one of:
-      {"op": "add_node",  "label": "...", "kind": "...", "meta_extras": {...}}
-      {"op": "add_edge",  "src_id": "...", "dst_id": "...", "relation": "..."}
-      {"op": "describe",  "text": "..."}
-      {"op": "remove",    "ids": ["..."]}
+      {"op": "add_node",    "label": "...", "kind": "...", "meta_extras": {...}}
+      {"op": "add_edge",    "src_id": "...", "dst_id": "...", "relation": "..."}
+      {"op": "add_caption", "text": "...", "x": ..., "y": ..., "anchor": "..."}
+      {"op": "describe",    "text": "..."}
+      {"op": "remove",      "ids": ["..."]}
       {"op": "clear"}
 
     Args:
@@ -558,6 +559,20 @@ def sevim_apply(ops: list[dict[str, Any]], canvas_id: str | None = None) -> dict
                     src_id=op["src_id"],
                     dst_id=op["dst_id"],
                     relation=op["relation"],
+                ))
+            elif kind == "add_caption":
+                # Captions are nodes with kind="caption"; the layout
+                # pass routes them to a margin via the anchor meta.
+                meta = {
+                    k: op[k] for k in ("x", "y", "anchor")
+                    if k in op
+                }
+                if "meta_extras" in op:
+                    meta.update(op["meta_extras"])
+                results.append(c.add_node(
+                    label=op["text"],
+                    kind="caption",
+                    meta_extras=meta,
                 ))
             elif kind == "describe":
                 results.append(c.describe(op["text"]))
