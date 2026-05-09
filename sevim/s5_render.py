@@ -955,7 +955,11 @@ def _render_caption(ps: PlacedShape, stroke: str) -> str:
     parts: list[str] = [f'<g data-nid="{escape(s.nid)}">']
 
     # Leader line first (so the box draws on top of the line at the
-    # caption end, hiding any sub-pixel join).
+    # caption end, hiding any sub-pixel join).  The endpoint marker is
+    # suppressed when the layout pass detected that the marker would
+    # land inside another caption's box — without that, multiple
+    # captions stacked in the same margin show stray dots inside each
+    # other's text.
     lf = s.meta.get("leader_from_canvas")
     lt = s.meta.get("leader_to_canvas")
     if (isinstance(lf, (tuple, list)) and len(lf) == 2
@@ -967,10 +971,11 @@ def _render_caption(ps: PlacedShape, stroke: str) -> str:
             f'stroke="{leader_color}" stroke-width="1" '
             f'stroke-dasharray="3,3"/>'
         )
-        parts.append(
-            f'<circle cx="{x2:g}" cy="{y2:g}" r="2.2" '
-            f'fill="{leader_color}" stroke="none"/>'
-        )
+        if not s.meta.get("leader_endpoint_suppressed"):
+            parts.append(
+                f'<circle cx="{x2:g}" cy="{y2:g}" r="2.2" '
+                f'fill="{leader_color}" stroke="none"/>'
+            )
 
     parts.append(
         f'<rect x="{ps.x:g}" y="{ps.y:g}" width="{s.width:g}" height="{h:g}" '
