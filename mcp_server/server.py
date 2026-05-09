@@ -146,21 +146,35 @@ mcp = FastMCP(
         "for reference, but a single short line like 'I've opened the "
         "canvas in your browser' is enough."
         "\n\n"
-        "**The standard 3-call workflow.**  Almost every figure should "
-        "be exactly three tool calls — open, apply, narrate:\n"
-        "  1. ``sevim_open(math_mode=True, animate=True, intro=\"…\")``\n"
-        "     — pass intro inline so audio starts immediately, no separate "
-        "       sevim_intro call needed.  animate=True turns the canvas "
-        "       into a self-playing whiteboard.\n"
-        "  2. ``sevim_apply(canvas_id=…, ops=[…])`` — ALL mutations in one "
-        "     batched call: nodes, edges, AND captions.  Captions go in "
-        "     the same list:  {\"op\":\"add_caption\", \"text\":…, \"x\":…, "
-        "     \"y\":…, \"anchor\":…}.  NEVER call sevim_add_caption in "
-        "     isolation when you're adding several — fold them into the "
-        "     apply call.\n"
+        "**The standard 3-call tutoring workflow.**  Audio plays in "
+        "three phases — prelude, transition, walkthrough — and Sevim "
+        "wires them together automatically:\n"
+        "\n"
+        "  1. ``sevim_open(math_mode=True, animate=True, prelude=\"…\")``\n"
+        "     The PRELUDE is the full verbal problem-and-solution "
+        "     definition (50–150 words).  State the problem, name the "
+        "     technique, give the high-level idea — everything you'd say "
+        "     before pointing at a diagram.  The viewer speaks this via "
+        "     the browser's TTS the moment the canvas opens, *while you "
+        "     are still writing* the next tool call.  The user hears a "
+        "     complete verbal explanation before the figure finishes "
+        "     rendering.\n"
+        "\n"
+        "  2. ``sevim_apply(canvas_id=…, ops=[…])`` — ALL nodes, edges, "
+        "     AND captions in ONE batched call.  Captions go in the same "
+        "     list:  {\"op\":\"add_caption\", \"text\":…, \"x\":…, \"y\":…, "
+        "     \"anchor\":…}.  NEVER call sevim_add_caption in isolation "
+        "     when you're adding several — fold them in.\n"
+        "\n"
         "  3. ``sevim_narrate(canvas_id=…, script=[…])`` — phrase-timed "
-        "     walk-through.  Each phrase highlights one canvas element "
-        "     for the duration it's spoken.\n"
+        "     walk-through with highlights.  Each phrase highlights one "
+        "     canvas element while it's spoken.  The viewer automatically "
+        "     plays a transition phrase ('And now please look at the "
+        "     diagram.') between the prelude and your script — you don't "
+        "     have to write the transition yourself.  Start the script "
+        "     directly with the first observation about the figure "
+        "     (e.g. {\"speak\":\"This top arc is variable x_1 set to "
+        "     TRUE.\", \"highlight\":\"n_t1\"}).\n"
         "\n"
         "If you find yourself writing add_node, add_edge, or add_caption "
         "in isolation more than twice in a row, stop and rewrite as one "
@@ -208,6 +222,8 @@ def sevim_open(
     auto_open: bool = True,
     width: int = 700,
     height: int = 440,
+    prelude: str | None = None,
+    transition: str | None = None,
     intro: str | None = None,
 ) -> dict[str, Any]:
     """Open a new (or reuse an existing) Sevim diagram canvas.
@@ -255,16 +271,22 @@ def sevim_open(
             the user is on a headless setup.
         width: Canvas width in SVG user units.
         height: Canvas height in SVG user units.
-        intro: Optional one-or-two-sentence introduction to *speak immediately*
-            on canvas open.  When set, the viewer starts speaking the intro
-            via the browser's built-in speech synthesis the moment the page
-            loads — no synthesis delay, no autoplay click — while piper-tts
-            synthesises the higher-quality voice on a background thread for
-            seamless takeover.  This collapses two tool calls (sevim_open
-            then sevim_intro) into one, saving 5–30 s of tool-call latency
-            on the user-perceived "time to first audio".  Recommended for
-            every figure: write a 1–2 sentence intro of what you're about
-            to draw and pass it here.
+        prelude: The FULL problem + solution definition, spoken via the
+            browser's built-in TTS the moment the canvas opens.  Should
+            be 50–150 words: state the problem, name the technique, give
+            the high-level idea.  The viewer speaks this *while you write
+            the figure-build calls*, so the user hears a complete verbal
+            explanation before the figure even finishes rendering.  After
+            the prelude, the viewer plays a transition phrase ("And now
+            please look at the diagram.") and hands off to ``sevim_narrate``
+            for the phrase-aligned walkthrough.  Web Speech autoplays
+            without a click on most browsers — far more reliable than
+            the gated <audio> element.
+        transition: Optional override for the transition phrase spoken
+            between the prelude and the narration.  Default is "And now
+            please look at the diagram."  Keep short (one sentence).
+        intro: DEPRECATED alias for ``prelude``.  If both are set,
+            ``prelude`` wins.
     """
     c = REGISTRY.open(
         canvas_id=canvas_id,
@@ -275,21 +297,28 @@ def sevim_open(
     )
     view_url = _Config.view_url(c.canvas_id)
 
-    # Stash the intro text on the canvas so the viewer's Web Speech API
-    # path can speak it instantly on load.  Spawn piper synthesis in a
-    # background thread for the higher-quality version; viewer crossfades
-    # when ready.
-    if intro and intro.strip():
+    spoken = (prelude or intro or "").strip()
+    transition_text = (transition or "").strip()
+
+    # Stash the prelude + transition on the canvas so the viewer's
+    # Web Speech path can speak them instantly on load.  Piper still
+    # synthesises a backup WAV in the background — viewer falls back
+    # to it if Web Speech is unavailable.
+    if spoken or transition_text:
         with c.lock:
-            c.intro_text = intro.strip()
+            if spoken:
+                c.intro_text = spoken
+            if transition_text:
+                c.transition_text = transition_text
             c.revision += 1
             c.updated_at = _time_now()
-        threading.Thread(
-            target=_synth_intro_in_background,
-            args=(c, intro.strip()),
-            name=f"sevim-intro-{c.canvas_id}",
-            daemon=True,
-        ).start()
+        if spoken:
+            threading.Thread(
+                target=_synth_intro_in_background,
+                args=(c, spoken),
+                name=f"sevim-intro-{c.canvas_id}",
+                daemon=True,
+            ).start()
 
     # Auto-launch the browser the first time we see this canvas, so the
     # user doesn't have to click the URL.  Subsequent ``sevim_open``
@@ -310,7 +339,7 @@ def sevim_open(
         "width": c.width,
         "height": c.height,
         "revision": c.revision,
-        "intro_speaking": bool(intro and intro.strip()),
+        "prelude_speaking": bool(spoken),
     }
 
 

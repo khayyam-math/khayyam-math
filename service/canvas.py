@@ -141,6 +141,11 @@ class Canvas:
     intro_wav: str | None = None
     intro_duration_s: float = 0.0
     intro_text: str | None = None
+    # Phrase the viewer speaks via Web Speech BETWEEN the prelude
+    # (intro_text) and the figure-aligned narration WAV — so the
+    # listener gets a clear cue to look at the canvas.  Override per
+    # canvas; viewer falls back to a default English phrase.
+    transition_text: str | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # ---------- internal: re-run S3→S5 and bump revision ----------
