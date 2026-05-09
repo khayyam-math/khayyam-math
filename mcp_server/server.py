@@ -84,11 +84,34 @@ _DEFAULT_CANVAS_ID = "default"
 
 
 def _get_or_default(canvas_id: str | None) -> Canvas:
-    cid = canvas_id or _DEFAULT_CANVAS_ID
+    """Resolve the target canvas for a tool call.
+
+    Order of resolution when ``canvas_id`` is None:
+      1. Most-recently-active *user-opened* canvas (excludes "default").
+         This catches the "LLM forgot to thread canvas_id" case.  Without
+         this, a tool call after ``sevim_open(math_mode=True)`` that
+         omits canvas_id would silently land on a fresh "default"
+         canvas with math_mode=False, and the LLM would only notice
+         when it called ``sevim_review`` and got the wrong shape.
+      2. Existing "default" canvas if one was previously created.
+      3. Lazily create "default" so ``sevim_describe`` still works
+         without an explicit ``sevim_open`` round-trip.
+
+    When ``canvas_id`` is explicitly provided, behaviour is unchanged
+    (get-or-create with that id).
+    """
+    if canvas_id is None:
+        latest = REGISTRY.latest_active(exclude=_DEFAULT_CANVAS_ID)
+        if latest is not None:
+            return latest
+        try:
+            return REGISTRY.get(_DEFAULT_CANVAS_ID)
+        except KeyError:
+            return REGISTRY.open(canvas_id=_DEFAULT_CANVAS_ID)
     try:
-        return REGISTRY.get(cid)
+        return REGISTRY.get(canvas_id)
     except KeyError:
-        return REGISTRY.open(canvas_id=cid)
+        return REGISTRY.open(canvas_id=canvas_id)
 
 
 # ---------------------------------------------------------------------------
