@@ -245,7 +245,10 @@ async def chat(req: ChatReq):
         for _step in range(8):  # safety cap
             payload = {
                 "model": req.model,
-                "max_tokens": 4096,
+                # Generous output budget — a single sevim_apply call with
+                # 50+ ops plus a 20-phrase sevim_narrate script can be
+                # ~6-12 K output tokens.  4096 was getting cut mid-apply.
+                "max_tokens": 16384,
                 "system": SYSTEM_PROMPT,
                 "tools": TOOLS,
                 "messages": messages,
@@ -281,7 +284,21 @@ async def chat(req: ChatReq):
             stop = result.get("stop_reason")
             messages.append({"role": "assistant", "content": content})
 
+            # If we hit a non-tool-use stop reason, surface it.  The
+            # important cases:
+            #   end_turn      — natural finish
+            #   max_tokens    — output budget hit; figure may be partial
+            #   stop_sequence — rare
             if stop != "tool_use" or not tool_uses:
+                if stop == "max_tokens":
+                    yield {"event": "text", "data": json.dumps({
+                        "text": (
+                            "\n\n[Studio: hit max_tokens before finishing — "
+                            "the figure above may be partial.  Bump "
+                            "max_tokens or break the build into smaller "
+                            "tool calls.]"
+                        ),
+                    })}
                 yield {"event": "done", "data": json.dumps({"stop_reason": stop})}
                 return
 
