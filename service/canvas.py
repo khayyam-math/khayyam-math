@@ -113,10 +113,16 @@ class Canvas:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     warnings: list[dict] = field(default_factory=list)
-    # Appearance-order index assigned to each node/edge id when ``animate``
-    # is on.  Used by ``_apply_fade_in`` to stagger SMIL fade-ins so the
-    # canvas builds itself like a slow whiteboard reveal.
-    appear_steps: dict[str, int] = field(default_factory=dict)
+    # Per-element appearance metadata used by ``_apply_fade_in``.  Each
+    # entry is ``(batch_started_at_wall_clock, step_within_batch)``.  The
+    # batch timestamp lets us emit *negative* SMIL begin times for elements
+    # added long ago, so they render fully-opaque on every re-render
+    # instead of restarting their fade-in.  Without this, every mutation
+    # would visibly re-cascade every previously-added element from
+    # opacity=0, producing a "blink, blink, blink…" rebuild on each
+    # tool call.  Step within batch preserves the staggered reveal among
+    # elements added together via ``sevim_apply``.
+    appear_meta: dict[str, tuple[float, int]] = field(default_factory=dict)
     # True once we've spawned the user's browser onto this canvas's
     # view_url.  Prevents repeat-launches when the LLM re-calls sevim_open
     # against an existing canvas mid-session.
@@ -151,10 +157,10 @@ class Canvas:
                     placed = layout(visual)
                 self.placed = placed
                 svg = render_svg(placed)
-                if self.animate and self.appear_steps:
+                if self.animate and self.appear_meta:
                     svg = _apply_fade_in(
                         svg,
-                        self.appear_steps,
+                        self.appear_meta,
                         step_duration=self.step_duration,
                         fade_duration=self.fade_duration,
                     )
@@ -198,10 +204,16 @@ class Canvas:
             added_nodes = [n.id for n in self.graph.nodes[n_before:]]
             added_edges = [e.id for e in self.graph.edges[e_before:]]
             if self.animate:
+                batch_t = time.time()
+                step = 0
                 for nid in added_nodes:
-                    self.appear_steps.setdefault(nid, len(self.appear_steps))
+                    if nid not in self.appear_meta:
+                        self.appear_meta[nid] = (batch_t, step)
+                        step += 1
                 for eid in added_edges:
-                    self.appear_steps.setdefault(eid, len(self.appear_steps))
+                    if eid not in self.appear_meta:
+                        self.appear_meta[eid] = (batch_t, step)
+                        step += 1
             return self._with_error({
                 "canvas_id": self.canvas_id,
                 "revision": self.revision,
@@ -248,8 +260,8 @@ class Canvas:
                 src_spans=[SpanRef(start=0, end=len(label), utterance_id="mcp")],
                 meta=meta,
             ))
-            if self.animate:
-                self.appear_steps.setdefault(nid, len(self.appear_steps))
+            if self.animate and nid not in self.appear_meta:
+                self.appear_meta[nid] = (time.time(), 0)
             self._rerender_locked()
             return self._with_error({"node_id": nid, "created": True, "revision": self.revision})
 
@@ -277,8 +289,8 @@ class Canvas:
                 relation=relation,  # validated at SVG render time by the literal type
                 src_spans=[SpanRef(start=0, end=0, utterance_id="mcp")],
             ))
-            if self.animate:
-                self.appear_steps.setdefault(eid, len(self.appear_steps))
+            if self.animate and eid not in self.appear_meta:
+                self.appear_meta[eid] = (time.time(), 0)
             self._rerender_locked()
             return self._with_error({"edge_id": eid, "created": True, "revision": self.revision})
 
@@ -305,14 +317,14 @@ class Canvas:
             self.graph.nodes = kept_nodes
             self.graph.edges = kept_edges
             for rid in removed:
-                self.appear_steps.pop(rid, None)
+                self.appear_meta.pop(rid, None)
             self._rerender_locked()
             return self._with_error({"removed": removed, "revision": self.revision})
 
     def clear(self) -> dict[str, Any]:
         with self.lock:
             self.graph = SceneGraph()
-            self.appear_steps.clear()
+            self.appear_meta.clear()
             self._rerender_locked()
             return {"revision": self.revision}
 
@@ -515,13 +527,31 @@ _OPEN_TAG_RE = _re.compile(
 
 def _apply_fade_in(
     svg: str,
-    appear_steps: dict[str, int],
+    appear_meta: dict[str, tuple[float, int]],
     step_duration: float = 0.4,
     fade_duration: float = 0.35,
 ) -> str:
-    """Inject SMIL fade-in animations on every element with an appearance step.
+    """Inject SMIL fade-in animations on every element with appearance metadata.
 
-    Two cases per match:
+    The viewer (canvas.html) replaces ``stage.innerHTML`` on every
+    revision, which means SMIL ``begin="Ns"`` is *relative to the SVG's
+    new load time*.  Naive positive begin values would restart every
+    previously-faded element on every mutation — the "blink, blink, blink"
+    rebuild cascade.
+
+    Fix: compute an *absolute* begin per element from its batch timestamp:
+
+        begin = (batch_started_at + step * step_duration) - now
+
+    For elements added long ago, ``begin + dur`` is far in the past — we
+    skip the ``<animate>`` entirely and the element renders fully opaque
+    from byte 0, no flash.  For elements added in the most recent batch,
+    begin is ~0s and they fade in normally (staggered by step_duration
+    within the batch).  For mid-fade elements during rapid re-renders,
+    begin is slightly negative so the browser jumps directly to the
+    correct opacity instead of restarting from 0.
+
+    Two patch shapes per match:
 
     1.  ``<g data-nid="X">…</g>`` (or any container element) — append
         ``style="opacity:0"`` to the opening tag and inject an
@@ -533,24 +563,39 @@ def _apply_fade_in(
 
     The post-processor is purely textual to avoid the namespace headaches
     of round-tripping through ElementTree.  It only touches elements
-    whose id appears in ``appear_steps``; everything else passes through
+    whose id appears in ``appear_meta``; everything else passes through
     byte-identically.
     """
-    if not appear_steps:
+    if not appear_meta:
         return svg
 
-    def _animate_tag(step: int) -> str:
-        delay = step * step_duration
+    now = time.time()
+    # Buffer past fade end before we drop the <animate>.  Keeps the
+    # animation in place during a brief window after completion in case
+    # the browser is still in the middle of one frame, but doesn't keep
+    # it indefinitely.
+    settled_buffer = 0.05
+
+    def _animate_tag(begin_s: float) -> str:
         return (
             f'<animate attributeName="opacity" from="0" to="1" '
-            f'begin="{delay:g}s" dur="{fade_duration:g}s" fill="freeze"/>'
+            f'begin="{begin_s:g}s" dur="{fade_duration:g}s" fill="freeze"/>'
         )
 
     def _replace(m: _re.Match) -> str:
         idval = m.group("idval")
-        if idval not in appear_steps:
+        meta = appear_meta.get(idval)
+        if meta is None:
             return m.group(0)
-        step = appear_steps[idval]
+        batch_t, step = meta
+        # Absolute begin: when, on the wall-clock, this element should
+        # *start* fading in.  Subtract `now` to make it relative to the
+        # SVG's new load time so SMIL plays it correctly post-replace.
+        begin_s = (batch_t + step * step_duration) - now
+        # Already faded long ago — emit no animation; element renders
+        # fully opaque on load.  This is the line that kills the blink.
+        if begin_s + fade_duration <= -settled_buffer:
+            return m.group(0)
         tag = m.group("tag")
         head = m.group("head")
         idkey = m.group("idkey")
@@ -563,7 +608,7 @@ def _apply_fade_in(
         if is_self_closing:
             # Wrap the entire self-closing element in a fading <g>.
             return (
-                f'<g style="opacity:0">{_animate_tag(step)}{original_open}</g>'
+                f'<g style="opacity:0">{_animate_tag(begin_s)}{original_open}</g>'
             )
         # Container element — patch style on the existing tag and inject
         # the <animate> as a first child.
@@ -580,7 +625,7 @@ def _apply_fade_in(
             head_to_use, tail_to_use = head, f'{tail} style="opacity:0"'
         return (
             f'<{tag}{head_to_use} data-{idkey}="{idval}"{tail_to_use}>'
-            f'{_animate_tag(step)}'
+            f'{_animate_tag(begin_s)}'
         )
 
     return _OPEN_TAG_RE.sub(_replace, svg)
