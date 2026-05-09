@@ -378,12 +378,66 @@ def _place_captions_in_margins(
         canvas_w, canvas_h, fig_xmin, fig_xmax, fig_ymin, fig_ymax, label_strip_h, pad,
     )
 
+    # Available pixel space in each canvas margin, computed once so we
+    # can reroute captions whose requested anchor doesn't fit.
+    margin_space = {
+        "above":  max(0.0, fig_ymin - (pad + label_strip_h)),
+        "below":  max(0.0, (canvas_h - pad) - fig_ymax),
+        "left":   max(0.0, fig_xmin - pad),
+        "right":  max(0.0, (canvas_w - pad) - fig_xmax),
+    }
+
+    def _anchor_fits(anc: str, vs: VisualShape) -> bool:
+        """True iff caption fits in this margin WITHOUT being clamped
+        into the figure."""
+        if anc in ("above", "top", "below", "bottom"):
+            # Vertical margin — caption height must fit.
+            return margin_space[anc.replace("top", "above").replace("bottom", "below")] >= vs.height + gap
+        if anc in ("left", "right"):
+            # Horizontal margin — caption width must fit.
+            return margin_space[anc] >= vs.width + gap
+        return True
+
+    def _best_alt_anchor(vs: VisualShape) -> str:
+        """When the requested anchor doesn't fit, pick the largest
+        margin that does."""
+        order = ["below", "above", "right", "left"]
+        candidates = [a for a in order if _anchor_fits(a, vs)]
+        if candidates:
+            # Prefer the one with most room.
+            return max(candidates, key=lambda a: margin_space[
+                "above" if a in ("above", "top") else
+                "below" if a in ("below", "bottom") else a
+            ])
+        # No margin can hold it — return the largest one and let the
+        # caller shrink the caption to fit.
+        return max(margin_space.keys(), key=lambda k: margin_space[k])
+
     out: list[tuple[VisualShape, float, float]] = []
     for vs in captions:
         m = vs.meta
         anchor = (m.get("anchor") or "auto").lower()
         if anchor == "auto":
             anchor = auto_margin
+
+        # Reroute when the requested anchor would force the caption
+        # to overlap the figure (i.e. canvas would clamp it inward).
+        if anchor not in ("overlay",) and not _anchor_fits(anchor, vs):
+            new_anchor = _best_alt_anchor(vs)
+            # If still doesn't fit, shrink width so the caption
+            # *does* fit and just wraps to more lines.
+            if not _anchor_fits(new_anchor, vs):
+                avail = margin_space[
+                    "above" if new_anchor in ("above", "top") else
+                    "below" if new_anchor in ("below", "bottom") else new_anchor
+                ]
+                if new_anchor in ("left", "right"):
+                    vs.width = max(80.0, avail - gap - 4)
+                else:
+                    # Top/bottom: cut height by halving the displayed
+                    # text — render layer wraps the long string.
+                    vs.height = max(28.0, avail - gap - 4)
+            anchor = new_anchor
 
         # Math anchor → canvas-px (used as leader endpoint).
         if "x" in m and "y" in m:
