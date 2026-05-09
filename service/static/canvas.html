@@ -254,9 +254,12 @@
       stage.classList.add('pulse');
       // Re-apply highlight on the (just-replaced) element if narration
       // is currently playing; the previous highlight reference died with
-      // the old DOM tree.
+      // the old DOM tree.  Same for the reveal mask: hide elements
+      // gated by upcoming narration phrases on every re-render.
       activePhraseIndex = -1;
+      applyRevealMask();
       tickHighlight();
+      tickReveal();
     }
     if (state.revision !== undefined) revEl.textContent = state.revision;
     if (state.node_count !== undefined) nodesEl.textContent = state.node_count;
@@ -296,6 +299,8 @@
       narration.duration_s === manifest.duration_s
     );
     narration = manifest;
+    rebuildRevealMap(manifest);
+    applyRevealMask();
     if (!sameAsCurrent) {
       // Cache-bust the audio src so the browser refetches when a new
       // narration is generated mid-session.
@@ -314,6 +319,57 @@
         userInteracted = true;
         overlay.classList.add('hidden');
       }).catch(() => overlay.classList.remove('hidden'));
+    }
+  }
+
+  // ── Narration-synced reveal ──────────────────────────────────────────
+  // Build a map id → first start_s where this id is highlighted.  Any
+  // element with a revealAt entry stays opacity:0 until its phrase
+  // begins; everything else (axes, decorations, captions without a
+  // matching phrase) is visible from the start.  This replaces the
+  // fixed-0.4s SMIL stagger with audio-locked timing — the figure
+  // builds itself in lockstep with the spoken explanation.
+  let revealAt = {};   // id -> seconds
+  let revealed = {};   // id -> true once the element has been shown
+
+  function rebuildRevealMap(manifest) {
+    revealAt = {};
+    revealed = {};
+    if (!manifest || !manifest.phrases) return;
+    for (const p of manifest.phrases) {
+      const id = p.highlight;
+      if (id && !(id in revealAt)) {
+        revealAt[id] = p.start_s;
+      }
+    }
+  }
+
+  function applyRevealMask() {
+    // Hide every element that is gated by narration but hasn't been
+    // revealed yet.  Reset on every SVG re-render (innerHTML replace).
+    for (const id of Object.keys(revealAt)) {
+      if (revealed[id]) continue;
+      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"]`;
+      stage.querySelectorAll(sel).forEach(el => {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.35s ease-out';
+      });
+    }
+  }
+
+  function tickReveal() {
+    // Called every audio.timeupdate.  Walk the revealAt map and turn
+    // on any element whose phrase has started.
+    if (!narration) return;
+    const t = audio.currentTime;
+    for (const [id, start] of Object.entries(revealAt)) {
+      if (revealed[id]) continue;
+      if (t < start) continue;
+      revealed[id] = true;
+      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"]`;
+      stage.querySelectorAll(sel).forEach(el => {
+        el.style.opacity = '1';
+      });
     }
   }
 
@@ -349,7 +405,7 @@
     applyHighlight(idx >= 0 ? narration.phrases[idx].highlight : null);
   }
 
-  audio.addEventListener('timeupdate', tickHighlight);
+  audio.addEventListener('timeupdate', () => { tickHighlight(); tickReveal(); });
   audio.addEventListener('ended', () => {
     activePhraseIndex = -1;
     clearHighlight();

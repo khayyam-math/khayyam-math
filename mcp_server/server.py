@@ -384,7 +384,13 @@ def sevim_add_node(
     canvas_id: str | None = None,
     meta_extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Append a node directly to the canvas, bypassing S2 extraction.
+    """Append ONE node.  Prefer ``sevim_apply`` with batched ops when adding
+    more than one node in this turn — every individual call costs you
+    ~3-10 s of JSON-args generation time, and the user feels every second.
+
+    USE THIS TOOL ONLY WHEN: you are adding a single afterthought node
+    after the bulk figure is already built.  Otherwise put the node into
+    the next ``sevim_apply`` call as ``{"op":"add_node", "label":..., ...}``.
 
     Args:
         label: Display label.  IDs are derived from this (slugified) so
@@ -437,7 +443,12 @@ def sevim_add_edge(
     relation: str,
     canvas_id: str | None = None,
 ) -> dict[str, Any]:
-    """Append a directed edge between two existing nodes.
+    """Append ONE edge.  Prefer ``sevim_apply`` with batched ops when adding
+    multiple edges — each isolated call costs ~3-10 s of model time.
+
+    USE THIS TOOL ONLY WHEN: you are adding a single afterthought edge
+    after the bulk figure is already built.  Otherwise put it in the
+    next ``sevim_apply`` call as ``{"op":"add_edge", "src_id":..., "dst_id":..., "relation":...}``.
 
     Args:
         src_id: Source node id (from sevim_add_node or sevim_describe).
@@ -469,7 +480,17 @@ def sevim_add_caption(
     anchor: str = "auto",
     canvas_id: str | None = None,
 ) -> dict[str, Any]:
-    """Add an in-canvas caption — explanatory text that sits in the canvas
+    """Add ONE caption.  STRONGLY prefer ``sevim_apply`` with batched ops
+    when you have several captions to add — each isolated call costs ~3-10 s
+    of model time you spend writing the JSON, and captions almost always
+    come in groups.
+
+    USE THIS TOOL ONLY WHEN: you are adding a single afterthought caption
+    after the figure and other captions are built.  In every other case,
+    put it in the next ``sevim_apply`` as
+    ``{"op":"add_caption", "text":..., "x":..., "y":..., "anchor":...}``.
+
+    An in-canvas caption is explanatory text that sits in the canvas
     margin with a leader line back to the figure piece it explains.
 
     **Captions never overlay the figure.**  In math_mode the caption is
