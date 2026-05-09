@@ -451,6 +451,25 @@ class CanvasRegistry:
         with self._lock:
             return [c.snapshot() for c in self._canvases.values()]
 
+    def latest_active(self, exclude: str | None = None) -> Canvas | None:
+        """Return the canvas with the highest ``updated_at``, or None.
+
+        Used to route tool calls that omit ``canvas_id`` to the canvas
+        the LLM was most recently working on, instead of silently
+        creating a fresh "default" canvas with mismatched settings
+        (math_mode/animate).  ``exclude`` skips a specific id, typically
+        the literal ``"default"`` so we only consider user-opened
+        canvases.
+        """
+        with self._lock:
+            candidates = [
+                c for cid, c in self._canvases.items()
+                if cid != exclude
+            ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda c: c.updated_at)
+
 
 # Module-level singleton — shared by mcp_server.server and service.app.
 REGISTRY = CanvasRegistry()
