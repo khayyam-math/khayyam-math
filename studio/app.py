@@ -28,12 +28,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from service.canvas import REGISTRY, Canvas
+from studio.digest import digest_for_agent, text_digest
 
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -301,3 +302,107 @@ def studio_index() -> HTMLResponse:
     if not html_path.exists():
         raise HTTPException(500, "studio.html missing")
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — canvas-state digest + realtime bridge stub
+# ---------------------------------------------------------------------------
+
+@router.get("/canvas/{cid}/digest")
+def canvas_digest(cid: str, include_png: bool = False) -> dict[str, Any]:
+    """Compact summary the realtime tutor receives every turn.
+
+    The realtime agent sees this on every conversation turn so it
+    knows what the user is currently looking at — without needing
+    to re-call sevim_review.  Lightweight: ~1-3 KB of text plus an
+    optional 5-30 KB PNG when vision is wanted.
+    """
+    try:
+        c = REGISTRY.get(cid)
+    except KeyError:
+        raise HTTPException(404, f"canvas {cid!r} not found")
+    return digest_for_agent(c, include_png=include_png)
+
+
+@router.websocket("/realtime/{cid}")
+async def realtime_bridge(ws: WebSocket, cid: str):
+    """Bidirectional bridge for realtime voice+canvas tutoring.
+
+    Architecture (when wired to a real backend):
+
+        Browser (mic + speaker)
+            ⇅ WebSocket (PCM16 frames + tool deltas)
+        This bridge
+            ⇅ WebSocket (vendor realtime API: OpenAI / Anthropic when shipped)
+        Realtime model
+            ⇅ tool calls
+        CanvasRegistry mutations + canvas digest on every turn
+
+    Current status: STUB.  Logs that a client connected, sends back
+    the canvas digest, and echoes pings.  Concrete realtime-vendor
+    plumbing (PCM forwarding, function-call routing, audio response
+    streaming) is intentionally left out so this commit lands cleanly
+    without an OpenAI/Anthropic-realtime API key.
+
+    To productionise: implement ``_run_vendor_session`` to open a
+    second WebSocket to the vendor, forward audio frames in both
+    directions, intercept ``tool_call`` events and execute them via
+    ``_execute_tool`` (which already does the right thing for the
+    HTTP /studio/chat path), and push ``canvas-digest`` to the
+    vendor session whenever ``REGISTRY.get(cid).revision`` changes.
+    """
+    await ws.accept()
+    try:
+        c = REGISTRY.get(cid)
+    except KeyError:
+        await ws.send_json({"type": "error", "message": f"canvas {cid!r} not found"})
+        await ws.close()
+        return
+
+    last_revision = -1
+    try:
+        # Initial digest so the agent can introduce the figure.
+        await ws.send_json({
+            "type": "canvas_digest",
+            "digest": digest_for_agent(c, include_png=False),
+        })
+
+        while True:
+            # Push a fresh digest whenever the canvas changes.
+            with c.lock:
+                rev = c.revision
+            if rev != last_revision:
+                last_revision = rev
+                await ws.send_json({
+                    "type": "canvas_digest",
+                    "digest": digest_for_agent(c, include_png=False),
+                })
+
+            # Echo any client message — placeholder for vendor
+            # round-trips.  Real implementation routes audio frames
+            # to the vendor and tool calls to _execute_tool.
+            try:
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            kind = msg.get("type")
+            if kind == "ping":
+                await ws.send_json({"type": "pong"})
+            elif kind == "user_text":
+                # In the real bridge this would be vendor-streamed
+                # audio.  Here we just acknowledge for development.
+                await ws.send_json({
+                    "type": "agent_turn",
+                    "text": (
+                        "[realtime stub] would stream audio reply for: "
+                        + str(msg.get("text", ""))[:160]
+                    ),
+                })
+            elif kind == "tool_call":
+                try:
+                    out = _execute_tool(msg["name"], msg.get("input") or {})
+                    await ws.send_json({"type": "tool_result", "result": out})
+                except Exception as exc:  # noqa: BLE001
+                    await ws.send_json({"type": "tool_error", "error": str(exc)})
+    except WebSocketDisconnect:
+        return
