@@ -370,12 +370,16 @@ class Canvas:
             if tgt and tgt not in existing_ids:
                 unknown.append(tgt)
         # Prepend the transition phrase (same voice = same speaker).
-        full_script: list[dict] = []
-        if self.transition_text:
-            full_script.append({
-                "speak": self.transition_text,
-                "highlight": None,
-            })
+        # Defaults to a sensible English phrase if neither sevim_open
+        # nor the canvas was set with one.
+        transition = (
+            self.transition_text
+            or "And now please look at the diagram."
+        )
+        full_script: list[dict] = [{
+            "speak": transition,
+            "highlight": None,
+        }]
         full_script.extend(script)
         narr_dir = _narration_dir(self.canvas_id)
         narr_dir.mkdir(parents=True, exist_ok=True)
