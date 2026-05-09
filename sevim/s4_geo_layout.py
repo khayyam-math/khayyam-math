@@ -118,12 +118,34 @@ def geometric_layout(
 
     # ---------- C2: extend bboxes to include label rectangles ----------
     # Captions are placed in canvas margins computed from these bboxes.
-    # If we only count the dot positions, the area where the labels live
-    # looks empty to the caption placer and a caption lands on top of
-    # the labels.  Extending each point's bbox to include its label
-    # rectangle pushes captions to truly empty margins.
+    # Without this, the area where labels live looks empty to the
+    # caption placer and a caption lands on top of the labels.
+    # Each point gets its label rect added (using the side picked by C1).
+    # Other labeled shapes (segments with measurement labels, etc.) get
+    # a generous label rect placed nearby — too generous is fine, the
+    # only failure mode is captions getting pushed slightly farther
+    # out than strictly necessary.
     for vs, cx_canvas, cy_canvas in point_records:
         geom_bboxes.append(_label_bbox(vs, cx_canvas, cy_canvas))
+    for vs in geom_shapes:
+        if vs.primitive == "point" or not (vs.label or "").strip():
+            continue
+        # Roughly: the label sits along/near the shape; reserve a small
+        # halo around its bbox.  The halo accounts for the label being
+        # rendered just outside the shape on most primitives.
+        center = centers.get(vs.nid)
+        if center is None:
+            continue
+        cx_c, cy_c = center
+        lw, lh = _label_dims(vs)
+        halo = 6.0
+        # Centre the label rect on the shape — coarse but safe.
+        geom_bboxes.append((
+            cx_c - lw / 2 - halo,
+            cy_c - lh / 2 - halo,
+            lw + 2 * halo,
+            lh + 2 * halo,
+        ))
 
     # ---------- place label shapes in the top strip ----------
     if label_shapes:
@@ -345,7 +367,10 @@ def _place_captions_in_margins(
         "left":   pad + label_strip_h,       # y advancing downward in left strip
         "right":  pad + label_strip_h,       # y advancing downward in right strip
     }
-    gap = 8.0
+    # Pixel separation between the figure bbox and a caption stacked in
+    # a margin.  Bumped from 8 → 18 so labels and captions never visually
+    # touch even with tight margins.
+    gap = 18.0
 
     # Decide auto-margin once for the whole batch — captions on the same
     # figure should cluster on the same side rather than ping-ponging.
@@ -419,6 +444,24 @@ def _place_captions_in_margins(
             vs.meta["leader_to_canvas"] = (ax, ay)
 
         out.append((vs, ps_x, ps_y))
+
+    # Post-pass: when caption A's leader endpoint would land *inside*
+    # another caption B's box (common when several captions stack in
+    # the same margin), the small filled dot at the leader end shows
+    # up as a stray dot inside B's text.  Suppress those endpoints —
+    # the leader line still points the way; only the redundant marker
+    # is dropped.
+    for i, (vs_a, _, _) in enumerate(out):
+        endpoint = vs_a.meta.get("leader_to_canvas")
+        if not (isinstance(endpoint, (tuple, list)) and len(endpoint) == 2):
+            continue
+        ex, ey = float(endpoint[0]), float(endpoint[1])
+        for j, (vs_b, bx, by) in enumerate(out):
+            if i == j:
+                continue
+            if _point_inside((ex, ey), bx, by, vs_b.width, vs_b.height):
+                vs_a.meta["leader_endpoint_suppressed"] = True
+                break
 
     return out
 
