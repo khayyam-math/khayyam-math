@@ -47,6 +47,17 @@ from sevim.s3_map import _RELATION_PATTERN  # noqa: E402
 
 from .canvas import REGISTRY  # noqa: E402
 
+# Studio router (Tier 2): direct-to-Anthropic voice tutor surface.
+# Imported lazily after REGISTRY so the studio module sees the same
+# singleton as the MCP path.
+try:
+    from studio.app import router as _studio_router
+    _STUDIO_AVAILABLE = True
+except Exception as _exc:  # noqa: BLE001 — studio is optional
+    _studio_router = None
+    _STUDIO_AVAILABLE = False
+    _STUDIO_IMPORT_ERROR = str(_exc)
+
 
 app = FastAPI(
     title="SeVim",
@@ -55,6 +66,9 @@ app = FastAPI(
                 "surface used by the MCP plugin's live viewer.",
     version="0.2.0",
 )
+
+if _STUDIO_AVAILABLE:
+    app.include_router(_studio_router)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 

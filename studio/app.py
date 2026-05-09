@@ -1,0 +1,303 @@
+"""Sevim Studio backend — direct-to-Anthropic chat with sevim tools.
+
+Mounted into the main FastAPI app at ``/studio/*``.  Endpoints:
+
+  GET  /studio                serve the SPA
+  POST /studio/chat           one-shot chat turn (streaming SSE response)
+  POST /studio/canvas/new     spawn a fresh studio canvas
+  GET  /studio/health         API key configured? piper available?
+
+The chat endpoint loops Claude's tool-use turns server-side: the
+client sends one user message, the server pumps the multi-step
+tool-use conversation with Anthropic until Claude returns a stop
+reason, streaming text deltas back to the client as SSE events.
+Tool calls execute against the same CanvasRegistry singleton the
+MCP path uses, so the canvas in Studio is the *same* canvas the
+MCP server's viewer would show.
+
+Required env var: ``ANTHROPIC_API_KEY``.
+Optional env var: ``SEVIM_STUDIO_MODEL`` (default ``claude-opus-4-7``).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import secrets
+from pathlib import Path
+from typing import Any
+
+import httpx
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+
+from service.canvas import REGISTRY, Canvas
+
+
+_STATIC = Path(__file__).resolve().parent / "static"
+_DEFAULT_MODEL = "claude-opus-4-7"
+_API_URL = "https://api.anthropic.com/v1/messages"
+
+router = APIRouter(prefix="/studio")
+
+
+# ---------------------------------------------------------------------------
+# Tool schemas — wire sevim ops into Anthropic tool-use definitions.
+# ---------------------------------------------------------------------------
+
+TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "sevim_open",
+        "description": (
+            "Open a new diagram canvas.  Pass intro=... so the user "
+            "hears a 1-2 sentence introduction immediately while you "
+            "write the build calls."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "math_mode": {"type": "boolean"},
+                "animate": {"type": "boolean"},
+                "intro": {"type": "string"},
+                "width": {"type": "integer"},
+                "height": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "sevim_apply",
+        "description": (
+            "Batched mutation: apply many ops in one round-trip.  "
+            "Each op is {op: 'add_node'|'add_edge'|'add_caption'|"
+            "'remove'|'describe', ...}."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string"},
+                "ops": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["canvas_id", "ops"],
+        },
+    },
+    {
+        "name": "sevim_narrate",
+        "description": "Generate phrase-timed voice narration for the current figure.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string"},
+                "script": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "speak": {"type": "string"},
+                            "highlight": {"type": "string"},
+                        },
+                        "required": ["speak"],
+                    },
+                },
+            },
+            "required": ["canvas_id", "script"],
+        },
+    },
+]
+
+
+def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Translate an Anthropic tool_use call into a CanvasRegistry mutation."""
+    if name == "sevim_open":
+        c = REGISTRY.open(
+            canvas_id=args.get("canvas_id"),
+            math_mode=bool(args.get("math_mode", False)),
+            animate=bool(args.get("animate", False)),
+            width=int(args.get("width", 700)),
+            height=int(args.get("height", 440)),
+        )
+        intro = (args.get("intro") or "").strip()
+        if intro:
+            with c.lock:
+                c.intro_text = intro
+                c.revision += 1
+            try:
+                c.intro(intro)
+            except Exception:  # noqa: BLE001 — Web Speech still covers
+                pass
+        return {
+            "canvas_id": c.canvas_id,
+            "view_url": f"/canvas/{c.canvas_id}/view",
+            "intro_started": bool(intro),
+        }
+    if name == "sevim_apply":
+        cid = args.get("canvas_id")
+        if not cid:
+            raise ValueError("canvas_id required")
+        c = REGISTRY.get(cid)
+        results = []
+        for op in args.get("ops", []):
+            kind = op.get("op")
+            if kind == "add_node":
+                results.append(c.add_node(
+                    label=op["label"],
+                    kind=op.get("kind"),
+                    meta_extras=op.get("meta_extras"),
+                ))
+            elif kind == "add_edge":
+                results.append(c.add_edge(
+                    src_id=op["src_id"],
+                    dst_id=op["dst_id"],
+                    relation=op["relation"],
+                ))
+            elif kind == "add_caption":
+                meta = {k: op[k] for k in ("x", "y", "anchor") if k in op}
+                results.append(c.add_node(
+                    label=op["text"], kind="caption", meta_extras=meta,
+                ))
+            elif kind == "remove":
+                results.append(c.remove(op["ids"]))
+        return {"canvas_id": cid, "results": results}
+    if name == "sevim_narrate":
+        cid = args.get("canvas_id")
+        if not cid:
+            raise ValueError("canvas_id required")
+        c = REGISTRY.get(cid)
+        return c.narrate(args.get("script", []))
+    raise ValueError(f"unknown tool {name!r}")
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoint — streams Claude's response back to the browser.
+# ---------------------------------------------------------------------------
+
+class ChatTurn(BaseModel):
+    role: str          # "user" | "assistant"
+    content: str       # plain text
+
+
+class ChatReq(BaseModel):
+    history: list[ChatTurn] = []
+    user: str
+    canvas_id: str | None = None
+    model: str = _DEFAULT_MODEL
+
+
+SYSTEM_PROMPT = (
+    "You are a real-time visual tutor.  The user is watching a live "
+    "Sevim canvas in their browser; you build figures on it via the "
+    "sevim_* tools.\n\n"
+    "BATCH AGGRESSIVELY.  Use sevim_apply with all ops in a single "
+    "call rather than many add_node/add_edge calls.  A typical "
+    "figure should be 1-3 tool calls total.\n\n"
+    "On the FIRST response, ALWAYS call sevim_open with intro=... "
+    "so the user hears 1-2 sentences immediately while you write "
+    "the build calls.\n\n"
+    "Carry canvas_id explicitly through every tool call.\n\n"
+    "End with sevim_narrate for the phrase-timed walk-through."
+)
+
+
+@router.post("/chat")
+async def chat(req: ChatReq):
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not set on the studio server")
+
+    messages: list[dict[str, Any]] = []
+    for turn in req.history:
+        messages.append({"role": turn.role, "content": turn.content})
+    messages.append({"role": "user", "content": req.user})
+
+    async def event_stream():
+        # The server-side tool-use loop: keep pinging Anthropic until
+        # we get a stop_reason that isn't "tool_use".  Each tool call
+        # is executed locally and its result threaded back.
+        for _step in range(8):  # safety cap
+            payload = {
+                "model": req.model,
+                "max_tokens": 4096,
+                "system": SYSTEM_PROMPT,
+                "tools": TOOLS,
+                "messages": messages,
+            }
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    _API_URL,
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json=payload,
+                )
+            if resp.status_code != 200:
+                yield {"event": "error", "data": json.dumps({"detail": resp.text[:400]})}
+                return
+
+            result = resp.json()
+            content = result.get("content", [])
+            tool_uses: list[dict[str, Any]] = []
+
+            for block in content:
+                if block.get("type") == "text":
+                    yield {"event": "text", "data": json.dumps({"text": block["text"]})}
+                elif block.get("type") == "tool_use":
+                    tool_uses.append(block)
+                    yield {"event": "tool_call", "data": json.dumps({
+                        "name": block["name"],
+                        "args_keys": list((block.get("input") or {}).keys()),
+                    })}
+
+            stop = result.get("stop_reason")
+            messages.append({"role": "assistant", "content": content})
+
+            if stop != "tool_use" or not tool_uses:
+                yield {"event": "done", "data": json.dumps({"stop_reason": stop})}
+                return
+
+            # Execute tools and append the tool_result blocks.
+            tool_results = []
+            for tu in tool_uses:
+                try:
+                    out = _execute_tool(tu["name"], tu.get("input") or {})
+                    body = json.dumps(out)
+                except Exception as exc:  # noqa: BLE001
+                    body = json.dumps({"error": str(exc)})
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tu["id"],
+                    "content": body,
+                })
+                yield {"event": "tool_result", "data": body}
+            messages.append({"role": "user", "content": tool_results})
+
+        yield {"event": "done", "data": json.dumps({"stop_reason": "max_steps"})}
+
+    return EventSourceResponse(event_stream())
+
+
+@router.post("/canvas/new")
+def new_canvas() -> dict[str, str]:
+    """Spawn a fresh canvas owned by Studio (random id, math_mode, animate)."""
+    cid = "studio_" + secrets.token_hex(3)
+    c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=True, width=820, height=520)
+    return {"canvas_id": c.canvas_id, "view_url": f"/canvas/{c.canvas_id}/view"}
+
+
+@router.get("/health")
+def health() -> dict[str, Any]:
+    return {
+        "api_key_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "model": os.environ.get("SEVIM_STUDIO_MODEL", _DEFAULT_MODEL),
+    }
+
+
+@router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
+def studio_index() -> HTMLResponse:
+    html_path = _STATIC / "studio.html"
+    if not html_path.exists():
+        raise HTTPException(500, "studio.html missing")
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))

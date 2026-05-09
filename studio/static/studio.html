@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sevim Studio — visual tutor</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #222; --muted: #777; --accent: #2a6df4;
+    --border: #e0e0e0; --user-bg: #eef3ff; --asst-bg: #f4f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1a1a; --fg: #eee; --muted: #999;
+            --border: #333; --user-bg: #1e2a47; --asst-bg: #222428; }
+  }
+  html, body { margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .layout { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
+  .chat { border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; }
+  .chat-header { padding: 0.75em 1em; border-bottom: 1px solid var(--border);
+    font-size: 0.9em; display: flex; gap: 0.6em; align-items: center; }
+  .chat-header .title { font-weight: 600; }
+  .chat-header .status { color: var(--muted); font-size: 0.8em; margin-left: auto; }
+  .chat-log { flex: 1; overflow-y: auto; padding: 0.6em 0.8em;
+    display: flex; flex-direction: column; gap: 0.6em; }
+  .msg { padding: 0.6em 0.8em; border-radius: 8px; line-height: 1.4;
+    font-size: 0.9em; max-width: 95%; word-wrap: break-word; }
+  .msg.user { background: var(--user-bg); align-self: flex-end; }
+  .msg.asst { background: var(--asst-bg); align-self: flex-start; }
+  .msg.tool { background: transparent; color: var(--muted); font-size: 0.78em;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  .input-row { display: flex; gap: 0.4em; padding: 0.6em;
+    border-top: 1px solid var(--border); }
+  .input-row textarea { flex: 1; resize: none; padding: 0.5em;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--fg); font: inherit;
+    min-height: 2.4em; max-height: 8em; }
+  .input-row button {
+    padding: 0 0.9em;
+    border: none; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: white; font: inherit;
+  }
+  .input-row button:disabled { opacity: 0.5; cursor: default; }
+  .input-row button.mic { background: transparent; color: var(--accent);
+    border: 1px solid var(--accent); }
+  .input-row button.mic.recording {
+    background: #ef4444; border-color: #ef4444; color: white;
+    animation: pulse-mic 0.9s infinite;
+  }
+  @keyframes pulse-mic {
+    0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+    50%     { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+  }
+  .canvas-pane { display: flex; flex-direction: column; }
+  .canvas-pane iframe { flex: 1; border: 0; width: 100%; }
+  .placeholder { display: flex; align-items: center; justify-content: center;
+    flex: 1; color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="chat">
+    <div class="chat-header">
+      <span class="title">Sevim Studio</span>
+      <span class="status" id="status">connecting…</span>
+    </div>
+    <div class="chat-log" id="log"></div>
+    <div class="input-row">
+      <button class="mic" id="mic-btn" type="button" title="Voice input">🎙</button>
+      <textarea id="input" placeholder="Ask me to draw something… (Enter to send)"></textarea>
+      <button id="send-btn" type="button">Send</button>
+    </div>
+  </aside>
+  <main class="canvas-pane">
+    <div class="placeholder" id="placeholder">
+      Ask a question to start. The canvas will appear here.
+    </div>
+    <iframe id="canvas-frame" style="display:none"></iframe>
+  </main>
+</div>
+<script>
+  // ── State ────────────────────────────────────────────────────────────
+  let canvasId = null;
+  let history = [];           // [{role, content}, ...]
+  const log = document.getElementById('log');
+  const status = document.getElementById('status');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('send-btn');
+  const micBtn = document.getElementById('mic-btn');
+  const frame = document.getElementById('canvas-frame');
+  const placeholder = document.getElementById('placeholder');
+
+  // ── Health check ─────────────────────────────────────────────────────
+  fetch('/studio/health').then(r => r.json()).then(h => {
+    if (!h.api_key_configured) {
+      status.textContent = 'no API key';
+      status.style.color = '#ef4444';
+    } else {
+      status.textContent = h.model;
+    }
+  });
+
+  // ── Logging utilities ────────────────────────────────────────────────
+  function appendMsg(role, text) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + role;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  // ── Voice input via Web Speech API ───────────────────────────────────
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null, recording = false;
+  if (SpeechRec) {
+    recog = new SpeechRec();
+    recog.continuous = false;
+    recog.interimResults = true;
+    recog.lang = 'en-US';
+    recog.onresult = (ev) => {
+      let txt = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        txt += ev.results[i][0].transcript;
+      }
+      input.value = txt;
+    };
+    recog.onend = () => {
+      recording = false;
+      micBtn.classList.remove('recording');
+      // Auto-send if there's text
+      if (input.value.trim()) sendMessage();
+    };
+    recog.onerror = (e) => {
+      console.warn('SpeechRecognition error', e);
+      recording = false;
+      micBtn.classList.remove('recording');
+    };
+  } else {
+    micBtn.disabled = true;
+    micBtn.title = 'Voice input not supported in this browser';
+  }
+  micBtn.addEventListener('click', () => {
+    if (!recog) return;
+    if (recording) { recog.stop(); return; }
+    recog.start();
+    recording = true;
+    micBtn.classList.add('recording');
+  });
+
+  // ── Voice output via Web Speech API ──────────────────────────────────
+  const synth = window.speechSynthesis;
+  function speak(text) {
+    if (!synth || !text) return;
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.rate = 1.0; utt.pitch = 1.0;
+    synth.speak(utt);
+  }
+
+  // ── Send loop ────────────────────────────────────────────────────────
+  async function sendMessage() {
+    const user = input.value.trim();
+    if (!user) return;
+    input.value = '';
+    input.disabled = true;
+    sendBtn.disabled = true;
+    appendMsg('user', user);
+
+    const asstEl = appendMsg('asst', '');
+    let asstText = '';
+    let speechBuf = '';
+
+    // Stream from /studio/chat
+    try {
+      const resp = await fetch('/studio/chat', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({history, user, canvas_id: canvasId}),
+      });
+      if (!resp.ok || !resp.body) {
+        asstEl.textContent = '(error: ' + resp.status + ')';
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {stream: true});
+        // SSE parser: split on "\n\n", parse "event: X\ndata: Y"
+        let parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let evt = 'message', data = '';
+          for (const ln of lines) {
+            if (ln.startsWith('event:')) evt = ln.slice(6).trim();
+            else if (ln.startsWith('data:')) data += ln.slice(5).trim();
+          }
+          if (!data) continue;
+          let payload;
+          try { payload = JSON.parse(data); } catch { continue; }
+          if (evt === 'text') {
+            asstText += payload.text;
+            asstEl.textContent = asstText;
+            speechBuf += payload.text;
+            // speak in sentence chunks for low latency
+            const m = speechBuf.match(/^(.*?[\.\!\?])\s+/s);
+            if (m) {
+              speak(m[1]);
+              speechBuf = speechBuf.slice(m[0].length);
+            }
+          } else if (evt === 'tool_call') {
+            const tEl = document.createElement('div');
+            tEl.className = 'msg tool';
+            tEl.textContent = '→ ' + payload.name + '(' + payload.args_keys.join(',') + ')';
+            log.insertBefore(tEl, asstEl);
+            log.scrollTop = log.scrollHeight;
+          } else if (evt === 'tool_result') {
+            try {
+              const r = JSON.parse(data);
+              if (r.canvas_id && r.canvas_id !== canvasId) {
+                canvasId = r.canvas_id;
+                placeholder.style.display = 'none';
+                frame.style.display = 'block';
+                frame.src = '/canvas/' + canvasId + '/view';
+              }
+            } catch {}
+          } else if (evt === 'done') {
+            if (speechBuf.trim()) speak(speechBuf);
+            history.push({role: 'user', content: user});
+            history.push({role: 'assistant', content: asstText});
+          } else if (evt === 'error') {
+            asstEl.textContent = '(error: ' + (payload.detail || 'unknown') + ')';
+          }
+        }
+      }
+    } catch (e) {
+      asstEl.textContent = '(error: ' + e.message + ')';
+    } finally {
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  input.focus();
+</script>
+</body>
+</html>
