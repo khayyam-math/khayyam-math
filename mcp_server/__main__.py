@@ -45,19 +45,32 @@ from .server import configure, get_default_host, get_default_port, mcp, run_stdi
 
 
 def _pick_port(host: str, preferred: int) -> int:
-    """Return ``preferred`` if free, else an OS-assigned free port."""
+    """Return ``preferred`` if free; refuse with an actionable message otherwise.
+
+    Why we don't fall back to a random port any more:
+    Chrome's autoplay permission is per-origin.  ``127.0.0.1:7777`` and
+    ``127.0.0.1:33629`` are *different* origins as far as the browser
+    is concerned, so a fresh random port forces the user to click the
+    "Play narration" overlay every session.  Pinning the port lets the
+    browser remember the permission once.
+
+    Override the preferred port via ``SEVIM_HTTP_PORT`` if you really
+    need a different one — but use a stable value, not 0.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind((host, preferred))
         s.close()
         return preferred
     except OSError:
         s.close()
-    s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s2.bind((host, 0))
-    port = s2.getsockname()[1]
-    s2.close()
-    return port
+    raise SystemExit(
+        f"[sevim-mcp] viewer port {preferred} on {host} is already bound.\n"
+        f"  Another Sevim MCP subprocess is probably still running.  "
+        f"Kill it with:  pkill -f 'python -m mcp_server'  "
+        f"or set SEVIM_HTTP_PORT to a different stable port and restart."
+    )
 
 
 def _preheat_heavy_modules() -> None:
