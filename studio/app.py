@@ -239,49 +239,115 @@ async def chat(req: ChatReq):
     messages.append({"role": "user", "content": req.user})
 
     async def event_stream():
-        # The server-side tool-use loop: keep pinging Anthropic until
-        # we get a stop_reason that isn't "tool_use".  Each tool call
-        # is executed locally and its result threaded back.
+        # STREAMING server-side tool-use loop: forward Anthropic's
+        # text + tool deltas as they arrive so the chat fills
+        # incrementally, instead of going silent for the full ~60 s
+        # generation per step.
         for _step in range(8):  # safety cap
             payload = {
                 "model": req.model,
-                # Generous output budget — a single sevim_apply call with
-                # 50+ ops plus a 20-phrase sevim_narrate script can be
-                # ~6-12 K output tokens.  4096 was getting cut mid-apply.
                 "max_tokens": 16384,
+                "stream": True,
                 "system": SYSTEM_PROMPT,
                 "tools": TOOLS,
                 "messages": messages,
             }
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    _API_URL,
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json=payload,
-                )
-            if resp.status_code != 200:
-                yield {"event": "error", "data": json.dumps({"detail": resp.text[:400]})}
+
+            content: list[dict[str, Any]] = []
+            stop = None
+            blocks: dict[int, dict[str, Any]] = {}
+
+            try:
+                async with httpx.AsyncClient(timeout=180) as client:
+                    async with client.stream(
+                        "POST",
+                        _API_URL,
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json=payload,
+                    ) as resp:
+                        if resp.status_code != 200:
+                            body = (await resp.aread()).decode(errors="replace")
+                            yield {"event": "error",
+                                   "data": json.dumps({"detail": body[:600]})}
+                            return
+                        async for raw in resp.aiter_lines():
+                            if not raw or not raw.startswith("data:"):
+                                continue
+                            data_str = raw[5:].strip()
+                            if not data_str:
+                                continue
+                            try:
+                                ev = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+                            etype = ev.get("type")
+                            if etype == "content_block_start":
+                                idx = ev.get("index", 0)
+                                cb = ev.get("content_block") or {}
+                                blocks[idx] = {
+                                    "type": cb.get("type"),
+                                    "id": cb.get("id"),
+                                    "name": cb.get("name"),
+                                    "text": "",
+                                    "partial_json": "",
+                                }
+                                if cb.get("type") == "tool_use":
+                                    yield {"event": "tool_call",
+                                           "data": json.dumps({
+                                               "name": cb.get("name"),
+                                               "args_keys": [],
+                                           })}
+                            elif etype == "content_block_delta":
+                                idx = ev.get("index", 0)
+                                delta = ev.get("delta") or {}
+                                blk = blocks.get(idx)
+                                if blk is None:
+                                    continue
+                                dtype = delta.get("type")
+                                if dtype == "text_delta":
+                                    chunk = delta.get("text", "")
+                                    blk["text"] += chunk
+                                    if chunk:
+                                        yield {"event": "text",
+                                               "data": json.dumps({"text": chunk})}
+                                elif dtype == "input_json_delta":
+                                    blk["partial_json"] += delta.get("partial_json", "")
+                            elif etype == "content_block_stop":
+                                idx = ev.get("index", 0)
+                                blk = blocks.get(idx)
+                                if blk is None:
+                                    continue
+                                if blk["type"] == "text":
+                                    content.append({"type": "text", "text": blk["text"]})
+                                elif blk["type"] == "tool_use":
+                                    try:
+                                        inp = json.loads(blk["partial_json"] or "{}")
+                                    except json.JSONDecodeError:
+                                        inp = {}
+                                    content.append({
+                                        "type": "tool_use",
+                                        "id": blk["id"],
+                                        "name": blk["name"],
+                                        "input": inp,
+                                    })
+                            elif etype == "message_delta":
+                                d = ev.get("delta") or {}
+                                if "stop_reason" in d:
+                                    stop = d["stop_reason"]
+                            elif etype == "error":
+                                yield {"event": "error",
+                                       "data": json.dumps(ev.get("error") or ev)}
+                                return
+            except Exception as exc:  # noqa: BLE001
+                yield {"event": "error",
+                       "data": json.dumps({"detail": f"stream failed: {exc}"})}
                 return
 
-            result = resp.json()
-            content = result.get("content", [])
-            tool_uses: list[dict[str, Any]] = []
-
-            for block in content:
-                if block.get("type") == "text":
-                    yield {"event": "text", "data": json.dumps({"text": block["text"]})}
-                elif block.get("type") == "tool_use":
-                    tool_uses.append(block)
-                    yield {"event": "tool_call", "data": json.dumps({
-                        "name": block["name"],
-                        "args_keys": list((block.get("input") or {}).keys()),
-                    })}
-
-            stop = result.get("stop_reason")
+            tool_uses = [b for b in content if b.get("type") == "tool_use"]
             messages.append({"role": "assistant", "content": content})
 
             # If we hit a non-tool-use stop reason, surface it.  The
