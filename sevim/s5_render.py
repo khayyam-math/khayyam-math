@@ -990,18 +990,33 @@ def _render_caption(ps: PlacedShape, stroke: str) -> str:
 
 
 def _render_point(ps: PlacedShape, stroke: str) -> str:
-    """Small filled disk + label below."""
+    """Small filled disk + label.
+
+    Label side is controlled by ``meta["label_side"]`` (one of
+    ``"below"`` (default), ``"above"``, ``"left"``, ``"right"``).  The
+    geometric layout pass picks the side per-point to avoid label/label
+    collisions at clustered coordinates.
+    """
     s = ps.shape
     cx = ps.x + s.width / 2
     cy = ps.y + s.height / 2
     r = min(s.width, s.height) * 0.25
-    label_y = cy + r + s.font_size
+    side = (s.meta.get("label_side") or "below").lower()
+    fs = s.font_size
+    if side == "above":
+        label_x, label_y, anchor = cx, cy - r - 4, "middle"
+    elif side == "left":
+        label_x, label_y, anchor = cx - r - 4, cy + fs * 0.35, "end"
+    elif side == "right":
+        label_x, label_y, anchor = cx + r + 4, cy + fs * 0.35, "start"
+    else:
+        label_x, label_y, anchor = cx, cy + r + fs, "middle"
     return (
         f'<g data-nid="{escape(s.nid)}">'
         f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" '
         f'fill="{stroke}" stroke="{stroke}" stroke-width="1"/>'
-        f'<text x="{cx:g}" y="{label_y:g}" font-size="{s.font_size:g}" '
-        f'font-family="serif" font-style="italic" text-anchor="middle" '
+        f'<text x="{label_x:g}" y="{label_y:g}" font-size="{fs:g}" '
+        f'font-family="serif" font-style="italic" text-anchor="{anchor}" '
         f'fill="#222">{escape(s.label)}</text>'
         f'</g>'
     )

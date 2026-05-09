@@ -98,6 +98,7 @@ def geometric_layout(
     placed_shapes: list[PlacedShape] = []
     centers: dict[str, tuple[float, float]] = {}
     geom_bboxes: list[tuple[float, float, float, float]] = []  # (x, y, w, h)
+    point_records: list[tuple[VisualShape, float, float]] = []  # (vs, cx, cy)
 
     for vs in geom_shapes:
         cx_canvas, cy_canvas, ps_x, ps_y = _place_geom_shape(
@@ -105,6 +106,24 @@ def geometric_layout(
         placed_shapes.append(PlacedShape(shape=vs, x=ps_x, y=ps_y))
         centers[vs.nid] = (cx_canvas, cy_canvas)
         geom_bboxes.append((ps_x, ps_y, vs.width, vs.height))
+        if vs.primitive == "point":
+            point_records.append((vs, cx_canvas, cy_canvas))
+
+    # ---------- C1: resolve point-label collisions ----------
+    # Each point label sits at a fixed offset from its dot.  When two
+    # points are coordinate-close (e.g. three vertices of a clause cluster
+    # in 3SAT → 3-clique), their default "below" labels stack and become
+    # unreadable.  Pick a non-colliding side per point in greedy order.
+    _assign_label_sides(point_records)
+
+    # ---------- C2: extend bboxes to include label rectangles ----------
+    # Captions are placed in canvas margins computed from these bboxes.
+    # If we only count the dot positions, the area where the labels live
+    # looks empty to the caption placer and a caption lands on top of
+    # the labels.  Extending each point's bbox to include its label
+    # rectangle pushes captions to truly empty margins.
+    for vs, cx_canvas, cy_canvas in point_records:
+        geom_bboxes.append(_label_bbox(vs, cx_canvas, cy_canvas))
 
     # ---------- place label shapes in the top strip ----------
     if label_shapes:
@@ -427,3 +446,100 @@ def _pick_auto_margin(
 def _point_inside(p, x: float, y: float, w: float, h: float) -> bool:
     px, py = p
     return x <= px <= x + w and y <= py <= y + h
+
+
+# ---------------------------------------------------------------------------
+# C1 / C2 — point-label collision avoidance + label-aware figure bboxes
+# ---------------------------------------------------------------------------
+
+# Per-character width estimate for italic-serif label text at the point's
+# font size.  Calibrated against the actual canvas font; off by ~10% for
+# very narrow ("i", "l") or very wide ("M", "W") characters but accurate
+# enough for collision detection.
+_LABEL_W_PER_CHAR = 0.55
+
+# Pixel padding around each label box used for collision detection.  A
+# little slack so labels never quite touch.
+_LABEL_PAD = 2.0
+
+
+def _label_dims(vs: VisualShape) -> tuple[float, float]:
+    """Estimate (width, height) of *vs*'s rendered point label, in canvas px."""
+    label = (vs.label or "").strip()
+    fs = float(vs.font_size or 14.0)
+    w = max(8.0, len(label) * _LABEL_W_PER_CHAR * fs)
+    h = fs + 2.0
+    return w, h
+
+
+def _label_rect_for_side(
+    vs: VisualShape, cx: float, cy: float, side: str,
+) -> tuple[float, float, float, float]:
+    """Bounding rect (x, y, w, h) of *vs*'s label when placed on *side* of
+    the dot at (cx, cy).  Mirrors the offsets in ``_render_point``."""
+    lw, lh = _label_dims(vs)
+    r = _POINT_PX * 0.25
+    fs = float(vs.font_size or 14.0)
+    if side == "above":
+        return (cx - lw / 2, cy - r - 4 - lh, lw, lh)
+    if side == "left":
+        return (cx - r - 4 - lw, cy - lh / 2 + fs * 0.35, lw, lh)
+    if side == "right":
+        return (cx + r + 4, cy - lh / 2 + fs * 0.35, lw, lh)
+    # default: below
+    return (cx - lw / 2, cy + r, lw, lh)
+
+
+def _rects_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (
+        ax + aw + _LABEL_PAD <= bx
+        or bx + bw + _LABEL_PAD <= ax
+        or ay + ah + _LABEL_PAD <= by
+        or by + bh + _LABEL_PAD <= ay
+    )
+
+
+def _assign_label_sides(
+    point_records: list[tuple[VisualShape, float, float]],
+) -> None:
+    """Greedy collision-resolver: pick a label side for each point so its
+    label rectangle does not overlap any previously-placed label.
+
+    Side preference order (per point): below, above, right, left.  For
+    points whose labels would still collide on every side, we accept
+    the least-bad choice (sticks with "below") rather than throwing.
+    """
+    if len(point_records) < 2:
+        if point_records:
+            point_records[0][0].meta.setdefault("label_side", "below")
+        return
+
+    placed: list[tuple[float, float, float, float]] = []
+    for vs, cx, cy in point_records:
+        chosen_side = "below"
+        chosen_rect: tuple[float, float, float, float] | None = None
+        for side in ("below", "above", "right", "left"):
+            rect = _label_rect_for_side(vs, cx, cy, side)
+            if not any(_rects_overlap(rect, p) for p in placed):
+                chosen_side = side
+                chosen_rect = rect
+                break
+        if chosen_rect is None:
+            chosen_rect = _label_rect_for_side(vs, cx, cy, "below")
+        vs.meta["label_side"] = chosen_side
+        placed.append(chosen_rect)
+
+
+def _label_bbox(
+    vs: VisualShape, cx: float, cy: float,
+) -> tuple[float, float, float, float]:
+    """Return the canvas-px bounding rect of *vs*'s label, using the side
+    chosen by ``_assign_label_sides``.  Used to expand the figure bbox
+    so caption placement avoids the label area."""
+    side = (vs.meta.get("label_side") or "below").lower()
+    return _label_rect_for_side(vs, cx, cy, side)
