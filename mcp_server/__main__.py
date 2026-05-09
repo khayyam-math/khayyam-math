@@ -60,6 +60,43 @@ def _pick_port(host: str, preferred: int) -> int:
     return port
 
 
+def _preheat_heavy_modules() -> None:
+    """Import + warm up modules that otherwise stall the first tool call.
+
+    Background-thread work, so the MCP ``initialize`` handshake responds
+    immediately while these load in parallel.  Each block is wrapped in a
+    broad try/except: missing-package or model-not-found situations
+    fall back to the same lazy-load paths the rest of Sevim already
+    handles, just at first-call instead of at startup.
+
+    Why each one matters
+    --------------------
+    * spaCy ``en_core_web_sm`` (~50–150 ms): used by ``_extract_dep`` in
+      sevim/s2_extract.py.  Loaded the first time the LLM calls
+      ``sevim_describe``.
+    * piper voice (~200–400 ms): mmaps the ONNX file in
+      sevim/narrate.py.  Loaded the first time the LLM calls
+      ``sevim_narrate``.
+    * cairosvg (~150 ms): SVG → PNG for ``sevim_review`` vision feedback.
+      Imported lazily inside mcp_server/server.py.
+    """
+    try:
+        from sevim.s2_extract import _get_nlp
+        _get_nlp()
+    except Exception:  # noqa: BLE001 — keep going on partial environments
+        pass
+    try:
+        from sevim.narrate import voice_available, _load_voice
+        if voice_available():
+            _load_voice()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import cairosvg  # noqa: F401 — import side-effect only
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _start_uvicorn(host: str, port: int) -> threading.Thread:
     """Start uvicorn (the canvas viewer) in a daemon thread."""
     config = uvicorn.Config(
@@ -121,6 +158,16 @@ def main() -> None:
         f"[sevim-mcp] live viewer at http://{viewer_host}:{viewer_port}/canvas/<id>/view",
         file=sys.stderr,
     )
+
+    # Warm heavy modules in a parallel daemon thread so the first
+    # sevim_describe / sevim_narrate / sevim_review doesn't pay an
+    # import + model-load cost.  The MCP ``initialize`` handshake runs
+    # below this line and is unblocked.
+    threading.Thread(
+        target=_preheat_heavy_modules,
+        name="sevim-preheat",
+        daemon=True,
+    ).start()
 
     if args.transport == "stdio":
         # Block on the MCP stdio transport until the host disconnects.
