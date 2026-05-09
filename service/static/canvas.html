@@ -186,31 +186,101 @@
   let webSpeakerActive = false;
   let lastSpokenIntro = null;
 
-  function speakViaWebSpeech(text) {
-    if (!synth || !text) return false;
+  // Default transition phrase spoken between the prelude and the
+  // figure-aligned narration.  Configurable via state.transition_text.
+  const DEFAULT_TRANSITION = "And now please look at the diagram.";
+
+  // Split long text into utterance-sized chunks so Chrome doesn't
+  // cut off after ~250 chars.  We split on sentence boundaries; if
+  // a single sentence is still too long, we hard-split at clause
+  // boundaries (commas).
+  function chunkForSpeech(text, maxLen = 220) {
+    const out = [];
+    const sentences = text.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [text];
+    for (const s of sentences) {
+      const trimmed = s.trim();
+      if (!trimmed) continue;
+      if (trimmed.length <= maxLen) {
+        out.push(trimmed);
+      } else {
+        // Long sentence — split on commas as fallback.
+        const clauses = trimmed.split(/, +/);
+        let buf = '';
+        for (const cl of clauses) {
+          if ((buf + ', ' + cl).length > maxLen && buf) {
+            out.push(buf);
+            buf = cl;
+          } else {
+            buf = buf ? (buf + ', ' + cl) : cl;
+          }
+        }
+        if (buf) out.push(buf);
+      }
+    }
+    return out;
+  }
+
+  // Speak a queue of chunks sequentially.  When the last chunk ends,
+  // call ``onAllDone``.  Tracks webSpeakerActive across the whole queue.
+  function speakChunkedViaWebSpeech(chunks, onAllDone) {
+    if (!synth || !chunks.length) {
+      if (onAllDone) onAllDone();
+      return false;
+    }
     try {
       synth.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
-      utt.onstart = () => { webSpeakerActive = true; };
-      utt.onend = () => {
+    } catch (e) {}
+
+    let i = 0;
+    webSpeakerActive = true;
+    const speakNext = () => {
+      if (i >= chunks.length) {
         webSpeakerActive = false;
         introPlayed = true;
-        // Chain into narration once the intro has finished speaking.
-        // Without this, the narration <audio> stays paused after Web
-        // Speech ends — the user thinks the narration is running but
-        // no timeupdate events fire, so no highlights ever appear.
+        if (onAllDone) onAllDone();
+        return;
+      }
+      const utt = new SpeechSynthesisUtterance(chunks[i]);
+      utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
+      utt.onend = () => { i += 1; speakNext(); };
+      utt.onerror = () => { i += 1; speakNext(); };
+      synth.speak(utt);
+    };
+    speakNext();
+    return true;
+  }
+
+  // Public: speak the prelude, then a short transition phrase, then
+  // hand off to the narration <audio>.  All in Web Speech so the
+  // prelude/transition autoplay (Chrome generally allows Web Speech
+  // on localhost without a gesture, even when <audio> is blocked).
+  function speakViaWebSpeech(text, transitionText) {
+    if (!synth || !text) return false;
+    const chunks = chunkForSpeech(text);
+    return speakChunkedViaWebSpeech(chunks, () => {
+      const t = (transitionText || DEFAULT_TRANSITION).trim();
+      if (!t || !narration) {
+        // No narration ready (yet) — try to start the audio anyway.
         if (narration && audio.src && audio.paused) {
           audio.play().then(() => { userInteracted = true; })
                       .catch(() => overlay.classList.remove('hidden'));
         }
+        return;
+      }
+      // Speak the transition phrase, then hand off to narration WAV.
+      webSpeakerActive = true;
+      const utt = new SpeechSynthesisUtterance(t);
+      utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
+      utt.onend = () => {
+        webSpeakerActive = false;
+        if (audio.src && audio.paused) {
+          audio.play().then(() => { userInteracted = true; })
+                      .catch(() => overlay.classList.remove('hidden'));
+        }
       };
+      utt.onerror = utt.onend;
       synth.speak(utt);
-      return true;
-    } catch (e) {
-      console.warn('Web Speech failed', e);
-      return false;
-    }
+    });
   }
 
   // ── Click-anywhere autoplay unlock ────────────────────────────────────
@@ -265,26 +335,17 @@
     if (state.updated_at) {
       updatedEl.textContent = new Date(state.updated_at * 1000).toLocaleTimeString();
     }
-    // ── Intro audio (two-stage) ──────────────────────────────────────
-    // Stage 1: as soon as we see intro_text, speak via the browser's
-    // built-in TTS — instant.  We don't wait for piper synthesis.
+    // ── Prelude → transition → narration pipeline ────────────────────
+    // The prelude (= state.intro_text) is the LONG problem+solution
+    // statement spoken via Web Speech immediately.  We chunk it into
+    // sentence-sized utterances (Chrome cuts off >250 chars).  After
+    // the last chunk, a transition phrase ("And now please look at
+    // the diagram.") plays, then the narration WAV takes over with
+    // phrase-aligned highlights.  The whole chain is autoplay-safe
+    // because Web Speech generally bypasses Chrome's <audio> block.
     if (state.intro_text && state.intro_text !== lastSpokenIntro && !webSpeakerActive) {
-      const ok = speakViaWebSpeech(state.intro_text);
+      const ok = speakViaWebSpeech(state.intro_text, state.transition_text);
       if (ok) lastSpokenIntro = state.intro_text;
-    }
-    // Stage 2: when piper's higher-quality intro is ready, queue it as
-    // an <audio> element so we can transition into the main narration
-    // smoothly via 'ended'.  If Web Speech is still talking, let it
-    // finish — its 'onend' triggers the narration handoff just like
-    // intro.wav 'ended' does.
-    if (state.has_intro) {
-      const url = `/canvas/${cid}/intro.wav`;
-      if (introLoaded !== url) {
-        intro.src = `${url}?t=${Date.now()}`;
-        intro.load();
-        introLoaded = url;
-        introPlayed = false;
-      }
     }
     // Narration arrived (or was updated)?
     if (state.narration && state.narration.phrases &&
