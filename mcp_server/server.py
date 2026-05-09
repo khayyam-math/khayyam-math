@@ -143,8 +143,35 @@ mcp = FastMCP(
         "by default), so DO NOT tell the user to click the view_url — it "
         "is already opening for them.  You may still mention the URL once "
         "for reference, but a single short line like 'I've opened the "
-        "canvas in your browser' is enough.  Prefer batched updates via "
-        "sevim_apply when adding multiple related elements."
+        "canvas in your browser' is enough."
+        "\n\n"
+        "**BATCH AGGRESSIVELY.**  Every individual mutation tool call costs "
+        "the user real wall-clock latency — not because Sevim is slow "
+        "(each call returns in <0.2 s) but because YOU spend 3–10 s "
+        "writing each call's JSON arguments.  Whenever you are about to "
+        "add 3 or more elements (nodes, edges, AND captions all count) "
+        "in the same logical step, put them in a single ``sevim_apply`` "
+        "call instead.  ``sevim_apply`` accepts a list of ops mixing "
+        "``add_node``, ``add_edge``, ``add_caption``, ``remove``, and "
+        "``describe`` — use it.  A typical math figure should take 1–3 "
+        "tool calls total: sevim_open, one sevim_apply with everything, "
+        "and sevim_review.  If you find yourself writing add_caption "
+        "five times in a row, stop and rewrite as one sevim_apply."
+        "\n\n"
+        "**Carry canvas_id.**  When you call any mutation tool after "
+        "sevim_open returns a canvas_id, pass that exact id back on "
+        "every subsequent call.  Without it, Sevim now routes to your "
+        "most recent canvas, but it is much safer to be explicit — "
+        "particularly across long conversations or multiple canvases."
+        "\n\n"
+        "**Keep the user engaged during long builds.**  Complex figures "
+        "take 30–120 s to build because of your own thinking time, not "
+        "Sevim's.  Cover the dead air with audio: right after sevim_open, "
+        "call ``sevim_intro(text=...)`` with one or two sentences "
+        "introducing what you're about to draw.  The browser plays the "
+        "intro immediately while you write the rest of the build calls.  "
+        "Then build the figure, then call ``sevim_narrate(script=...)`` "
+        "for the proper phrase-timed walk-through."
         "\n\n"
         "Closed-loop visual feedback: every mutation tool returns a "
         "`warnings` list when the algorithmic critic spots problems "
@@ -482,6 +509,53 @@ def sevim_apply(ops: list[dict[str, Any]], canvas_id: str | None = None) -> dict
         "node_count": snap["node_count"],
         "edge_count": snap["edge_count"],
     }
+
+
+@mcp.tool()
+def sevim_intro(
+    text: str,
+    canvas_id: str | None = None,
+) -> dict[str, Any]:
+    """Synthesise a short intro audio that plays immediately on canvas open.
+
+    Use right after sevim_open to fill the dead air while you are
+    still writing the figure-build calls.  The browser plays the
+    intro the moment it arrives; when ``sevim_narrate`` is later
+    called with the full phrase-timed script, the viewer transitions
+    from intro to main narration without a click.
+
+    Recommended length: one or two sentences (8-25 seconds when
+    spoken).  Long enough to cover your build latency, short enough
+    that the user is not stuck listening to filler.
+
+    Args:
+        text: One or two sentences introducing the figure you are about
+            to draw.  Plain prose; no highlight targets.  Example:
+            "Let's reduce 3SAT to Hamiltonian path.  I'll build the
+            variable diamond gadget first, then connect the clause
+            nodes."
+        canvas_id: Target canvas.  Omit to use the most-recently-opened
+            canvas.
+
+    Returns:
+        Summary with the synthesised intro's duration in seconds.
+    """
+    c = _get_or_default(canvas_id)
+    try:
+        result = c.intro(text)
+    except FileNotFoundError as e:
+        return {
+            "canvas_id": c.canvas_id,
+            "view_url": _Config.view_url(c.canvas_id),
+            "error": str(e),
+            "hint": (
+                "Download a piper voice model (default expected path: "
+                "~/.local/share/sevim/voices/en_US-lessac-medium.onnx + "
+                ".onnx.json) or set SEVIM_VOICE_MODEL to point at one."
+            ),
+        }
+    result["view_url"] = _Config.view_url(c.canvas_id)
+    return result
 
 
 @mcp.tool()
