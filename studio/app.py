@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -113,16 +113,27 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
-async def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+async def _execute_tool(
+    name: str,
+    args: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
     """Run the single Studio tool: ``sevim_express``.
 
     Loads any prior canvases the user is refining out of REGISTRY,
     delegates to ``express_figure`` for SVG generation + vision audit,
     then injects the resulting SVG and synthesises narration.
+
+    When ``session_id`` is provided AND telemetry is enabled, records
+    the turn (prompt, canvas, retries, cost) for later mining.
     """
     if name != "sevim_express":
         raise ValueError(f"unknown tool {name!r} — only sevim_express is exposed")
     from studio.express import express_figure
+    from sevim.telemetry import get_telemetry
+    from studio.sessions import estimate_express_cost
+    import time as _time
     prompt = (args.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("sevim_express requires a non-empty 'prompt'")
@@ -144,6 +155,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "prompt": pc.genesis_prompt or "",
             "narration": (pc.narration_manifest or {}).get("phrases") or [],
         })
+    t0 = _time.monotonic()
     result = await express_figure(
         user_prompt=prompt,
         base_url=_vllm_url(),
@@ -151,6 +163,7 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         api_key=os.environ.get("OPENAI_API_KEY"),
         context_canvases=context_canvases,
     )
+    duration_s = _time.monotonic() - t0
     cid = "express_" + secrets.token_hex(3)
     c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=False,
                       width=900, height=620)
@@ -158,15 +171,43 @@ async def _execute_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     c.genesis_prompt = prompt
     narration = result.get("narration") or []
     narrate_out = c.narrate(narration) if narration else {}
+    retries_used = result.get("retries_used", 0)
+    cost_estimate = estimate_express_cost(retries_used=retries_used)
+    review_history = result.get("review_history", [])
+    # Telemetry: record the turn (best-effort; never raises).
+    tel = get_telemetry()
+    if tel is not None and session_id:
+        turn_id = tel.record_turn(
+            session_id=session_id,
+            user_prompt=prompt,
+            canvas_id=c.canvas_id,
+            prior_canvas_ids=[pc["id"] for pc in context_canvases],
+            n_phrases=len(narration),
+            retries_used=retries_used,
+            review_history=review_history,
+            duration_s=duration_s,
+            cost_usd_estimate=cost_estimate,
+            intent="express",
+        )
+        tel.record_canvas(
+            canvas_id=c.canvas_id,
+            session_id=session_id,
+            turn_id=turn_id,
+            title=result.get("title", ""),
+            svg=result.get("svg", ""),
+            narration=narration,
+        )
     return {
         "canvas_id": c.canvas_id,
         "view_url": f"/canvas/{c.canvas_id}/view",
         "title": result.get("title", ""),
         "n_phrases": len(narration),
-        "retries_used": result.get("retries_used", 0),
-        "review_history": result.get("review_history", []),
+        "retries_used": retries_used,
+        "review_history": review_history,
         "context_used": [pc["id"] for pc in context_canvases],
         "narration": narrate_out,
+        "duration_s": duration_s,
+        "cost_usd_estimate": cost_estimate,
     }
 
 
@@ -210,6 +251,11 @@ class ChatReq(BaseModel):
     # chat panel.  Used for combining figures across turns.  Capped at
     # ~3 by the frontend to bound LLM cost.
     prior_canvas_ids: list[str] = []
+    # Stable per-tab session id the frontend generates on first load
+    # and persists in localStorage.  Used by telemetry, rate limiter,
+    # and cost guard.  When missing (older frontends), Studio assigns
+    # a synthetic one for this single request.
+    session_id: str | None = None
 
 
 SYSTEM_PROMPT = (
@@ -247,17 +293,63 @@ SYSTEM_PROMPT = (
 
 
 @router.post("/chat")
-async def chat(req: ChatReq):
-    # Diagnostic so /tmp/sevim_studio_openai.log shows when the
-    # browser actually reaches us.
+async def chat(req: ChatReq, request: Request):
+    """Studio chat entrypoint.
+
+    Pipeline order:
+      1. Assign / record session_id (telemetry).
+      2. Content filter (reject obvious off-topic / injection prompts).
+      3. Rate limit + cost guard (reject sessions over their caps).
+      4. Preference pre-router (handles backend-only requests without
+         a gpt-4o call).
+      5. Otherwise stream the gpt-4o → sevim_express pipeline.
+    """
     import sys
-    print(f"[studio-chat] POST received: user={req.user[:60]!r} canvas_id={req.canvas_id}",
+    import secrets as _secrets
+
+    session_id = req.session_id or ("anon_" + _secrets.token_hex(4))
+    req.session_id = session_id  # ensure downstream code sees a value
+
+    print(f"[studio-chat] POST received: session={session_id[:12]!r} "
+          f"user={req.user[:60]!r} canvas_id={req.canvas_id}",
           flush=True, file=sys.stderr)
-    # PRE-ROUTER: detect "system preference" requests (highlight color,
-    # audio speed, volume, autoplay) and handle them deterministically
-    # without calling gpt-4o.  When the user asks for a backend-only
-    # change, the LLM round-trip is unnecessary cost + latency + a
-    # source of hangs.
+
+    # 1. Session bookkeeping (no-op if telemetry disabled).
+    from sevim.telemetry import get_telemetry
+    from studio.sessions import (
+        get_rate_limiter, check_cost_guard, hash_ip,
+    )
+    from studio.safety import check_prompt
+    tel = get_telemetry()
+    if tel is not None:
+        client_ip = (request.client.host if request.client else None)
+        tel.upsert_session(
+            session_id=session_id,
+            user_agent=request.headers.get("user-agent"),
+            ip_hash=hash_ip(client_ip),
+        )
+
+    # 2. Content filter.
+    deny = check_prompt(req.user)
+    if deny is not None:
+        async def deny_stream():
+            yield {"event": "text", "data": json.dumps({"text": deny})}
+            yield {"event": "done",
+                   "data": json.dumps({"stop_reason": "content_filter"})}
+        return EventSourceResponse(deny_stream())
+
+    # 3. Rate limit + cost guard.
+    rl_msg = get_rate_limiter().check(session_id)
+    if rl_msg is None:
+        rl_msg = check_cost_guard(session_id)
+    if rl_msg is not None:
+        async def limit_stream():
+            yield {"event": "text", "data": json.dumps({"text": rl_msg})}
+            yield {"event": "done",
+                   "data": json.dumps({"stop_reason": "rate_limited"})}
+        return EventSourceResponse(limit_stream())
+
+    # 4. Preference pre-router (no LLM round-trip needed).
     from studio.preferences import parse_preference
     pref = parse_preference(req.user)
     if pref is not None:
@@ -268,9 +360,21 @@ async def chat(req: ChatReq):
                 "args_keys": [f"{pref.get('key','?')}={pref.get('value','?')}"],
             })}
             yield {"event": "tool_result", "data": json.dumps(pref)}
-            yield {"event": "text", "data": json.dumps({"text": pref.get("status", "Preference applied.")})}
-            yield {"event": "done", "data": json.dumps({"stop_reason": "preference_applied"})}
+            yield {"event": "text", "data": json.dumps(
+                {"text": pref.get("status", "Preference applied.")}
+            )}
+            yield {"event": "done",
+                   "data": json.dumps({"stop_reason": "preference_applied"})}
+            # Telemetry: lightweight record (no canvas, no cost).
+            if tel is not None:
+                tel.record_turn(
+                    session_id=session_id,
+                    user_prompt=req.user,
+                    intent="preference",
+                )
         return EventSourceResponse(pref_stream())
+
+    # 5. Full express pipeline.
     return EventSourceResponse(_stream_vllm_chat(req))
 
 
@@ -495,7 +599,10 @@ async def _stream_vllm_chat(req: ChatReq):
                 if ctx_ids:
                     args["context_canvas_ids"] = ctx_ids
             try:
-                out = await _execute_tool(tc.get("name") or "", args)
+                out = await _execute_tool(
+                    tc.get("name") or "", args,
+                    session_id=req.session_id,
+                )
                 # Track the most-recent canvas_id touched by any tool —
                 # this is what the post-stop audit will inspect.
                 if isinstance(out, dict) and out.get("canvas_id"):

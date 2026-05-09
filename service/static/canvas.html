@@ -520,6 +520,22 @@
   applyPreferences();
   setInterval(applyPreferences, 3000);
 
+  // ── Interrupt path: parent (Studio chat) can pause audio on demand ───
+  // When the user starts typing a new question or clicks the mic to
+  // record speech, Studio posts {type: 'sevim_pause_audio'} so the
+  // current narration shuts up immediately — otherwise the user is
+  // typing/talking over a voice that's still explaining the old figure,
+  // and the mic picks up the speakers.
+  window.addEventListener('message', (ev) => {
+    if (!ev.data || typeof ev.data !== 'object') return;
+    if (ev.data.type === 'sevim_pause_audio') {
+      if (!intro.paused) intro.pause();
+      if (!audio.paused) audio.pause();
+      clearHighlight();
+      activePhraseIndex = -1;
+    }
+  });
+
   loadInitial().then(connectSSE);
 </script>
 </body>

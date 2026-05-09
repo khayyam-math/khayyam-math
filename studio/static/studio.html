@@ -96,6 +96,22 @@
   // messages.  Sent to Studio with each new prompt so gpt-4o sees the
   // pinned figures' PNG snapshots as conversational context.
   let pinnedCanvasIds = [];
+  // Stable per-tab session id, persisted in localStorage so refreshes
+  // keep the same identity (telemetry / rate-limit grouping).
+  function _genSessionId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+  let sessionId = (() => {
+    try {
+      const k = 'sevim_session_id_v1';
+      let s = localStorage.getItem(k);
+      if (!s) { s = _genSessionId(); localStorage.setItem(k, s); }
+      return s;
+    } catch (_) {
+      return _genSessionId();
+    }
+  })();
   function persistHistory() { /* no-op: memory removed */ }
   function clearPersistedState() {
     // Best-effort wipe of any leftover state from older builds that
@@ -162,6 +178,19 @@
     return el;
   }
 
+  // ── Interrupt path: stop any narration playing in the canvas iframe ──
+  // Called whenever the user starts a new turn (typing, recording, or
+  // sending) so the old voice doesn't talk over them and the mic doesn't
+  // pick up the speakers.  Idempotent — the iframe ignores the message
+  // if audio is already paused.
+  function interruptNarration() {
+    try {
+      if (frame && frame.contentWindow) {
+        frame.contentWindow.postMessage({type: 'sevim_pause_audio'}, '*');
+      }
+    } catch (_) { /* cross-origin or not loaded yet */ }
+  }
+
   // ── Voice input via Web Speech API ───────────────────────────────────
   const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recog = null, recording = false;
@@ -195,6 +224,9 @@
   micBtn.addEventListener('click', () => {
     if (!recog) return;
     if (recording) { recog.stop(); return; }
+    // Kill the canvas's narration audio BEFORE we open the mic — otherwise
+    // the speakers feed straight back into the recording.
+    interruptNarration();
     recog.start();
     recording = true;
     micBtn.classList.add('recording');
@@ -212,6 +244,10 @@
   async function sendMessage() {
     const user = input.value.trim();
     if (!user) return;
+    // Pause any in-flight narration the moment the user commits a new
+    // turn — otherwise the old explanation keeps talking over the new
+    // one being generated.
+    interruptNarration();
     input.value = '';
     input.disabled = true;
     sendBtn.disabled = true;
@@ -230,6 +266,7 @@
         body: JSON.stringify({
           history, user, canvas_id: canvasId,
           prior_canvas_ids: pinnedCanvasIds.slice(),
+          session_id: sessionId,
         }),
       });
       console.log('[studio] response', resp.status, 'has body?', !!resp.body);
@@ -372,6 +409,12 @@
       sendMessage();
     }
   });
+  // Pause narration the moment the user starts engaging with the
+  // chat — focusing the textarea or pressing the first key.  Both
+  // paths are safe to call repeatedly (postMessage is idempotent and
+  // the iframe pause is a no-op when audio is already paused).
+  input.addEventListener('focus', interruptNarration);
+  input.addEventListener('input', interruptNarration);
   input.focus();
 
   // One-line "page is alive" log so it's obvious in DevTools whether
