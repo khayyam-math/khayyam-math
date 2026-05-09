@@ -25,6 +25,7 @@ while the conversation continues.
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any
 
 import sys
@@ -209,6 +210,7 @@ def sevim_open(
     auto_open: bool = True,
     width: int = 700,
     height: int = 440,
+    intro: str | None = None,
 ) -> dict[str, Any]:
     """Open a new (or reuse an existing) Sevim diagram canvas.
 
@@ -255,6 +257,16 @@ def sevim_open(
             the user is on a headless setup.
         width: Canvas width in SVG user units.
         height: Canvas height in SVG user units.
+        intro: Optional one-or-two-sentence introduction to *speak immediately*
+            on canvas open.  When set, the viewer starts speaking the intro
+            via the browser's built-in speech synthesis the moment the page
+            loads — no synthesis delay, no autoplay click — while piper-tts
+            synthesises the higher-quality voice on a background thread for
+            seamless takeover.  This collapses two tool calls (sevim_open
+            then sevim_intro) into one, saving 5–30 s of tool-call latency
+            on the user-perceived "time to first audio".  Recommended for
+            every figure: write a 1–2 sentence intro of what you're about
+            to draw and pass it here.
     """
     c = REGISTRY.open(
         canvas_id=canvas_id,
@@ -264,6 +276,22 @@ def sevim_open(
         animate=animate,
     )
     view_url = _Config.view_url(c.canvas_id)
+
+    # Stash the intro text on the canvas so the viewer's Web Speech API
+    # path can speak it instantly on load.  Spawn piper synthesis in a
+    # background thread for the higher-quality version; viewer crossfades
+    # when ready.
+    if intro and intro.strip():
+        with c.lock:
+            c.intro_text = intro.strip()
+            c.revision += 1
+            c.updated_at = _time_now()
+        threading.Thread(
+            target=_synth_intro_in_background,
+            args=(c, intro.strip()),
+            name=f"sevim-intro-{c.canvas_id}",
+            daemon=True,
+        ).start()
 
     # Auto-launch the browser the first time we see this canvas, so the
     # user doesn't have to click the URL.  Subsequent ``sevim_open``
@@ -284,7 +312,21 @@ def sevim_open(
         "width": c.width,
         "height": c.height,
         "revision": c.revision,
+        "intro_speaking": bool(intro and intro.strip()),
     }
+
+
+def _time_now() -> float:
+    import time
+    return time.time()
+
+
+def _synth_intro_in_background(canvas, text: str) -> None:
+    """Run piper synthesis on a daemon thread; failures are non-fatal."""
+    try:
+        canvas.intro(text)
+    except Exception as exc:  # noqa: BLE001 — viewer Web Speech keeps working
+        print(f"[sevim-intro-bg] piper synthesis failed: {exc}")
 
 
 @mcp.tool()

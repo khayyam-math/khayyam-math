@@ -234,6 +234,7 @@ def canvas_state(cid: str):
             "has_narration": c.narration_wav is not None,
             "has_intro": c.intro_wav is not None,
             "intro_duration_s": c.intro_duration_s,
+            "intro_text": c.intro_text,
         }
 
 
@@ -265,6 +266,7 @@ async def canvas_events(cid: str, request: Request):
                         "has_narration": c.narration_wav is not None,
                         "has_intro": c.intro_wav is not None,
                         "intro_duration_s": c.intro_duration_s,
+                        "intro_text": c.intro_text,
                     }
             if payload is not None:
                 last_rev = rev

@@ -83,33 +83,31 @@
     0%, 100% { filter: drop-shadow(0 0 2px rgba(251,191,36,0.6)); }
     50%      { filter: drop-shadow(0 0 10px rgba(251,191,36,0.95)); }
   }
-  /* Play overlay shown the first time narration is available — browsers
-     block autoplay of audio without user interaction. */
+  /* Audio-unlock hint — non-blocking corner pill instead of a modal.
+     Any click or keypress on the page unlocks autoplay; the hint
+     fades out after the first interaction. */
   .play-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.45);
-    display: flex; align-items: center; justify-content: center;
+    position: fixed;
+    bottom: 12px; right: 12px;
+    background: rgba(42,109,244,0.92); color: white;
+    padding: 0.5em 0.9em;
+    border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    font-size: 0.85em;
     z-index: 1000;
     cursor: pointer;
+    transition: opacity 0.3s;
   }
-  .play-overlay .panel {
-    background: white; color: #222;
-    padding: 1.5em 2em;
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-    text-align: center;
-    max-width: 360px;
-  }
+  .play-overlay .panel { display: contents; }
   .play-overlay .panel button {
-    font-size: 1.1em;
-    padding: 0.6em 1.4em;
+    background: transparent;
     border: none;
-    border-radius: 6px;
-    background: var(--accent);
     color: white;
+    font-size: 0.95em;
     cursor: pointer;
-    margin-top: 0.6em;
+    padding: 0;
   }
+  .play-overlay h3, .play-overlay p { display: none; }
   .play-overlay.hidden { display: none; }
 </style>
 </head>
@@ -133,12 +131,8 @@
 <audio id="intro-audio" preload="auto"></audio>
 <audio id="narration-audio" preload="auto"></audio>
 <div class="play-overlay hidden" id="play-overlay">
-  <div class="panel" onclick="event.stopPropagation()">
-    <h3 style="margin-top:0">Narration ready</h3>
-    <p style="color:#555;margin:0.4em 0 1em">
-      Click below to enable audio playback (browsers block autoplay).
-    </p>
-    <button id="overlay-play" type="button">▶ Play narration</button>
+  <div class="panel">
+    <button id="overlay-play" type="button">▶ tap anywhere for sound</button>
   </div>
 </div>
 <script>
@@ -167,7 +161,51 @@
   let introLoaded = null;          // url of currently-loaded intro audio
   let introPlayed = false;         // already finished one intro this session
 
-  // When the intro finishes, hand off to narration if it has arrived.
+  // ── Web Speech API path ──────────────────────────────────────────────
+  // The browser's built-in TTS has *zero* synthesis delay and uses a
+  // separate autoplay path that's typically more permissive than <audio>.
+  // We use it for the intro (low-stakes, time-critical) so the user
+  // hears something within 100 ms of the canvas opening.  Piper
+  // takes over once it finishes synthesising the higher-quality voice.
+  const synth = window.speechSynthesis || null;
+  let webSpeakerActive = false;
+  let lastSpokenIntro = null;
+
+  function speakViaWebSpeech(text) {
+    if (!synth || !text) return false;
+    try {
+      synth.cancel();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = 1.0; utt.pitch = 1.0; utt.volume = 1.0;
+      utt.onstart = () => { webSpeakerActive = true; };
+      utt.onend = () => { webSpeakerActive = false; introPlayed = true; };
+      synth.speak(utt);
+      return true;
+    } catch (e) {
+      console.warn('Web Speech failed', e);
+      return false;
+    }
+  }
+
+  // ── Click-anywhere autoplay unlock ────────────────────────────────────
+  // Browsers require a user gesture before <audio>.play() succeeds.
+  // Instead of a blocking modal, attach a one-shot handler to the whole
+  // document — *any* click or keypress unlocks audio for this origin.
+  function unlockAudio() {
+    if (userInteracted) return;
+    userInteracted = true;
+    overlay.classList.add('hidden');
+    // Try to start whichever audio is currently waiting.
+    if (intro.src && intro.paused && !introPlayed) {
+      intro.play().catch(() => {});
+    } else if (audio.src && audio.paused) {
+      audio.play().catch(() => {});
+    }
+  }
+  document.addEventListener('click', unlockAudio, { once: false });
+  document.addEventListener('keydown', unlockAudio, { once: false });
+
+  // When the piper-synthesised intro finishes, hand off to narration.
   intro.addEventListener('ended', () => {
     introPlayed = true;
     if (narration && audio.paused && audio.src) {
@@ -193,21 +231,25 @@
     if (state.updated_at) {
       updatedEl.textContent = new Date(state.updated_at * 1000).toLocaleTimeString();
     }
-    // Intro arrived (or was updated)?  Play it immediately so the
-    // user has audio while the LLM is still writing build calls.
+    // ── Intro audio (two-stage) ──────────────────────────────────────
+    // Stage 1: as soon as we see intro_text, speak via the browser's
+    // built-in TTS — instant.  We don't wait for piper synthesis.
+    if (state.intro_text && state.intro_text !== lastSpokenIntro && !webSpeakerActive) {
+      const ok = speakViaWebSpeech(state.intro_text);
+      if (ok) lastSpokenIntro = state.intro_text;
+    }
+    // Stage 2: when piper's higher-quality intro is ready, queue it as
+    // an <audio> element so we can transition into the main narration
+    // smoothly via 'ended'.  If Web Speech is still talking, let it
+    // finish — its 'onend' triggers the narration handoff just like
+    // intro.wav 'ended' does.
     if (state.has_intro) {
       const url = `/canvas/${cid}/intro.wav`;
-      // Only (re)load when it's a different audio or first time.
-      if (introLoaded !== url || (introPlayed && state.intro_duration_s > 0)) {
+      if (introLoaded !== url) {
         intro.src = `${url}?t=${Date.now()}`;
         intro.load();
         introLoaded = url;
         introPlayed = false;
-        // Try to autoplay; fall back to the user-gesture overlay if blocked.
-        intro.play().then(() => { userInteracted = true; }).catch(() => {
-          // The narration "Play" overlay also unlocks the intro.
-          overlay.classList.remove('hidden');
-        });
       }
     }
     // Narration arrived (or was updated)?
