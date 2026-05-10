@@ -28,7 +28,11 @@ import webbrowser
 
 import uvicorn
 
-from service.app import app
+from service.secrets import bootstrap as _bootstrap_secrets
+
+_bootstrap_secrets()
+
+from service.app import app  # noqa: E402 — import after env is populated
 
 
 def _port() -> int:

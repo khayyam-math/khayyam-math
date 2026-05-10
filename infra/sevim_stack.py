@@ -1,0 +1,361 @@
+"""SevimStack — single CDK stack for the public Sevim deployment.
+
+Provisions, in dependency order:
+
+  1. **VPC** with 2 public + 2 private (with NAT) subnets in 2 AZs.
+  2. **S3 buckets** for canvas WAVs, training data, LoRA artefacts.
+  3. **RDS Postgres** (db.t4g.small, single AZ for cost) in private subnets;
+     credentials live in a Secrets Manager secret CDK creates automatically.
+  4. **Secrets Manager** entries for OpenAI key, auth secret, IP-hash salt,
+     SES sender address.  Values are placeholders until you fill them with
+     ``aws secretsmanager put-secret-value``.
+  5. **ECR repo** for the Sevim image, and a CDK ``DockerImageAsset`` that
+     builds the image from ``../Dockerfile`` and pushes it.
+  6. **ECS Fargate** service: 1 task (1 vCPU / 2 GB) behind an ALB.  Task
+     env vars include the SEVIM_* knobs; secrets are injected via the
+     ``Secret`` ECS construct so the values never appear in plaintext on
+     the task definition.
+  7. **(Optional) ACM cert + Route 53 A-alias** when ``SEVIM_DOMAIN`` is
+     passed.  Cert validation uses DNS records the stack adds.
+  8. **CloudWatch log group** for task logs (14-day retention).
+
+Outputs:
+
+  * ``ServiceUrl``         — ALB DNS or domain, the user-visible URL.
+  * ``DbSecretArn``        — RDS-managed secret (already wired into the task).
+  * ``OpenAiSecretArn``    — secret to populate manually with your key.
+  * ``CanvasBucketName``   — S3 bucket for canvas WAVs.
+  * ``LoraBucketName``     — S3 bucket for LoRA artefacts.
+  * ``TrainingBucketName`` — S3 bucket for distillation training data.
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+import aws_cdk as cdk
+from aws_cdk import (
+    CfnOutput,
+    Duration,
+    RemovalPolicy,
+    Stack,
+    aws_certificatemanager as acm,
+    aws_ec2 as ec2,
+    aws_ecr_assets as ecr_assets,
+    aws_ecs as ecs,
+    aws_ecs_patterns as ecs_patterns,
+    aws_elasticloadbalancingv2 as elbv2,
+    aws_iam as iam,
+    aws_logs as logs,
+    aws_rds as rds,
+    aws_route53 as route53,
+    aws_route53_targets as r53_targets,
+    aws_s3 as s3,
+    aws_secretsmanager as secretsmanager,
+)
+from constructs import Construct
+
+
+class SevimStack(Stack):
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        domain: Optional[str] = None,
+        domain_zone_id: Optional[str] = None,
+        redirect_domains: Optional[list[str]] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        # ── 1. Network ────────────────────────────────────────────────
+        # 2 AZ × (public + private-with-NAT) — minimum for ALB.  One NAT
+        # gateway is enough for outbound traffic (saves $32/mo vs 2).
+        vpc = ec2.Vpc(
+            self, "Vpc",
+            max_azs=2,
+            nat_gateways=1,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="public", subnet_type=ec2.SubnetType.PUBLIC, cidr_mask=24,
+                ),
+                ec2.SubnetConfiguration(
+                    name="private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, cidr_mask=24,
+                ),
+            ],
+        )
+
+        # ── 2. S3 buckets ────────────────────────────────────────────
+        # Three buckets — privacy by default; lifecycle rules keep
+        # storage costs predictable as the corpus grows.
+        canvas_bucket = s3.Bucket(
+            self, "CanvasBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            removal_policy=RemovalPolicy.RETAIN,  # don't lose user output
+            versioned=False,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    id="expire-canvas-wavs-90d",
+                    expiration=Duration.days(90),
+                    enabled=True,
+                ),
+            ],
+        )
+        training_bucket = s3.Bucket(
+            self, "TrainingBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        lora_bucket = s3.Bucket(
+            self, "LoraBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            removal_policy=RemovalPolicy.RETAIN,
+            versioned=True,  # so we can roll back a bad LoRA
+        )
+
+        # ── 3. RDS Postgres ──────────────────────────────────────────
+        db_creds = rds.Credentials.from_generated_secret(
+            username="sevim",
+            secret_name="sevim/db_credentials",
+        )
+        db = rds.DatabaseInstance(
+            self, "TelemetryDb",
+            engine=rds.DatabaseInstanceEngine.postgres(
+                version=rds.PostgresEngineVersion.VER_16,
+            ),
+            instance_type=ec2.InstanceType.of(
+                ec2.InstanceClass.BURSTABLE4_GRAVITON,
+                ec2.InstanceSize.SMALL,
+            ),
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+            ),
+            credentials=db_creds,
+            allocated_storage=20,
+            max_allocated_storage=100,
+            backup_retention=Duration.days(7),
+            deletion_protection=False,  # flip to True after first prod cut
+            publicly_accessible=False,
+            removal_policy=RemovalPolicy.SNAPSHOT,
+            multi_az=False,
+            database_name="sevim",
+        )
+
+        # ── 4. App-side secrets ───────────────────────────────────────
+        # We pre-create empty placeholders so the ECS task can mount them
+        # at boot.  Populate after deploy with:
+        #   aws secretsmanager put-secret-value \
+        #       --secret-id sevim/openai --secret-string sk-...
+        openai_secret = secretsmanager.Secret(
+            self, "OpenAiKey",
+            secret_name="sevim/openai",
+            description="OpenAI API key — populate after deploy",
+        )
+        # Auto-generated 64-byte HMAC secret for magic-link tokens + cookies.
+        auth_secret = secretsmanager.Secret(
+            self, "AuthSecret",
+            secret_name="sevim/auth_secret",
+            description="HMAC key for magic-link tokens and login cookies",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                exclude_punctuation=True,
+                password_length=64,
+            ),
+        )
+        # Auto-generated IP-hash salt — stable across deploys (regenerating
+        # would invalidate every existing IP rate-limit bucket).
+        ip_hash_salt = secretsmanager.Secret(
+            self, "IpHashSalt",
+            secret_name="sevim/ip_hash_salt",
+            description="Salt for sha256(IP) telemetry hashing",
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                exclude_punctuation=True,
+                password_length=32,
+            ),
+        )
+        ses_from = secretsmanager.Secret(
+            self, "SesFromAddress",
+            secret_name="sevim/ses_from",
+            description="Verified SES sender address (e.g. 'Sevim <noreply@…>')",
+        )
+
+        # ── 5. Container image ───────────────────────────────────────
+        # CDK builds the Docker image locally (needs `docker` on the
+        # synth host) and pushes to a CDK-managed ECR repo.  For
+        # CodeBuild-based remote builds, swap to a CdkPipeline.
+        image_asset = ecr_assets.DockerImageAsset(
+            self, "SevimImage",
+            directory="..",  # repo root — Dockerfile lives there
+            file="Dockerfile",
+            platform=ecr_assets.Platform.LINUX_AMD64,
+        )
+
+        # ── 6. ECS Fargate behind ALB ────────────────────────────────
+        log_group = logs.LogGroup(
+            self, "AppLogs",
+            retention=logs.RetentionDays.TWO_WEEKS,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        cluster = ecs.Cluster(self, "Cluster", vpc=vpc, container_insights=True)
+
+        env_vars: dict[str, str] = {
+            "SEVIM_TELEMETRY": "1",
+            "SEVIM_RATE_LIMIT": "1",
+            "SEVIM_COST_GUARD": "1",
+            "SEVIM_COST_DAILY_MAX_USD": "10.00",  # raised from default $1
+            "SEVIM_CONTACT_TO": "gradersystem@gmail.com",
+            "SEVIM_CONTENT_FILTER": "1",
+            "SEVIM_TRUST_PROXY": "1",
+            "SEVIM_AUTH_REQUIRED": "1",
+            "SEVIM_VLLM_URL": "https://api.openai.com/v1",
+            "SEVIM_VLLM_MODEL": "gpt-4o",
+            "SEVIM_STORAGE_URL": f"s3://{canvas_bucket.bucket_name}",
+            "SEVIM_EXPORT_S3_BUCKET": training_bucket.bucket_name,
+            "SEVIM_LORA_S3_BUCKET": lora_bucket.bucket_name,
+            "AWS_REGION": self.region,
+        }
+        if domain:
+            env_vars["SEVIM_AUTH_DOMAIN"] = domain
+
+        secrets_map: dict[str, ecs.Secret] = {
+            "OPENAI_API_KEY":          ecs.Secret.from_secrets_manager(openai_secret),
+            "SEVIM_AUTH_SECRET":       ecs.Secret.from_secrets_manager(auth_secret),
+            "SEVIM_IP_HASH_SALT":      ecs.Secret.from_secrets_manager(ip_hash_salt),
+            "SEVIM_SES_FROM_ADDRESS":  ecs.Secret.from_secrets_manager(ses_from),
+            # RDS-managed secret is a JSON dict
+            # ({username,password,host,port,dbname,...}) — inject it as
+            # SEVIM_DB_SECRET_JSON and let service/secrets.py assemble
+            # the postgresql:// URL at boot.  Keeps the CFN template
+            # free of any string-templating across resources.
+            "SEVIM_DB_SECRET_JSON":    ecs.Secret.from_secrets_manager(
+                db.secret,  # type: ignore[arg-type]
+            ),
+        }
+
+        cert: Optional[acm.ICertificate] = None
+        zone: Optional[route53.IHostedZone] = None
+        if domain:
+            if domain_zone_id:
+                zone = route53.HostedZone.from_hosted_zone_attributes(
+                    self, "Zone",
+                    hosted_zone_id=domain_zone_id,
+                    zone_name=domain,
+                )
+            else:
+                zone = route53.HostedZone.from_lookup(
+                    self, "Zone", domain_name=domain,
+                )
+            cert = acm.Certificate(
+                self, "Cert",
+                domain_name=domain,
+                validation=acm.CertificateValidation.from_dns(zone),
+            )
+
+        service = ecs_patterns.ApplicationLoadBalancedFargateService(
+            self, "Service",
+            cluster=cluster,
+            cpu=1024,
+            memory_limit_mib=2048,
+            desired_count=1,
+            public_load_balancer=True,
+            assign_public_ip=False,
+            task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
+                image=ecs.ContainerImage.from_docker_image_asset(image_asset),
+                container_port=8080,
+                environment=env_vars,
+                secrets=secrets_map,
+                log_driver=ecs.LogDrivers.aws_logs(
+                    stream_prefix="sevim",
+                    log_group=log_group,
+                ),
+            ),
+            certificate=cert,
+            domain_name=domain,
+            domain_zone=zone,
+            redirect_http=bool(domain),  # only when we have HTTPS
+            health_check_grace_period=Duration.seconds(60),
+            # Roll back automatically if the new task version doesn't
+            # become healthy.  Cuts failed-deployment timeout from 3 h
+            # to ~10 min.
+            circuit_breaker=ecs.DeploymentCircuitBreaker(rollback=True),
+        )
+        service.target_group.configure_health_check(
+            path="/health",
+            healthy_http_codes="200",
+            healthy_threshold_count=2,
+            unhealthy_threshold_count=3,
+            interval=Duration.seconds(30),
+            timeout=Duration.seconds(5),
+        )
+
+        # Grant the task role least-privileged S3 access.
+        canvas_bucket.grant_read_write(service.task_definition.task_role)
+        training_bucket.grant_read_write(service.task_definition.task_role)
+        lora_bucket.grant_read(service.task_definition.task_role)
+
+        # SES send permission for magic-link delivery.  Scoped to the
+        # account default — narrow further to a specific verified
+        # identity if you operate multiple senders.
+        service.task_definition.task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["ses:SendEmail", "ses:SendRawEmail"],
+                resources=["*"],
+            )
+        )
+
+        # RDS connectivity: open Postgres port from the Fargate SG only.
+        db.connections.allow_default_port_from(service.service)
+
+        # ── 7b. Typo / alias domains that 301 to the canonical one ─────
+        # Each entry gets its own ACM cert (DNS-validated against its
+        # own hosted zone), an A-alias to the ALB, and a listener rule
+        # that 301-redirects by Host header.  Costs $15/yr per domain
+        # for registration; nothing extra for the ACM cert or rule.
+        if domain and redirect_domains:
+            listener = service.listener
+            for i, rdomain in enumerate(redirect_domains):
+                rzone = route53.HostedZone.from_lookup(
+                    self, f"RedirectZone{i}", domain_name=rdomain,
+                )
+                rcert = acm.Certificate(
+                    self, f"RedirectCert{i}",
+                    domain_name=rdomain,
+                    validation=acm.CertificateValidation.from_dns(rzone),
+                )
+                listener.add_certificates(
+                    f"RedirectListenerCert{i}", certificates=[rcert],
+                )
+                route53.ARecord(
+                    self, f"RedirectAlias{i}",
+                    zone=rzone,
+                    record_name=rdomain,
+                    target=route53.RecordTarget.from_alias(
+                        r53_targets.LoadBalancerTarget(service.load_balancer),
+                    ),
+                )
+                listener.add_action(
+                    f"RedirectAction{i}",
+                    priority=10 + i,
+                    conditions=[elbv2.ListenerCondition.host_headers([rdomain])],
+                    action=elbv2.ListenerAction.redirect(
+                        host=domain,
+                        port="443",
+                        protocol="HTTPS",
+                        permanent=True,  # 301
+                    ),
+                )
+
+        # ── 7. Outputs ───────────────────────────────────────────────
+        url = f"https://{domain}" if domain else f"http://{service.load_balancer.load_balancer_dns_name}"
+        CfnOutput(self, "ServiceUrl", value=url)
+        CfnOutput(self, "DbSecretArn", value=(db.secret.secret_arn if db.secret else "n/a"))
+        CfnOutput(self, "OpenAiSecretArn", value=openai_secret.secret_arn)
+        CfnOutput(self, "AuthSecretArn", value=auth_secret.secret_arn)
+        CfnOutput(self, "CanvasBucketName", value=canvas_bucket.bucket_name)
+        CfnOutput(self, "TrainingBucketName", value=training_bucket.bucket_name)
+        CfnOutput(self, "LoraBucketName", value=lora_bucket.bucket_name)
+        CfnOutput(self, "ImageUri", value=image_asset.image_uri)

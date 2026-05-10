@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sevim Studio — visual tutor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+<title>Khayyam Math — visual tutor</title>
 <style>
   :root {
     --bg: #fafafa; --fg: #222; --muted: #777; --accent: #2a6df4;
@@ -12,36 +15,99 @@
     :root { --bg: #1a1a1a; --fg: #eee; --muted: #999;
             --border: #333; --user-bg: #1e2a47; --asst-bg: #222428; }
   }
+  *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%;
     background: var(--bg); color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  .layout { display: grid; grid-template-columns: 360px 1fr; height: 100%; }
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    /* iOS: stop the page bouncing when the chat hits its bounds */
+    overscroll-behavior: none;
+  }
+  /* Use 100dvh on browsers that support it so iOS Safari doesn't reserve
+     space for the URL bar that shouldn't be there once the bar collapses. */
+  body { height: 100dvh; }
+  .layout { display: grid; grid-template-columns: 400px 1fr; height: 100%; }
   .chat { border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; }
+    display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .chat-header { padding: 0.75em 1em; border-bottom: 1px solid var(--border);
     font-size: 0.9em; display: flex; gap: 0.6em; align-items: center; }
-  .chat-header .title { font-weight: 600; }
-  .chat-header .status { color: var(--muted); font-size: 0.8em; margin-left: auto; }
+  .chat-header .title { font-weight: 600; letter-spacing: -0.01em; }
+  .chat-header .status { color: var(--muted); font-size: 0.78em; margin-left: auto;
+    /* Status text is informational only — don't let a long model name
+       push the clear button off-screen on narrow widths. */
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 12em;
+    display: inline-flex; align-items: center; gap: 0.4em; }
+  /* Replace the heavy bullet that the JS prepends to "ready" with a
+     small green LED — looks like a status light, not a chunky character. */
+  .chat-header .status::before {
+    content: ""; display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; background: #22c55e;
+    box-shadow: 0 0 6px rgba(34,197,94,0.55);
+  }
+  .chat-header .status.error::before { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.6); }
+  .chat-header .status.error { color: #ef4444; }
+  /* When the JS hasn't filled status yet, hide the dot to avoid a
+     mysterious empty green bullet during boot. */
+  .chat-header .status:empty::before { display: none; }
+  .chat-header #canvas-badge { font-size: 0.7em; color: var(--muted);
+    font-family: ui-monospace, monospace; }
+  .chat-header #clear-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 4px; padding: 0.25em 0.55em;
+    font-size: 0.78em; cursor: pointer;
+  }
+  .chat-header #clear-btn:hover { color: var(--fg); border-color: var(--accent); }
   .chat-log { flex: 1; overflow-y: auto; padding: 0.6em 0.8em;
-    display: flex; flex-direction: column; gap: 0.6em; }
+    display: flex; flex-direction: column; gap: 0.6em;
+    -webkit-overflow-scrolling: touch; }
   .msg { padding: 0.6em 0.8em; border-radius: 8px; line-height: 1.4;
-    font-size: 0.9em; max-width: 95%; word-wrap: break-word; }
+    font-size: 0.95em; max-width: 95%; word-wrap: break-word;
+    overflow-wrap: anywhere; }
   .msg.user { background: var(--user-bg); align-self: flex-end; }
   .msg.asst { background: var(--asst-bg); align-self: flex-start; }
-  .msg.tool { background: transparent; color: var(--muted); font-size: 0.78em;
+  .msg.tool { background: transparent; color: var(--muted); font-size: 0.8em;
     font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   .input-row { display: flex; gap: 0.4em; padding: 0.6em;
+    /* iOS notch / home-indicator padding so the send button isn't
+       hidden under the bottom bezel when added to the home screen. */
+    padding-bottom: max(0.6em, env(safe-area-inset-bottom));
     border-top: 1px solid var(--border); }
   .input-row textarea { flex: 1; resize: none; padding: 0.5em;
     border: 1px solid var(--border); border-radius: 6px;
-    background: var(--bg); color: var(--fg); font: inherit;
-    min-height: 2.4em; max-height: 8em; }
+    background: var(--bg); color: var(--fg);
+    /* Explicit 16px font on the input prevents iOS Safari from auto-
+       zooming the page when the user taps to type — anything smaller
+       triggers the zoom. */
+    font-size: 16px;
+    line-height: 1.35;
+    font-family: inherit;
+    min-height: 2.6em; max-height: 8em; }
   .input-row button {
     padding: 0 0.9em;
     border: none; border-radius: 6px; cursor: pointer;
     background: var(--accent); color: white; font: inherit;
+    /* WCAG-aligned touch target — buttons under 44px are hard to tap
+       reliably on a phone. */
+    min-height: 44px; min-width: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background 120ms ease, opacity 120ms ease;
   }
+  .input-row button:hover:not(:disabled) { filter: brightness(1.05); }
   .input-row button:disabled { opacity: 0.5; cursor: default; }
+  .input-row #send-btn.loading {
+    /* When a turn is in flight, swap the icon for a spinning ring so
+       the user gets feedback the request is moving — beyond just the
+       button being disabled. */
+    background: var(--accent); position: relative;
+  }
+  .input-row #send-btn.loading svg { display: none; }
+  .input-row #send-btn.loading::after {
+    content: ""; width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: white; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .input-row button.mic { background: transparent; color: var(--accent);
     border: 1px solid var(--accent); }
   .input-row button.mic.recording {
@@ -52,37 +118,128 @@
     0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
     50%     { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
   }
-  .canvas-pane { display: flex; flex-direction: column; }
+  .canvas-pane { display: flex; flex-direction: column; min-height: 0; }
   .canvas-pane iframe { flex: 1; border: 0; width: 100%; }
-  .placeholder { display: flex; align-items: center; justify-content: center;
-    flex: 1; color: var(--muted); font-style: italic; }
+  /* Empty state: branded title + tagline + tappable example prompts.
+     Replaces the bare "Ask a question…" italic line that left the
+     canvas-pane feeling unowned and offered no scaffolding for a new
+     user who doesn't know what Sevim can draw. */
+  .placeholder {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; color: var(--muted);
+    text-align: center; padding: 1.5em;
+    gap: 0.8em;
+  }
+  .placeholder .empty-brand {
+    font-size: 1.8em; font-weight: 700; color: var(--fg);
+    letter-spacing: -0.02em;
+  }
+  .placeholder .empty-tagline {
+    font-size: 0.95em; color: var(--muted); max-width: 28em;
+    line-height: 1.45;
+  }
+  .placeholder .empty-examples {
+    display: flex; flex-wrap: wrap; gap: 0.5em; justify-content: center;
+    margin-top: 0.6em; max-width: 36em;
+  }
+  .placeholder .example-chip {
+    background: var(--asst-bg); color: var(--fg); border: 1px solid var(--border);
+    padding: 0.55em 0.9em; border-radius: 999px;
+    font: inherit; font-size: 0.85em; cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+    min-height: 40px;
+  }
+  .placeholder .example-chip:hover { border-color: var(--accent); }
+  .placeholder .example-chip:active { background: var(--user-bg); }
+  /* The clear button + canvas badge inherit chat-header sizing; force
+     them to be tappable on touch. */
+  .chat-header button, .chat-header [type=button] {
+    min-height: 32px; min-width: 32px;
+  }
+  /* Stack into a single column on phones AND iPad-portrait.  The
+     canvas-pane gets the top ~38vh, the chat takes the rest with the
+     input pinned to the bottom.  900px lets us cover iPad Mini portrait
+     (768×1024) and iPad Pro 11" portrait (834×1194) — both feel cramped
+     when the chat column eats half the width side-by-side.  Desktop
+     side-by-side kicks in at ≥901px. */
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: 38vh 1fr;
+    }
+    .canvas-pane {
+      order: -1;
+      border-bottom: 1px solid var(--border);
+    }
+    .chat { border-right: none; }
+    .chat-header {
+      padding: 0.55em 0.8em;
+      gap: 0.5em;
+      font-size: 0.9em;
+    }
+    .chat-header .status { font-size: 0.7em; max-width: 8em; }
+    .chat-log { padding: 0.5em 0.6em; }
+    .msg { font-size: 1em; max-width: 92%; }
+    .msg.tool { font-size: 0.78em; }
+    .input-row { padding: 0.5em; gap: 0.35em; }
+    .input-row button { padding: 0 0.7em; }
+    .placeholder { gap: 0.55em; padding: 0.8em; }
+    .placeholder .empty-brand { font-size: 1.4em; }
+    .placeholder .empty-tagline { font-size: 0.85em; }
+    .placeholder .example-chip { font-size: 0.78em; padding: 0.45em 0.75em; }
+  }
+  /* Landscape phones — keep side-by-side but with a tighter chat
+     column so neither pane is starved. */
+  @media (min-width: 600px) and (max-width: 900px) and (orientation: landscape) {
+    .layout {
+      grid-template-columns: 280px 1fr;
+      grid-template-rows: none;
+    }
+    .canvas-pane { order: 0; border-bottom: none; }
+    .chat { border-right: 1px solid var(--border); }
+  }
 </style>
 </head>
 <body>
 <div class="layout">
   <aside class="chat">
     <div class="chat-header">
-      <span class="title">Sevim Studio</span>
-      <span class="status" id="status">connecting…</span>
-      <span id="canvas-badge" style="margin-left:0.5em;font-size:0.7em;color:var(--muted);
-                                     font-family:monospace;"></span>
+      <span class="title">Khayyam Math</span>
+      <span class="status" id="status" aria-live="polite"></span>
+      <span id="canvas-badge"></span>
       <button id="clear-btn" type="button" title="Clear conversation"
-              style="margin-left:auto;background:transparent;border:1px solid var(--border);
-                     color:var(--muted);border-radius:4px;padding:0.2em 0.5em;
-                     font-size:0.8em;cursor:pointer;">clear</button>
+              aria-label="Clear conversation">clear</button>
     </div>
     <div class="chat-log" id="log"></div>
     <div class="input-row">
-      <button class="mic" id="mic-btn" type="button" title="Voice input">🎙</button>
-      <textarea id="input" placeholder="Ask me to draw something… (Enter to send)"></textarea>
-      <button id="send-btn" type="button">Send</button>
+      <button class="mic" id="mic-btn" type="button"
+              title="Voice input" aria-label="Voice input">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/>
+          <path fill="currentColor" d="M19 11h-1a6 6 0 0 1-12 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>
+        </svg>
+      </button>
+      <textarea id="input" placeholder="Describe a figure…"
+                rows="1" autocapitalize="sentences"></textarea>
+      <button id="send-btn" type="button" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M3 11.5L21 3l-8.5 18-2-7.5z"/>
+        </svg>
+      </button>
     </div>
   </aside>
   <main class="canvas-pane">
     <div class="placeholder" id="placeholder">
-      Ask a question to start. The canvas will appear here.
+      <div class="empty-brand">Khayyam Math</div>
+      <div class="empty-tagline">A live diagram tutor — ask in words, watch a figure appear.</div>
+      <div class="empty-examples" role="group" aria-label="Example prompts">
+        <button type="button" class="example-chip" data-prompt="Show how the angles of a triangle sum to π">Triangle angle sum</button>
+        <button type="button" class="example-chip" data-prompt="Draw the unit circle with sin and cos labelled at 30°, 45°, 60°">Unit circle (sin / cos)</button>
+        <button type="button" class="example-chip" data-prompt="Illustrate matrix multiplication with two 3×3 matrices and a worked cell">Matrix multiplication</button>
+        <button type="button" class="example-chip" data-prompt="Show the area under y = x² from 0 to 2 as a Riemann sum, then the integral">Area under x²</button>
+      </div>
     </div>
-    <iframe id="canvas-frame" style="display:none"></iframe>
+    <iframe id="canvas-frame" style="display:none" title="Khayyam Math canvas"></iframe>
   </main>
 </div>
 <script>
@@ -147,25 +304,49 @@
   });
 
   // ── Health check ─────────────────────────────────────────────────────
+  // The user doesn't care which model is configured — they care
+  // whether Sevim is *up*.  Show a green bullet on success, the
+  // specific failure mode on error.  Hover/title carries the model
+  // name for power users + future debugging.
   fetch('/studio/health').then(r => r.json()).then(h => {
+    let label = '', errored = false, title = '';
     if (h.backend === 'vllm') {
-      // h.remote is 'openai' (api.openai.com) or 'local' (local vLLM).
       const tag = h.remote === 'openai' ? 'openai' : 'local';
+      title = h.model + ' · ' + tag;
       if (!h.vllm_reachable) {
-        status.textContent = tag === 'openai' ? 'openai unreachable' : 'vllm unreachable';
-        status.style.color = '#ef4444';
+        label = tag === 'openai' ? 'openai unreachable' : 'vllm unreachable';
+        errored = true;
       } else if (tag === 'openai' && !h.api_key_configured) {
-        status.textContent = 'no OPENAI_API_KEY';
-        status.style.color = '#ef4444';
+        label = 'no OPENAI_API_KEY';
+        errored = true;
       } else {
-        status.textContent = h.model + ' (' + tag + ')';
+        label = 'ready';
       }
     } else if (!h.api_key_configured) {
-      status.textContent = 'no API key';
-      status.style.color = '#ef4444';
+      label = 'no API key';
+      errored = true;
     } else {
-      status.textContent = h.model;
+      label = 'ready';
+      title = h.model || '';
     }
+    status.textContent = label;
+    status.title = title;
+    if (errored) status.classList.add('error');
+  }).catch(() => {
+    status.textContent = 'offline';
+    status.classList.add('error');
+  });
+
+  // ── Example-prompt chips on the empty state ─────────────────────────
+  // Tapping one drops the prompt into the textarea and immediately
+  // sends it — feels like a launchpad rather than make-the-user-type.
+  document.querySelectorAll('.example-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const prompt = chip.dataset.prompt;
+      if (!prompt) return;
+      input.value = prompt;
+      sendMessage();
+    });
   });
 
   // ── Logging utilities ────────────────────────────────────────────────
@@ -251,6 +432,7 @@
     input.value = '';
     input.disabled = true;
     sendBtn.disabled = true;
+    sendBtn.classList.add('loading');
     appendMsg('user', user);
 
     const asstEl = appendMsg('asst', '…');
@@ -398,6 +580,7 @@
     } finally {
       input.disabled = false;
       sendBtn.disabled = false;
+      sendBtn.classList.remove('loading');
       input.focus();
     }
   }
@@ -420,6 +603,38 @@
   // One-line "page is alive" log so it's obvious in DevTools whether
   // the bottom of the script ran (i.e. all listeners are bound).
   console.log('[studio] ready — chat handler bound, history len', history.length);
+
+  // Cookie acceptance banner — shown once, dismissed via localStorage flag.
+  (function() {
+    try {
+      if (localStorage.getItem('khayyam_cookie_consent') === '1') return;
+    } catch (_) {}
+    const b = document.getElementById('cookie-banner');
+    if (!b) return;
+    b.hidden = false;
+    document.getElementById('cookie-ok').addEventListener('click', function () {
+      try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
+      b.style.transition = 'opacity 0.25s';
+      b.style.opacity = '0';
+      setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+    });
+  })();
 </script>
+<div id="cookie-banner" hidden style="
+     position:fixed; bottom:0; left:0; right:0;
+     background:#1a1d24; color:#eef0f3;
+     padding:0.9em 1.2em; padding-bottom:max(0.9em, env(safe-area-inset-bottom));
+     display:flex; flex-wrap:wrap; gap:0.8em; align-items:center;
+     justify-content:center; font-size:0.92em; z-index:1000;
+     box-shadow:0 -2px 12px rgba(0,0,0,0.18);">
+  <span style="flex:1; min-width:14em; line-height:1.45;">
+    Khayyam Math uses one essential cookie for sign-in.  No advertising
+    or analytics trackers.  See the <a href="/terms" style="color:#7eb6ff">Terms</a>.
+  </span>
+  <button id="cookie-ok" type="button" style="
+        padding:0.55em 1.2em; min-height:40px;
+        background:#1f6fe0; color:#fff; border:0;
+        border-radius:6px; font:inherit; cursor:pointer;">Got it</button>
+</div>
 </body>
 </html>

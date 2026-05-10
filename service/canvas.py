@@ -406,22 +406,33 @@ class Canvas:
             for one in tgt_list:
                 if one and one not in existing_ids:
                     unknown.append(one)
-        # Prepend the transition phrase (same voice = same speaker).
-        # Defaults to a sensible English phrase if neither sevim_open
-        # nor the canvas was set with one.
-        transition = (
-            self.transition_text
-            or "And now please look at the diagram."
-        )
-        full_script: list[dict] = [{
-            "speak": transition,
-            "highlight": None,
-        }]
+        # Prepend the transition phrase ONLY when it's explicitly set
+        # (i.e. a prelude was configured for this canvas, and the
+        # transition exists to bridge prelude → walkthrough).  When no
+        # prelude was set — which is the case for the entire express
+        # path — there is nothing to transition FROM, and starting the
+        # very first audio with "And now please look at the diagram"
+        # makes no semantic sense.  Just play the script as-is.
+        full_script: list[dict] = []
+        if self.transition_text:
+            full_script.append({
+                "speak": self.transition_text,
+                "highlight": None,
+            })
         full_script.extend(script)
         narr_dir = _narration_dir(self.canvas_id)
         narr_dir.mkdir(parents=True, exist_ok=True)
         wav_path = narr_dir / "narration.wav"
         manifest = synthesize_script(full_script, str(wav_path))
+        # Best-effort durability: upload to S3 (no-op for FileStorage).
+        # Survives ECS task replacement; viewer endpoint redirects to
+        # the presigned URL when the local copy is gone.
+        from service.storage import get_storage
+        get_storage().upload_file(
+            wav_path,
+            f"{self.canvas_id}/narration.wav",
+            content_type="audio/wav",
+        )
         with self.lock:
             self.narration_wav = str(wav_path)
             self.narration_manifest = manifest
@@ -457,6 +468,12 @@ class Canvas:
         manifest = synthesize_script(
             [{"speak": text, "highlight": None}],
             str(wav_path),
+        )
+        from service.storage import get_storage
+        get_storage().upload_file(
+            wav_path,
+            f"{self.canvas_id}/intro.wav",
+            content_type="audio/wav",
         )
         with self.lock:
             self.intro_wav = str(wav_path)

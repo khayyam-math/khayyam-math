@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Khayyam Math — Live diagram tutor: ask in words, see math come alive</title>
+<meta name="description" content="Khayyam Math is an AI-powered visual tutor. Type a math, geometry, or science question in plain English and watch a custom SVG diagram appear on the canvas with synchronised audio narration. Powered by GPT-4o with a built-in math-correctness inspector.">
+<meta name="keywords" content="live diagram tutor, AI math tutor, math visualization, geometry tutor, GPT-4o tutor, educational AI, interactive math, animated diagrams, AI figure generator">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Khayyam Math — Live diagram tutor">
+<meta property="og:description" content="Type a math question in plain English. Watch a custom diagram appear with synchronised narration. AI-powered, math-correctness verified.">
+<meta property="og:url" content="https://khayyammath.com/">
+<meta property="og:site_name" content="Khayyam Math">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Khayyam Math — Live diagram tutor">
+<meta name="twitter:description" content="Type a math question in plain English. Watch a custom diagram appear with synchronised narration.">
+
+<!-- Structured data: WebApplication -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Khayyam Math",
+  "url": "https://khayyammath.com/",
+  "description": "A live diagram tutor that turns plain-English questions into custom SVG figures with synchronised audio narration. Includes a math-correctness inspector that catches false claims before they reach the learner.",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Math tutor",
+  "operatingSystem": "Any (browser)",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD",
+    "availability": "https://schema.org/InStock"
+  },
+  "inLanguage": "en"
+}
+</script>
+
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fafafa;
+    --fg: #1a1d24;
+    --muted: #5a6470;
+    --soft: #ecf1f7;
+    --accent: #1f6fe0;
+    --accent-strong: #1657b8;
+    --border: #dfe4ec;
+    --hi: #fbbf24;
+    --tri: #1f6fe0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --fg: #ebeef3;
+      --muted: #98a3b1;
+      --soft: #1a1f29;
+      --border: #2a313d;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+                 "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+    font-size: 17px;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3 { letter-spacing: -0.015em; line-height: 1.2; }
+
+  /* ── Header ────────────────────────────────────────────────────── */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  header .inner {
+    max-width: 1100px; margin: 0 auto;
+    padding: 0.9em 1.4em;
+    display: flex; align-items: center; gap: 1em;
+  }
+  header .brand { font-weight: 700; font-size: 1.15em; letter-spacing: -0.02em;
+                  color: var(--fg); }
+  header nav { margin-left: auto; display: flex; gap: 1.2em;
+               align-items: center; }
+  header nav a { color: var(--fg); font-size: 0.95em; }
+  header nav a.cta {
+    background: var(--accent); color: #fff;
+    padding: 0.55em 1.1em; border-radius: 8px;
+    font-weight: 500;
+    transition: filter 120ms ease;
+  }
+  header nav a.cta:hover { filter: brightness(1.08); text-decoration: none; }
+  @media (max-width: 540px) {
+    header nav .nav-link { display: none; }
+  }
+
+  /* ── Hero ──────────────────────────────────────────────────────── */
+  main { max-width: 1100px; margin: 0 auto; padding: 0 1.4em; }
+  .hero {
+    padding: clamp(2.5em, 8vh, 5em) 0 clamp(2.5em, 7vh, 4em);
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: clamp(1.5em, 5vw, 4em);
+    align-items: center;
+  }
+  @media (max-width: 820px) {
+    .hero { grid-template-columns: 1fr; gap: 2em;
+            padding: 2.5em 0 2em; }
+  }
+  .hero h1 {
+    font-size: clamp(1.9em, 4.5vw, 2.85em);
+    font-weight: 700;
+    margin: 0 0 0.5em;
+  }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p.lede {
+    font-size: 1.1em;
+    color: var(--muted);
+    margin: 0 0 1.6em;
+    max-width: 32em;
+  }
+  .hero .ctas { display: flex; gap: 0.8em; flex-wrap: wrap; }
+  .hero .ctas a {
+    padding: 0.85em 1.4em; border-radius: 10px; font-weight: 500;
+    font-size: 1em;
+  }
+  .hero .ctas a.primary {
+    background: var(--accent); color: #fff;
+  }
+  .hero .ctas a.primary:hover {
+    filter: brightness(1.08); text-decoration: none;
+  }
+  .hero .ctas a.secondary {
+    border: 1px solid var(--border); color: var(--fg);
+  }
+  .hero .ctas a.secondary:hover {
+    border-color: var(--accent); text-decoration: none;
+  }
+
+  /* ── Demo SVG (the visual hero) ─────────────────────────────────── */
+  .demo {
+    background: var(--soft);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.4em;
+    aspect-ratio: 1.05;
+    display: flex; flex-direction: column;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .demo svg { width: 100%; height: 100%; max-height: 360px; }
+  .demo .caption {
+    text-align: center; font-size: 0.92em; color: var(--muted);
+    margin-top: 0.5em; font-style: italic;
+  }
+
+  /* ── How it works ──────────────────────────────────────────────── */
+  section.section { padding: clamp(2em, 6vh, 4em) 0;
+                    border-top: 1px solid var(--border); }
+  section.section h2 {
+    font-size: clamp(1.5em, 3vw, 2em); margin: 0 0 1em;
+    font-weight: 700;
+  }
+  section.section h2 .num {
+    color: var(--muted); font-weight: 400; font-size: 0.7em;
+    margin-right: 0.5em; font-variant-numeric: tabular-nums;
+  }
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.6em;
+  }
+  @media (max-width: 760px) {
+    .steps { grid-template-columns: 1fr; gap: 1.2em; }
+  }
+  .step {
+    background: var(--soft); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.4em;
+  }
+  .step h3 { margin: 0 0 0.5em; font-size: 1.1em; }
+  .step p { margin: 0; color: var(--muted); font-size: 0.95em; }
+
+  /* ── Examples ──────────────────────────────────────────────────── */
+  .examples {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13em, 1fr));
+    gap: 0.7em;
+  }
+  .examples .example {
+    background: var(--soft); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0.7em 1.1em;
+    font-size: 0.9em; color: var(--fg);
+  }
+
+  /* ── FAQ ───────────────────────────────────────────────────────── */
+  .faq details {
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.9em 1.2em; margin-bottom: 0.7em;
+    background: var(--soft);
+  }
+  .faq summary { font-weight: 600; cursor: pointer;
+                 padding: 0.1em 0; }
+  .faq summary::marker { color: var(--muted); }
+  .faq p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+
+  /* ── Footer ────────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--border);
+    margin-top: 3em;
+    padding: 2em 1.4em;
+    text-align: center; color: var(--muted); font-size: 0.88em;
+  }
+  footer a { color: var(--muted); }
+
+  /* Animated highlight on the demo arc — subtle, non-distracting */
+  @keyframes glow {
+    0%, 100% { filter: drop-shadow(0 0 1px rgba(251,191,36,0.5)); }
+    50%      { filter: drop-shadow(0 0 8px rgba(251,191,36,0.95)); }
+  }
+  .demo .arc-a { animation: glow 3s ease-in-out infinite; }
+  .demo .arc-b { animation: glow 3s ease-in-out infinite 1s; }
+  .demo .arc-c { animation: glow 3s ease-in-out infinite 2s; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <a href="/" class="brand">Khayyam Math</a>
+    <nav>
+      <a class="nav-link" href="#how">How it works</a>
+      <a class="nav-link" href="#examples">Examples</a>
+      <a class="nav-link" href="#faq">FAQ</a>
+      <a class="cta" href="/studio/auth/login">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div>
+      <h1>Watch math come alive <em>while you ask</em>.</h1>
+      <p class="lede">Khayyam Math turns a plain-English question into a custom
+      diagram with synchronised audio narration — in seconds. Type
+      <em>"show how the angles of a triangle sum to π"</em> and watch
+      the figure build itself, phrase by phrase.</p>
+      <div class="ctas">
+        <a class="primary" href="/studio/auth/login">Try it free →</a>
+        <a class="secondary" href="#how">See how it works</a>
+      </div>
+    </div>
+
+    <!-- Inline demo SVG: triangle ABC with three angle arcs.  No JS,
+         no extra request — gives the visitor a sense of the output
+         style on first paint. -->
+    <div class="demo" aria-label="Example Khayyam Math figure: triangle with angle arcs">
+      <svg viewBox="0 0 360 320" role="img" aria-labelledby="demoTitle">
+        <title id="demoTitle">Triangle with three angle arcs at vertices A, B, C</title>
+        <!-- Triangle ABC -->
+        <polygon points="180,40 60,260 300,260"
+                 fill="none" stroke="var(--tri)" stroke-width="3"
+                 stroke-linejoin="round"/>
+        <!-- Vertex labels -->
+        <text x="180" y="32" text-anchor="middle" font-size="16"
+              font-weight="600" fill="currentColor">A</text>
+        <text x="48"  y="270" font-size="16" font-weight="600" fill="currentColor">B</text>
+        <text x="306" y="270" font-size="16" font-weight="600" fill="currentColor">C</text>
+        <!-- Angle arcs (small) -->
+        <path class="arc-a" d="M 162 67 A 28 28 0 0 1 198 67"
+              fill="none" stroke="#fbbf24" stroke-width="2.5"/>
+        <path class="arc-b" d="M 84 245 A 28 28 0 0 1 92 220"
+              fill="none" stroke="#22c55e" stroke-width="2.5"/>
+        <path class="arc-c" d="M 268 220 A 28 28 0 0 1 276 245"
+              fill="none" stroke="#ef4444" stroke-width="2.5"/>
+        <!-- Conclusion caption -->
+        <text x="180" y="300" text-anchor="middle" font-size="15"
+              fill="currentColor" font-style="italic">α + β + γ = π</text>
+      </svg>
+      <div class="caption">Sample figure rendered by Khayyam Math</div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how" class="section">
+    <h2><span class="num">01</span>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <h3>Ask in plain words</h3>
+        <p>"Show the unit circle with sin and cos at 30°, 45°, 60°."
+        Or "draw a Riemann sum approximating ∫₀² x² dx with 8 rectangles."
+        No special syntax — just describe what you want to see.</p>
+      </div>
+      <div class="step">
+        <h3>The figure builds itself</h3>
+        <p>GPT-4o emits a custom SVG plus a phrase-timed narration
+        script. Each spoken sentence highlights the exact part of the
+        figure it's describing — the audio cursor and the visual
+        spotlight stay in lock-step from start to finish.</p>
+      </div>
+      <div class="step">
+        <h3>Verified, then shown</h3>
+        <p>A built-in math-correctness inspector reads every claim
+        against the rendered figure. Catches false statements
+        ("interior angles sum to 2π" — actually π) and false visual
+        claims before they reach you. Up to three correction rounds.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- EXAMPLES -->
+  <section id="examples" class="section">
+    <h2><span class="num">02</span>What people draw with Khayyam Math</h2>
+    <p style="color: var(--muted); margin-top: -0.4em;">
+      A non-exhaustive sample. Khayyam Math is good at any concept that lives
+      well as a diagram — math, geometry, set theory, basic physics,
+      causal chains, simple algorithms.
+    </p>
+    <div class="examples">
+      <div class="example">Triangle interior-angle sum</div>
+      <div class="example">Unit circle with sin / cos</div>
+      <div class="example">Matrix multiplication, worked</div>
+      <div class="example">Riemann sum → integral</div>
+      <div class="example">Pythagorean theorem proof</div>
+      <div class="example">Set-theory Venn diagrams</div>
+      <div class="example">Vector addition, head-to-tail</div>
+      <div class="example">Derivative as tangent slope</div>
+      <div class="example">Pigeonhole-principle sketch</div>
+      <div class="example">3SAT → clique reduction</div>
+      <div class="example">Linked-list / tree structures</div>
+      <div class="example">Causal diagrams</div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="section faq">
+    <h2><span class="num">03</span>FAQ</h2>
+
+    <details>
+      <summary>Is it free?</summary>
+      <p>Yes, while we're in early access. Each signed-in user has a
+      generous daily quota of figures. We'll add paid tiers if/when
+      OpenAI inference costs require it.</p>
+    </details>
+
+    <details>
+      <summary>How accurate is the math?</summary>
+      <p>Every figure passes through an automated math-correctness
+      inspector that reads each narration phrase + on-canvas caption,
+      flags false claims and visual mismatches, and triggers up to
+      three correction rounds before showing the figure. False-positive
+      acceptance rate is low — but a tutor, not an arbiter; check
+      anything you'd cite.</p>
+    </details>
+
+    <details>
+      <summary>What works on mobile?</summary>
+      <p>Everything. The chat + canvas stacks vertically on phones,
+      audio plays through the device speakers, and the layout adapts
+      to iPad portrait, desktop, and everything between.</p>
+    </details>
+
+    <details>
+      <summary>Does it remember the conversation?</summary>
+      <p>Yes. After a figure appears, you can ask follow-up questions
+      ("why is α + β = π/2 here?") in plain chat, and the model
+      answers without redrawing. Or ask for an edit ("highlight the
+      median from A") and the canvas updates incrementally.</p>
+    </details>
+
+    <details>
+      <summary>What's the data policy?</summary>
+      <p>Your email is the only identifier we keep, used solely for
+      sign-in and per-user usage accounting. Prompts and generated
+      figures are stored to improve the underlying models; no email
+      addresses are ever attached to those records, and we never share
+      your email with third parties.</p>
+    </details>
+
+    <details>
+      <summary>Why "Khayyam Math"?</summary>
+      <p>Named after Omar Khayyam (1048–1131), the Persian mathematician
+      and astronomer who solved cubic equations geometrically — by
+      drawing the right curves and reading off the roots where they
+      met. That's exactly what this product does: turn an abstract
+      question into a figure you can see, and let the picture do the
+      explaining.</p>
+    </details>
+  </section>
+
+</main>
+
+<footer>
+  <p>
+    <strong>Khayyam Math</strong> · A live diagram tutor.
+    <a href="/studio/auth/login">Sign in</a> ·
+    <a href="/contact">Contact</a> ·
+    <a href="/terms">Terms</a>
+  </p>
+</footer>
+
+<!-- Cookie acceptance banner — non-blocking, sets a localStorage flag
+     on dismissal.  We only set ONE cookie (sevim_auth, strictly
+     necessary for sign-in) and no analytics/marketing trackers, so
+     the disclosure is a courtesy more than a regulatory necessity. -->
+<div id="cookie-banner" hidden style="
+     position:fixed; bottom:0; left:0; right:0;
+     background:#1a1d24; color:#eef0f3;
+     padding:0.9em 1.2em; padding-bottom:max(0.9em, env(safe-area-inset-bottom));
+     display:flex; flex-wrap:wrap; gap:0.8em; align-items:center;
+     justify-content:center; font-size:0.92em; z-index:1000;
+     box-shadow:0 -2px 12px rgba(0,0,0,0.18);">
+  <span style="flex:1; min-width:14em; line-height:1.45;">
+    Khayyam Math uses one essential cookie for sign-in.  No advertising
+    or analytics trackers.  See the <a href="/terms" style="color:#7eb6ff">Terms</a>.
+  </span>
+  <button id="cookie-ok" type="button" style="
+        padding:0.55em 1.2em; min-height:40px;
+        background:#1f6fe0; color:#fff; border:0;
+        border-radius:6px; font:inherit; cursor:pointer;">Got it</button>
+</div>
+<script>
+(function() {
+  try {
+    if (localStorage.getItem('khayyam_cookie_consent') === '1') return;
+  } catch (_) {}
+  var b = document.getElementById('cookie-banner');
+  if (!b) return;
+  b.hidden = false;
+  document.getElementById('cookie-ok').addEventListener('click', function () {
+    try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
+    b.style.transition = 'opacity 0.25s';
+    b.style.opacity = '0';
+    setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+  });
+})();
+</script>
+
+</body>
+</html>

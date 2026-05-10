@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sevim — live canvas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Khayyam Math — live canvas</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -16,16 +17,20 @@
   @media (prefers-color-scheme: dark) {
     :root { --bg: #1a1a1a; --fg: #eee; --muted: #888; --border: #333; }
   }
+  *, *::before, *::after { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; height: 100%;
     background: var(--bg); color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    overscroll-behavior: none;
   }
+  body { height: 100dvh; }
   header {
     display: flex; align-items: center; gap: 1em;
     padding: 0.5em 1em;
     border-bottom: 1px solid var(--border);
     font-size: 0.85em;
+    flex-wrap: wrap;
   }
   header .title { font-weight: 600; }
   header .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -44,13 +49,23 @@
     background: var(--accent);
     color: white;
     cursor: pointer;
+    /* Make the play button thumb-friendly on touch. */
+    min-height: 40px; min-width: 40px;
   }
   header button.play-btn:disabled { opacity: 0.5; cursor: default; }
   header button.play-btn.hidden { display: none; }
   main {
     display: flex; align-items: center; justify-content: center;
-    height: calc(100vh - 50px);
+    /* 100dvh accounts for iOS Safari's collapsing URL bar; falls back
+       to 100vh on browsers that don't support dvh. */
+    height: calc(100dvh - 50px);
     padding: 1em;
+    padding-bottom: max(1em, env(safe-area-inset-bottom));
+  }
+  @media (max-width: 720px) {
+    header { padding: 0.4em 0.7em; gap: 0.6em; font-size: 0.8em; }
+    header button.play-btn { padding: 0.35em 0.75em; font-size: 0.85em; }
+    main { padding: 0.5em; height: calc(100dvh - 44px); }
   }
   #stage {
     max-width: 100%; max-height: 100%;
@@ -129,7 +144,7 @@
 <body>
 <header>
   <span class="dot" id="status-dot"></span>
-  <span class="title">Sevim canvas</span>
+  <span class="title">Khayyam Math canvas</span>
   <span class="meta" id="cid"></span>
   <span class="meta">rev <span id="rev">0</span></span>
   <span class="meta"><span id="nodes">0</span> nodes / <span id="edges">0</span> edges</span>
@@ -147,7 +162,7 @@
 <audio id="narration-audio" preload="auto"></audio>
 <div class="play-overlay" id="play-overlay">
   <div class="panel">
-    <button id="overlay-play" type="button">▶ tap anywhere for sound</button>
+    <button id="overlay-play" type="button">▶ Play narration</button>
   </div>
 </div>
 <script>
@@ -227,34 +242,25 @@
     }
   }
 
-  function unlockAudio() {
-    // Mark interaction so future autoplay attempts succeed.  Do NOT
-    // hide the overlay here — only an actual audio 'play' event hides
-    // it (handlers below).  Otherwise a stray mousemove dismisses the
-    // pill before audio has loaded, and the user gets neither the
-    // visual cue nor sound.
-    userInteracted = true;
-    tryPlayChain();
-  }
-  // Click / keydown / touchstart count as user gestures for autoplay
-  // grants on every browser.  Mousemove and scroll are excluded — they
-  // were dismissing the pill silently before audio had a chance to load.
-  ['click', 'keydown', 'touchstart'].forEach(ev => {
-    document.addEventListener(ev, unlockAudio, { once: false, passive: true });
-  });
+  // ── Audio playback policy: explicit Play only ──────────────────────
+  // Earlier versions tried to autoplay on canplay AND on every random
+  // user gesture (click, keydown, touchstart anywhere on the page).
+  // That meant a user who clicked the chat input or the canvas itself
+  // got audio they didn't ask for — which they reasonably called a
+  // bug.  New policy: audio NEVER starts on its own.  The header's
+  // Play button (or the centred overlay button) is the only trigger.
+  // Once playback starts, the standard browser <audio> controls (when
+  // exposed) handle pause / resume / seek.
 
-  // Try to autoplay the prelude as soon as the audio element finishes
-  // loading the WAV.  In Chrome this succeeds when the origin has
-  // accumulated enough media-engagement (effectively: user has played
-  // audio on this exact origin before).
-  intro.addEventListener('canplay', () => {
-    if (!introPlayed && intro.paused) {
-      intro.play().then(() => {
-        userInteracted = true;
-        overlay.classList.add('hidden');
-      }).catch(() => overlay.classList.remove('hidden'));
-    }
-  });
+  // Make the header Play button visible the moment audio is ready.
+  function showPlayButton() {
+    playBtn.classList.remove('hidden');
+    playBtn.style.display = '';
+    playBtn.disabled = false;
+    playBtn.textContent = '▶ Play narration';
+  }
+  intro.addEventListener('canplay', showPlayButton);
+  audio.addEventListener('canplay', showPlayButton);
 
   // Prelude finished → start the narration WAV (which begins with
   // the transition phrase server-side).
@@ -318,9 +324,8 @@
         introPlayed = false;
       }
     }
-    // Whenever state changes, try to start the chain — browsers may
-    // grant autoplay later (e.g. after the user has interacted).
-    tryPlayChain();
+    // (Was: tryPlayChain() here.)  Removed — audio only starts via
+    // an explicit Play button click now.
     // Narration arrived (or was updated)?
     if (state.narration && state.narration.phrases &&
         state.narration.phrases.length > 0) {
@@ -343,22 +348,10 @@
       audio.src = `/canvas/${cid}/narration.wav?t=${Date.now()}`;
       audio.load();
     }
-    // Defer narration whenever an intro WAV exists and hasn't finished
-    // playing.  ``introPlayed`` is the only reliable indicator — checking
-    // ``intro.paused`` was racy because intro.play() returns a Promise
-    // that resolves *after* the next microtask, so right after a click
-    // ``intro.paused`` reads true even though playback is queued, and
-    // narration would start in parallel.  The intro 'ended' handler
-    // takes over and starts narration when the time comes.
-    const introQueued = intro.src && !introPlayed;
-    if (introQueued) return;
-    // Otherwise try to play immediately.
-    if (audio.paused) {
-      audio.play().then(() => {
-        userInteracted = true;
-        overlay.classList.add('hidden');
-      }).catch(() => overlay.classList.remove('hidden'));
-    }
+    // Audio does NOT auto-play here.  Narration is loaded into the
+    // <audio> element; the user clicks the header Play button to
+    // start.  intro.ended still hands off to narration so that one
+    // click on Play covers the full sequence.
   }
 
   // ── Narration-synced reveal ──────────────────────────────────────────

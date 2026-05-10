@@ -1,0 +1,14 @@
+{
+  "app": "../.venv/bin/python sevim_app.py",
+  "watch": {
+    "include": ["**/*.py"],
+    "exclude": ["cdk.out/**", "__pycache__/**"]
+  },
+  "acknowledged-issue-numbers": [34635],
+  "context": {
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/aws-ecs:shouldUseCircuitBreaker": true,
+    "@aws-cdk/aws-ecs:disableExplicitDeploymentControllerForCircuitBreaker": true,
+    "@aws-cdk/aws-rds:auroraClusterChangeScopeOfInstanceParameterGroupWithEachParameters": true
+  }
+}

@@ -110,16 +110,58 @@ _EXPRESS_SYSTEM = (
     "  5. A concluding caption stating the result (e.g. dimensions of C, "
     "or the satisfiability claim, or the limit value).\n"
     "\n"
+    "REFERENCE STYLE — emulate trusted math literature.  Every figure "
+    "should look like it could appear in one of these canonical sources, "
+    "and every narration should sound like it was written by a teacher "
+    "from that tradition.  Pick whichever fits the topic best:\n"
+    "  • Geometry, classical proofs → **Euclid's Elements** (numbered "
+    "constructions, parallel-line + auxiliary-line tricks, formal "
+    "vertex labels A B C, angles α β γ, sides a b c opposite their "
+    "vertices).  e.g. triangle angle sum = Elements I.32.\n"
+    "  • Calculus → **Spivak's Calculus** or **Apostol** (rigorous "
+    "limit-and-area framing, named theorems, ε-δ when relevant); for "
+    "intuition-first plots, **3Blue1Brown / Better Explained** (clean "
+    "color-coded geometric metaphors).\n"
+    "  • Linear algebra → **Strang's Introduction to Linear Algebra** "
+    "(matrix-as-grid layouts, row × column highlighted in contrasting "
+    "colors, four-fundamental-subspaces framing) or **Axler's Linear "
+    "Algebra Done Right** (basis-free thinking, operators-not-matrices).\n"
+    "  • Real / complex analysis → **Rudin's Principles** (concise "
+    "theorem-proof boxes, ε-δ, named inequalities).\n"
+    "  • Discrete & combinatorics → **Concrete Mathematics** (Knuth/"
+    "Graham/Patashnik): Iverson brackets, ⌊⌋⌈⌉, named identities.\n"
+    "  • Algorithms → **CLRS** (pseudocode block + array-state diagram + "
+    "loop invariants stated explicitly).\n"
+    "  • Probability → **Bertsekas/Tsitsiklis** or **Feller** (event "
+    "diagrams, conditional-probability trees, Bayes table).\n"
+    "  • Topology → **Munkres** (open-cover figures, basis arguments).\n"
+    "  • Abstract algebra → **Dummit & Foote** or **Artin** (Cayley "
+    "tables, group-action diagrams, lattice of subgroups).\n"
+    "  • Number theory → **Hardy & Wright** (modular-arithmetic clocks, "
+    "sieve diagrams).\n"
+    "  • Complexity → **Sipser** or **Arora & Barak** (reduction "
+    "diagrams, gadget figures with input/output wires).\n"
+    "  • Mathematical physics → standard textbook diagrams "
+    "(**Feynman**, **Griffiths**, **Goldstein**): coordinate axes "
+    "with arrows, free-body decomposition, vector decomposition.\n"
+    "Cite the named theorem in a caption when one applies (e.g. "
+    "'Elements I.47', 'FTC', 'Cayley-Hamilton', 'Master Theorem', "
+    "'Bayes' theorem').\n"
+    "\n"
     "LAYOUT — match canonical textbook form:\n"
     "  • Matrix multiplication: 2-D grids for A (m×n), B (n×p), C (m×p) "
     "with '·' and '=' between them; row-i of A and column-j of B both "
     "highlighted; the worked sum-of-products written as a separate "
-    "caption.\n"
+    "caption.  (Strang style.)\n"
     "  • 3SAT→clique: 3 columns of literals with cross-cluster edges; "
-    "highlight one valid k-clique.\n"
+    "highlight one valid k-clique.  (Sipser-style reduction diagram.)\n"
     "  • Sets: overlapping circles with example elements drawn inside.\n"
     "  • Derivative / integral: function curve + tangent line / shaded "
-    "area + the actual computed value.\n"
+    "area + the actual computed value.  (Spivak-style.)\n"
+    "  • Euclidean proofs: auxiliary construction drawn with dashed "
+    "stroke; numbered steps in a side caption (Elements style).\n"
+    "  • Group theory: Cayley table as a square grid; group elements "
+    "as labelled nodes if showing a group action.\n"
     "\n"
     "STYLE:\n"
     "  • Notation conventional: a_{ij} via <tspan baseline-shift='sub'>, "
@@ -136,6 +178,40 @@ _EXPRESS_SYSTEM = (
     "computation step by step (typically 15-30 phrases for a non-trivial "
     "concept).\n"
     "\n"
+    "FIRST NARRATION PHRASE — must be specific to THE QUESTION the "
+    "user asked.  Not a generic transition.  Examples:\n"
+    "  • User asks 'show how the angles of a triangle sum to π' → first "
+    "    phrase: 'In any triangle, the three interior angles always add "
+    "    up to π radians — here's why.'  (concrete, names the claim)\n"
+    "  • User asks 'show matrix multiplication' → first phrase: 'Matrix "
+    "    multiplication combines a row of A with a column of B to "
+    "    produce one cell of C.'  (states the operation)\n"
+    "  • User asks 'draw the unit circle' → first phrase: 'The unit "
+    "    circle is the circle of radius 1 centred at the origin.'  "
+    "    (defines the object)\n"
+    "BANNED openings (these sound like filler from a continuation):\n"
+    "  • 'Now let's…'  — implies we were just discussing something else\n"
+    "  • 'Let's see…' / 'Let's look at…'  — empty hedge\n"
+    "  • 'First, let's…' / 'To begin…'  — meta-narration; just begin\n"
+    "  • 'OK so…' / 'Alright,…'  — verbal-tic preamble\n"
+    "  • 'And now please look at the diagram.'  — leftover transition\n"
+    "Open with the IDEA, not a transition into it.\n"
+    "\n"
+    "NARRATION TONE — write as a TEXTBOOK author, not a chatbot.\n"
+    "  • Precise, declarative sentences.  Define things before using them.\n"
+    "  • Use the named theorem when one applies.  'By the Pythagorean "
+    "theorem,…' / 'By Bayes' rule,…' / 'By the FTC,…'  not 'we know that…'\n"
+    "  • Standard notation pronounced naturally: say 'pi' for π, 'theta' "
+    "for θ, 'sigma from k equals one to n' for ∑ₖ₌₁ⁿ.  Read fractions as "
+    "'a over b'.  Read x² as 'x squared'.  Use 'such that' for ':' or "
+    "'|' in set-builder.\n"
+    "  • Avoid colloquialisms ('super easy', 'kind of like', 'awesome').\n"
+    "  • For proofs, use 'Given… | Construction… | By [theorem]… | "
+    "Therefore…' — Euclid-style markers if appropriate.\n"
+    "  • Length: aim for 8-15 phrases for a typical concept; up to 25 "
+    "for a multi-step proof.  Each phrase ≤ 15 words; this is read "
+    "aloud, not read.\n"
+    "\n"
     "FORBIDDEN:\n"
     "  • Empty boxes labelled just 'A', 'B', 'C' with nothing inside.\n"
     "  • Three-column-of-indices layouts that just enumerate cells "
@@ -146,12 +222,22 @@ _EXPRESS_SYSTEM = (
     "whole computation.\n"
     "  • Regenerating a prior figure from scratch when the user asked "
     "for a targeted change.  When a PRIOR FIGURE block is in the "
-    "conversation, your default behaviour is to copy that SVG and "
-    "narration verbatim, then apply ONLY the user's specific edit.  "
-    "Same node ids, same coordinates, same captions for everything "
-    "except the explicitly-changed elements.  The user expects "
-    "visual continuity — they are iterating on a figure, not asking "
-    "for an unrelated new one each turn.\n"
+    "conversation, the SVG must keep every prior element (same ids, "
+    "same coordinates, same captions) and only add or modify the "
+    "elements the user's edit touches.  Visual continuity matters — "
+    "the user is iterating on a figure, not asking for an unrelated "
+    "one each turn.\n"
+    "  • Re-narrating prior content on a refinement.  When a PRIOR "
+    "FIGURE block is in the conversation, the ``narration`` field "
+    "must contain ONLY the NEW phrases that describe the change — "
+    "NOT the prior narration verbatim plus new tail.  The user has "
+    "ALREADY heard the prior audio; restating it word-for-word is "
+    "exactly the wrong behaviour.  Example: prior narration was "
+    "['Here is triangle ABC.', 'The interior angles are α, β, γ.', "
+    "'They sum to π.'].  User says 'now add the median from A'.  "
+    "Correct narration: ['I'm adding the median from A to the "
+    "midpoint of BC.', 'It bisects side BC at point M.'].  WRONG: "
+    "the original three phrases plus the two new ones.\n"
     "\n"
     "If the user's request can't reasonably be drawn, emit a small SVG "
     "saying so plus a one-phrase narration explaining why."
@@ -161,11 +247,13 @@ _EXPRESS_SYSTEM = (
 # ── Vision review (used between retries) ─────────────────────────────────
 
 _REVIEW_SYSTEM = (
-    "You are a pragmatic reviewer of mathematical figures.  Default to "
-    "PASS.  PASS any figure that is functional and broadly correct, "
-    "even if it could be better — partial figures, mid-quality "
-    "labelling, and missing-but-non-essential captions are all PASS.  "
-    "FAIL only when the figure is genuinely BROKEN:\n"
+    "You are a pragmatic reviewer of mathematical figures AND the "
+    "narration that explains them.  You are given the rendered figure "
+    "(as a PNG) and the spoken narration script (as text).  Default to "
+    "PASS for visual polish — partial figures, mid-quality labelling, "
+    "and missing-but-non-essential captions are PASS.\n"
+    "\n"
+    "FAIL on these BROKEN-FIGURE problems:\n"
     "  • orphan leader lines pointing to empty canvas\n"
     "  • notation mismatches the user's request (wrong dimensions, "
     "wrong concept)\n"
@@ -173,10 +261,49 @@ _REVIEW_SYSTEM = (
     "with no matrices visible at all)\n"
     "  • text overlapping text such that nothing is readable\n"
     "  • wrong topology (3SAT-clique drawn as a tree, etc.)\n"
-    "When you FAIL, list concrete actionable fixes — specific elements "
-    "to add/change/remove with values and positions.  Pedagogical "
-    "perfection (e.g. 'no concrete worked example shown') is NOT a "
-    "FAIL condition; the user can ask for that as a follow-up."
+    "\n"
+    "FAIL on these MATH-CORRECTNESS problems (these matter at least as "
+    "much as visual problems — a beautiful figure that teaches a wrong "
+    "fact is worse than a sloppy figure that teaches the truth):\n"
+    "  • Factually wrong claim in any narration phrase, on-canvas "
+    "caption, or text label.  Examples of false claims to catch: "
+    "'interior angles of a triangle sum to 2π' (it is π); 'a prime "
+    "number has exactly three divisors' (it has two); 'sin²θ + cos²θ "
+    "= 2'; 'the derivative of x² is x'; mis-stated formulas, wrong "
+    "constants, wrong dimensions, false set-theoretic identities, "
+    "wrong limits, swapped definitions.  Be especially alert when a "
+    "claim is plausible-sounding but the constant or coefficient is "
+    "wrong.\n"
+    "  • Claim↔figure mismatch — the narration or caption asserts "
+    "something specific that the figure does not actually show.  "
+    "Examples: 'observe how the three angle arcs at A, B, C sum to π' "
+    "but no angle arcs are drawn; caption says 'shaded region is the "
+    "intersection' but nothing is shaded; narration names element "
+    "id='cell_a_2_3' which doesn't exist in the SVG; claim says "
+    "'equilateral triangle' but the rendered sides are visibly "
+    "unequal; claim labels a point as the centroid but it's clearly "
+    "not at the average of the vertices.\n"
+    "  • Geometric impossibility visible in the figure — three points "
+    "claimed collinear but the rendered line bends; circle claimed to "
+    "pass through a labelled point but the point sits clearly off the "
+    "circle; an angle marked '90°' that visibly is not.\n"
+    "\n"
+    "When you FAIL, list concrete actionable fixes.  Use:\n"
+    "  • fix_narration_phrase — for false claims in spoken narration "
+    "(give the phrase index + the corrected text in details).\n"
+    "  • fix_caption_text — for false text on the canvas (give the "
+    "current wrong text + the corrected text in details).\n"
+    "  • add_element / highlight_relation — when the claim is "
+    "correct but the figure needs the visual demonstration the claim "
+    "references (e.g. add the angle arcs the narration is talking "
+    "about).\n"
+    "  • the existing actions (add_label, fix_layout, fix_notation, "
+    "etc.) for visual-only problems.\n"
+    "\n"
+    "Pedagogical perfection (e.g. 'no concrete worked example shown') "
+    "is NOT a FAIL condition; the user can ask for that as a "
+    "follow-up.  But a wrong claim is always FAIL, regardless of how "
+    "polished the figure looks."
 )
 
 
@@ -217,6 +344,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
                             "fill_with_data", "add_label", "add_formula",
                             "add_conclusion", "fix_layout", "highlight_relation",
                             "fix_notation",
+                            "fix_narration_phrase", "fix_caption_text",
                         ],
                     },
                     "what": {
@@ -256,31 +384,70 @@ REVIEW_SCHEMA: dict[str, Any] = {
 }
 
 
-def _review_user_prompt(user_prompt: str) -> str:
+def _review_user_prompt(
+    user_prompt: str,
+    narration: list[dict[str, Any]] | None = None,
+) -> str:
+    narration_block = ""
+    if narration:
+        lines = []
+        for i, phrase in enumerate(narration, start=1):
+            speak = (phrase or {}).get("speak", "")
+            highlight = (phrase or {}).get("highlight") or []
+            if highlight:
+                lines.append(f"  [{i}] {speak!r}  → highlights: {highlight}")
+            else:
+                lines.append(f"  [{i}] {speak!r}")
+        narration_block = (
+            "\nNarration script (spoken aloud while the figure plays):\n"
+            + "\n".join(lines)
+            + "\n"
+        )
     return (
-        f"User asked: {user_prompt!r}\n\n"
-        "Review this figure pragmatically.  PASS unless the figure is "
-        "genuinely broken or wildly off-topic.  Specifically PASS when "
-        "the main content matches the request (matrices for matrix "
-        "mult, clauses-and-edges for 3SAT-clique, etc.), even if some "
-        "polish is missing — the user can request refinements as "
-        "follow-up turns.\n\n"
-        "FAIL only on these objective problems:\n"
-        "  • Main content missing entirely (e.g. matrix-mult request "
-        "    but no matrices visible).\n"
-        "  • Wrong topology (3SAT-clique shown as a tree, "
-        "    matrix-mult shown as a single column of indices).\n"
-        "  • Orphan leader lines pointing to empty canvas.\n"
-        "  • Dimensions don't match the user's request "
-        "    (asked for 3×5, drawn as 2×4).\n"
-        "  • Text completely overlapping text such that nothing is "
-        "    readable.\n\n"
-        "Set verdict='PASS' when the figure shows the right concept "
-        "with reasonable layout, even if it lacks worked examples or "
-        "explanatory captions.  Reserve verdict='FAIL' for the "
-        "objective problems above.\n\n"
-        "If FAIL, populate fixes[] with concrete actions: specific "
-        "elements to add/change/remove with positions and values."
+        f"User asked: {user_prompt!r}\n"
+        f"{narration_block}\n"
+        "Review the figure AND the narration together.  Two independent "
+        "judgements:\n"
+        "\n"
+        "(A) Visual polish.  PASS unless the figure is genuinely broken "
+        "or wildly off-topic.  Specifically PASS when the main content "
+        "matches the request (matrices for matrix mult, clauses-and-"
+        "edges for 3SAT-clique, etc.), even if some polish is missing.  "
+        "FAIL on: main content missing entirely; wrong topology; orphan "
+        "leader lines; dimensions don't match the request; text "
+        "completely overlapping text.\n"
+        "\n"
+        "(B) Math-correctness inspection.  Check each narration phrase "
+        "AND each on-canvas caption/label for factual truth and for "
+        "consistency with the figure.  FAIL on:\n"
+        "  • A claim that is mathematically false on its face "
+        "    (e.g. 'angles of a triangle sum to 2π' — the truth is π; "
+        "    'derivative of x² is x' — the truth is 2x).  Pay attention "
+        "    to constants, signs, exponents, and direction of "
+        "    inequalities — these are where false claims hide.\n"
+        "  • A claim that names something the figure does not show "
+        "    (e.g. 'observe the angle arcs at A, B, C' but no arcs are "
+        "    drawn; highlight ids that don't exist in the SVG; caption "
+        "    'shaded intersection' but nothing is shaded).\n"
+        "  • A geometric assertion the figure visibly contradicts "
+        "    (claimed equilateral triangle with unequal sides, claimed "
+        "    right angle that is not 90°, claimed point on circle that "
+        "    is plainly off it).\n"
+        "\n"
+        "Verdict='PASS' only when BOTH (A) and (B) pass.  A wrong claim "
+        "is always FAIL even if the figure looks good — fixing the math "
+        "matters more than visual polish.\n"
+        "\n"
+        "If FAIL, populate fixes[] with concrete actions:\n"
+        "  • fix_narration_phrase — what='phrase N' (1-indexed), "
+        "    details='exact corrected text the speaker should say'.\n"
+        "  • fix_caption_text — what=current wrong text or element id, "
+        "    details='exact corrected caption text'.\n"
+        "  • add_element / highlight_relation — when the claim is "
+        "    correct but the figure lacks the visual the claim names "
+        "    (give what to draw, where, and any text).\n"
+        "  • existing visual actions (add_label, fix_layout, "
+        "    fix_notation, etc.) for purely visual issues."
     )
 
 
@@ -319,6 +486,12 @@ async def express_figure(
 
     review_history: list[str] = []
     result: dict[str, Any] = {}
+    # Snapshot of the most recent FAILED attempt's (svg, narration, critique).
+    # When a later attempt PASSes the reviewer, this snapshot pairs with the
+    # passing result to form a (bad → critique → good) repair triple — the
+    # core distillation signal export_finetune.py turns into DPO/SFT data.
+    prev_fail: tuple[str, list[dict[str, Any]], str] | None = None
+    repairs: list[dict[str, Any]] = []
 
     import sys as _sys
     def _log(msg: str) -> None:
@@ -369,16 +542,38 @@ async def express_figure(
             base_url=base_url,
             model=model,
             api_key=api_key,
+            narration=result.get("narration") or [],
         )
         if verdict is None:  # PASS or unable to review
+            # If a previous attempt failed and this one passed, the pair
+            # is a repair triple worth keeping for distillation.
+            if prev_fail is not None:
+                bad_svg, bad_narration, bad_critique = prev_fail
+                repairs.append({
+                    "attempt_index": attempt,
+                    "bad_svg": bad_svg,
+                    "bad_narration": bad_narration,
+                    "critique": bad_critique,
+                    "good_svg": result["svg"],
+                    "good_narration": result.get("narration") or [],
+                })
             return {
                 "svg": result["svg"],
                 "narration": result.get("narration") or [],
                 "title": result.get("title") or "",
                 "review_history": review_history,
                 "retries_used": attempt,
+                "repairs": repairs,
             }
         review_history.append(verdict)
+        # Stash this failed attempt; if the next attempt PASSes it pairs
+        # with this one to form a repair triple.  Overwrites any earlier
+        # failure: only the LAST fail-then-pass pair is captured per turn.
+        prev_fail = (
+            result["svg"],
+            result.get("narration") or [],
+            verdict,
+        )
 
         # 3. Inject critique + image, ask for a corrected response.
         if attempt >= max_retries:
@@ -404,12 +599,14 @@ async def express_figure(
         ]})
 
     # Loop exited with a still-failing figure — return last attempt anyway.
+    # No repair pair recorded: nothing was actually corrected.
     return {
         "svg": result.get("svg", ""),
         "narration": result.get("narration") or [],
         "title": result.get("title") or "",
         "review_history": review_history,
         "retries_used": max_retries,
+        "repairs": repairs,
     }
 
 
@@ -419,6 +616,7 @@ async def _vision_review(
     base_url: str,
     model: str,
     api_key: str | None,
+    narration: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Render SVG to PNG, ask the LLM to review it via the structured
     REVIEW_SCHEMA.  Returns ``None`` on PASS (or if the review call
@@ -460,7 +658,7 @@ async def _vision_review(
         "messages": [
             {"role": "system", "content": _REVIEW_SYSTEM},
             {"role": "user", "content": [
-                {"type": "text", "text": _review_user_prompt(user_prompt)},
+                {"type": "text", "text": _review_user_prompt(user_prompt, narration)},
                 {"type": "image_url",
                  "image_url": {"url": f"data:image/png;base64,{b64}"}},
             ]},
@@ -538,18 +736,29 @@ def _build_user_content(
         f"{len(context_canvases)} prior figure(s) are attached below.  "
         f"For each, you'll see (a) the SVG XML, (b) the rendered PNG, "
         f"(c) the prompt that produced it, (d) its narration script.\n\n"
-        f"RULE: when the user's NEW REQUEST asks for a targeted change "
-        f"to a prior figure ('change X', 'add Y', 'remove Z', "
-        f"'highlight W'), you MUST start from that prior SVG and apply "
-        f"ONLY the requested change.  Preserve every unchanged element "
-        f"BYTE-FOR-BYTE — same ids, same coordinates, same text.  Do "
-        f"NOT regenerate the layout from scratch; the user expects to "
-        f"see continuity.  Same applies to narration: keep unchanged "
-        f"phrases verbatim, modify or insert only what the request "
-        f"affects.\n\n"
-        f"Only generate a fully new figure when the new request is "
-        f"unrelated to any attached prior figure (e.g. user says "
-        f"'now show me a different concept')."
+        f"SVG RULE: when the user's NEW REQUEST asks for a targeted "
+        f"change ('add X', 'change Y', 'remove Z', 'highlight W', "
+        f"'continue', 'explain step 3'), start from the prior SVG and "
+        f"apply ONLY the requested change.  Preserve every unchanged "
+        f"element BYTE-FOR-BYTE — same ids, same coordinates, same "
+        f"text.  Do NOT regenerate the layout; the user expects "
+        f"visual continuity.\n\n"
+        f"NARRATION RULE — this is the part most models get wrong, "
+        f"please re-read carefully: the ``narration`` field MUST "
+        f"contain ONLY THE NEW PHRASES that describe THIS turn's "
+        f"change.  Do NOT re-emit any prior phrase verbatim and do "
+        f"NOT prepend the prior narration to the new content.  The "
+        f"user has ALREADY heard the prior audio in their browser; "
+        f"playing it again from the top is exactly what the user is "
+        f"trying to avoid.\n\n"
+        f"Concretely: if prior narration had 5 phrases and the user "
+        f"asks 'continue with the next step', the new narration must "
+        f"be e.g. 2-4 phrases — only the new step's narration — NOT "
+        f"the original 5 + 3 new = 8.  If unsure whether a phrase is "
+        f"genuinely new vs a restatement of the prior turn, drop it.\n\n"
+        f"Only generate a fully new figure (and a fully new narration) "
+        f"when the new request is UNRELATED to any attached prior "
+        f"figure (e.g. user pivots: 'now show me matrix multiplication')."
     )})
     for i, ctx in enumerate(context_canvases, start=1):
         cid = ctx.get("id", "?")
@@ -570,19 +779,25 @@ def _build_user_content(
             blocks.append({"type": "text", "text": f"(could not render preview: {exc})"})
         narration = ctx.get("narration") or []
         if narration:
-            # Include the FULL narration script with highlight ids — the
-            # model needs to know which phrases targeted which elements
-            # so it can preserve unchanged phrases verbatim and only
-            # modify the ones the refinement affects.
+            # The prior narration is shown for CONTEXT only — so the
+            # model knows what the user has already heard and which
+            # SVG-element ids prior phrases targeted.  The new turn's
+            # ``narration`` field must NOT include any of these
+            # phrases.  Only emit phrases that describe the new
+            # change.
             blocks.append({"type": "text", "text": (
-                "Its current narration script "
-                "(modify in place; preserve unchanged phrases byte-for-byte):\n"
+                "Its prior narration script (FOR REFERENCE ONLY — the "
+                "user has already heard this; do NOT include any of "
+                "these phrases in your new ``narration`` output):\n"
                 + json.dumps(narration, indent=2)
             )})
     blocks.append({"type": "text", "text": (
         f"\n=== NEW REQUEST ===\n{user_prompt}\n\n"
-        f"Reminder: if this is a refinement of a prior figure, return "
-        f"the prior SVG with ONLY the requested edits applied.  If it "
-        f"is a brand-new figure, ignore the priors and start fresh."
+        f"Reminder if this is a refinement: SVG keeps every prior "
+        f"element + adds the requested change; ``narration`` contains "
+        f"ONLY the NEW phrases for this turn (the user has already "
+        f"heard the prior audio).  If this is a brand-new request "
+        f"unrelated to the prior figure, ignore the priors and start "
+        f"fresh with a complete narration."
     )})
     return blocks

@@ -32,11 +32,18 @@ import asyncio
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
-from sse_starlette.sse import EventSourceResponse
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Populate env from Secrets Manager (AWS) or .env (local) BEFORE any
+# downstream module reads OPENAI_API_KEY / SEVIM_VLLM_* / SEVIM_TELEMETRY_DB.
+# Idempotent and safe across all entry points (uvicorn direct, python -m
+# studio, python -m mcp_server, container CMD).
+from service.secrets import bootstrap as _bootstrap_secrets  # noqa: E402
+_bootstrap_secrets()
+
+from fastapi import FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, Response  # noqa: E402
+from sse_starlette.sse import EventSourceResponse  # noqa: E402
 
 from sevim.s3_map import _RELATION_PATTERN  # noqa: E402
 
@@ -65,7 +72,108 @@ app = FastAPI(
 if _STUDIO_AVAILABLE:
     app.include_router(_studio_router)
 
+# Public marketing-side routes: contact form (with captcha + SES send)
+# and the terms page.  Both serve unauthenticated.
+from service.contact import router as _contact_router  # noqa: E402
+app.include_router(_contact_router)
+
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Public landing page — explains what Sevim is, gives a CTA to
+    sign in, and contains the SEO meta + structured data crawlers need
+    to surface us in search results.  Authenticated users still get
+    Studio one click away via the Sign-in button."""
+    landing = _STATIC_DIR / "landing.html"
+    if not landing.exists():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/studio", status_code=302)
+    return FileResponse(
+        landing, media_type="text/html",
+        headers={"cache-control": "public, max-age=300"},
+    )
+
+
+@app.get("/terms", include_in_schema=False)
+def terms_page():
+    """Public terms-and-conditions page.  Static HTML, served from disk
+    so we can edit copy without touching Python."""
+    terms = _STATIC_DIR / "terms.html"
+    if not terms.exists():
+        raise HTTPException(500, "terms.html missing")
+    return FileResponse(
+        terms, media_type="text/html",
+        headers={"cache-control": "public, max-age=3600"},
+    )
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    """Search-engine policy: index the landing, the FAQ anchors are
+    fine, but stay out of the Studio app, the canvas viewers, and
+    every internal API surface (those need auth or are user-data)."""
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /contact\n"
+        "Allow: /terms\n"
+        "Disallow: /studio\n"
+        "Disallow: /studio/\n"
+        "Disallow: /canvas/\n"
+        "Disallow: /canvases\n"
+        "Disallow: /ontology\n"
+        "Disallow: /health\n"
+        "\n"
+        "Sitemap: https://khayyammath.com/sitemap.xml\n"
+    )
+    return Response(content=body, media_type="text/plain",
+                    headers={"cache-control": "public, max-age=86400"})
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml():
+    """One URL today: the landing.  We'll add more as we grow public
+    content (a /pricing page, a /docs page, etc.)."""
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        '  <url>\n'
+        '    <loc>https://khayyammath.com/</loc>\n'
+        '    <changefreq>weekly</changefreq>\n'
+        '    <priority>1.0</priority>\n'
+        '  </url>\n'
+        '  <url>\n'
+        '    <loc>https://khayyammath.com/contact</loc>\n'
+        '    <changefreq>monthly</changefreq>\n'
+        '    <priority>0.5</priority>\n'
+        '  </url>\n'
+        '  <url>\n'
+        '    <loc>https://khayyammath.com/terms</loc>\n'
+        '    <changefreq>yearly</changefreq>\n'
+        '    <priority>0.3</priority>\n'
+        '  </url>\n'
+        '</urlset>\n'
+    )
+    return Response(content=body, media_type="application/xml",
+                    headers={"cache-control": "public, max-age=86400"})
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """1x1 transparent PNG — silences browsers' /favicon.ico requests
+    so they don't show 404s in the tab and don't pollute the auth
+    handler's logs.  Replace with a real icon when we have a brand."""
+    from fastapi.responses import Response
+    # 67-byte 1×1 transparent PNG
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00"
+        b"\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc"
+        b"\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    return Response(content=png, media_type="image/png",
+                    headers={"cache-control": "public, max-age=86400"})
 
 
 @app.get("/health")
@@ -123,6 +231,25 @@ def canvas_svg(cid: str):
     return Response(content=svg, media_type="image/svg+xml")
 
 
+def _serve_canvas_audio(cid: str, kind: str, local_path: str | None):
+    """Shared serve-or-redirect logic for narration / intro WAVs.
+
+    Local FileResponse when the file is on disk; else a 302 redirect to a
+    presigned S3 URL when the storage backend is remote and an upload
+    succeeded earlier (Fargate task replacement scenario); else 404.
+    """
+    if local_path and Path(local_path).is_file():
+        return FileResponse(local_path, media_type="audio/wav")
+    from service.storage import get_storage
+    from fastapi.responses import RedirectResponse
+    storage = get_storage()
+    if storage.is_remote():
+        url = storage.presigned_get_url(f"{cid}/{kind}.wav")
+        if url:
+            return RedirectResponse(url, status_code=302)
+    raise HTTPException(404, f"no {kind} generated yet")
+
+
 @app.get("/canvas/{cid}/narration.wav")
 def canvas_narration_wav(cid: str):
     try:
@@ -131,9 +258,7 @@ def canvas_narration_wav(cid: str):
         raise HTTPException(404, f"canvas {cid!r} not found")
     with c.lock:
         wav_path = c.narration_wav
-    if not wav_path or not Path(wav_path).is_file():
-        raise HTTPException(404, "no narration generated yet")
-    return FileResponse(wav_path, media_type="audio/wav")
+    return _serve_canvas_audio(cid, "narration", wav_path)
 
 
 @app.get("/canvas/{cid}/intro.wav")
@@ -144,9 +269,7 @@ def canvas_intro_wav(cid: str):
         raise HTTPException(404, f"canvas {cid!r} not found")
     with c.lock:
         wav_path = c.intro_wav
-    if not wav_path or not Path(wav_path).is_file():
-        raise HTTPException(404, "no intro generated yet")
-    return FileResponse(wav_path, media_type="audio/wav")
+    return _serve_canvas_audio(cid, "intro", wav_path)
 
 
 @app.get("/canvas/{cid}/narration.json")

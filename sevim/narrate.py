@@ -3,7 +3,7 @@
 The host LLM hands Sevim a *script* — an ordered list of phrases, each
 optionally tagged with the canvas element it talks about.  This module:
 
-  1. Synthesises each phrase to its own WAV via piper-tts.
+  1. Synthesises each phrase to its own WAV (via OpenAI TTS or piper).
   2. Reads each phrase's exact duration from its WAV header.
   3. Concatenates the phrases into a single audio file with a tiny
      silence gap between them (so the cadence sounds natural).
@@ -16,15 +16,27 @@ count — the highlight schedule is exact: when the audio cursor hits
 highlight on that phrase becomes active at that instant.  No drift, no
 estimation, no need for forced alignment.
 
-Voice model
------------
-Default path: ``~/.local/share/sevim/voices/en_US-lessac-medium.onnx``.
-Override via the env var ``SEVIM_VOICE_MODEL``.  The companion JSON
-config must sit next to the .onnx (piper expects ``<model>.onnx.json``).
+Backends
+--------
+``SEVIM_TTS_BACKEND`` selects the synthesiser:
+  * ``openai``  — OpenAI's TTS endpoint (``tts-1-hd`` by default).
+                  Higher voice quality, costs money (~$0.036 per turn
+                  at typical phrase length × 15 phrases).
+  * ``piper``   — local piper-tts, free, fast, lower quality.  Voice
+                  model lives at ``SEVIM_VOICE_MODEL`` (default
+                  ``~/.local/share/sevim/voices/en_US-lessac-medium.onnx``).
+  * ``auto``    — (default) prefer ``openai`` when ``OPENAI_API_KEY``
+                  is set, fall back to ``piper`` otherwise.
+
+When OpenAI is selected, the model + voice are tunable via
+``SEVIM_TTS_MODEL`` (default ``tts-1-hd``) and ``SEVIM_TTS_VOICE``
+(default ``alloy``).  Within a single script every phrase uses the
+same backend so sample-rate / channel format stays uniform.
 """
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import wave
 from dataclasses import dataclass
@@ -59,6 +71,87 @@ def _load_voice():
         voice = PiperVoice.load(path)
         _voice_cache[path] = voice
         return voice
+
+
+# ---------------------------------------------------------------------------
+# Backend selection — OpenAI vs piper.
+# ---------------------------------------------------------------------------
+
+_OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech"
+_DEFAULT_OPENAI_MODEL = "tts-1-hd"   # quality > speed; ~1-2 s/phrase
+_DEFAULT_OPENAI_VOICE = "alloy"      # clear neutral voice for tutoring
+
+
+def _tts_backend() -> str:
+    return os.environ.get("SEVIM_TTS_BACKEND", "auto").lower()
+
+
+def _resolved_backend() -> str:
+    """Materialise ``auto`` into ``openai`` or ``piper`` based on key
+    availability.  Once chosen the value is sticky for the call."""
+    chosen = _tts_backend()
+    if chosen == "auto":
+        if os.environ.get("OPENAI_API_KEY"):
+            return "openai"
+        return "piper"
+    return chosen
+
+
+def _openai_synthesize_wav(text: str, out_path: Path) -> None:
+    """POST text to OpenAI's /v1/audio/speech and write the WAV bytes
+    to ``out_path``.  Raises on HTTP / network failure so the caller
+    can fall back to piper.
+    """
+    import httpx
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    payload = {
+        "model": os.environ.get("SEVIM_TTS_MODEL", _DEFAULT_OPENAI_MODEL),
+        "voice": os.environ.get("SEVIM_TTS_VOICE", _DEFAULT_OPENAI_VOICE),
+        "input": text,
+        "response_format": "wav",
+    }
+    with httpx.Client(timeout=45.0) as c:
+        r = c.post(
+            _OPENAI_TTS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"OpenAI TTS HTTP {r.status_code}: {r.text[:200]}"
+            )
+        out_path.write_bytes(r.content)
+
+
+def _synthesize_phrase(text: str, out_path: Path, backend: str) -> str:
+    """Synthesise one phrase to ``out_path``.  Returns the backend that
+    actually produced the audio (may differ from the requested one if
+    OpenAI failed and we fell back to piper)."""
+    if backend == "openai":
+        try:
+            _openai_synthesize_wav(text, out_path)
+            return "openai"
+        except Exception as exc:  # noqa: BLE001
+            # Fall back to piper rather than fail the whole turn.  Log
+            # so it's visible in CloudWatch.
+            print(f"[narrate] OpenAI TTS failed ({exc}); "
+                  "falling back to piper for this phrase",
+                  flush=True, file=sys.stderr)
+    if not voice_available():
+        raise FileNotFoundError(
+            f"piper voice model not found at {_voice_path()} and OpenAI "
+            f"TTS unavailable.  Install a piper voice or set "
+            f"OPENAI_API_KEY + SEVIM_TTS_BACKEND=openai."
+        )
+    voice = _load_voice()
+    with wave.open(str(out_path), "wb") as wav:
+        voice.synthesize_wav(text, wav)
+    return "piper"
 
 
 def voice_available() -> bool:
@@ -114,15 +207,18 @@ def synthesize_script(
     """
     if not script:
         raise ValueError("script must contain at least one phrase")
-    if not voice_available():
+
+    backend = _resolved_backend()
+    # If we picked piper (either explicitly or because no OpenAI key
+    # is configured), the voice model must exist.  When using OpenAI
+    # we don't need the local model at all, so this check is gated.
+    if backend == "piper" and not voice_available():
         raise FileNotFoundError(
-            f"Sevim voice model not found at {_voice_path()}.  "
-            "Download a piper voice (e.g. en_US-lessac-medium.onnx + .json) "
-            "and place both files there, or set SEVIM_VOICE_MODEL to point "
-            "at an existing model."
+            f"piper voice model not found at {_voice_path()}.  "
+            "Install one (en_US-lessac-medium.onnx + .json) or set "
+            "SEVIM_TTS_BACKEND=openai with a valid OPENAI_API_KEY."
         )
 
-    voice = _load_voice()
     phrases_dir = Path(out_wav_path).with_suffix(".phrases")
     phrases_dir.mkdir(parents=True, exist_ok=True)
 
@@ -134,18 +230,39 @@ def synthesize_script(
     audio_frames: list[bytes] = []
     gap_silence: bytes = b""
 
+    # Validate every phrase up front so the parallel synth doesn't
+    # spawn a futile threadpool of bad inputs.
+    for i, entry in enumerate(script):
+        if not (entry.get("speak") or "").strip():
+            raise ValueError(
+                f"script[{i}] has no `speak` text — every phrase must speak something"
+            )
+
+    # Synthesise all phrases CONCURRENTLY.  Sequential made the chat
+    # endpoint look hung for 15-25 s during a typical turn, which
+    # (a) was a poor UX and (b) caused the SSE connection to be
+    # cancelled by the ALB before the tool result could be sent.
+    # Parallelism collapses the wall time to roughly the SLOWEST
+    # single-phrase synth (~1-2 s).
+    from concurrent.futures import ThreadPoolExecutor
+    tmp_paths: list[Path] = [
+        phrases_dir / f"phrase_{i:03d}.wav" for i in range(len(script))
+    ]
+    max_workers = min(len(script), 12)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [
+            ex.submit(_synthesize_phrase, (entry.get("speak") or "").strip(),
+                      tmp_paths[i], backend)
+            for i, entry in enumerate(script)
+        ]
+        for fut in futures:
+            fut.result()  # propagate any synth exception
+
     try:
         for i, entry in enumerate(script):
             text = (entry.get("speak") or "").strip()
-            if not text:
-                raise ValueError(
-                    f"script[{i}] has no `speak` text — every phrase must "
-                    f"speak something"
-                )
             highlight = entry.get("highlight")
-            tmp_path = phrases_dir / f"phrase_{i:03d}.wav"
-            with wave.open(str(tmp_path), "wb") as wav:
-                voice.synthesize_wav(text, wav)
+            tmp_path = tmp_paths[i]
             with wave.open(str(tmp_path), "rb") as wav:
                 if sample_rate is None:
                     sample_rate = wav.getframerate()
@@ -155,8 +272,27 @@ def synthesize_script(
                     gap_silence = b"\x00" * (
                         silence_frames * sample_width * channels
                     )
-                duration = wav.getnframes() / wav.getframerate()
-                audio_frames.append(wav.readframes(wav.getnframes()))
+                # OpenAI's TTS WAV uses the streaming-audio placeholder
+                # nframes=INT32_MAX (2147483647) instead of the real
+                # frame count.  Calling wav.readframes(2147483647)
+                # tries to PRE-ALLOCATE a 4.3 GB buffer and raises
+                # MemoryError on a 2 GB Fargate task.  Read in 64 K
+                # frame chunks until EOF and concat — the bytes-length
+                # returned is authoritative for both real and bogus
+                # nframes counts.
+                CHUNK_FRAMES = 65536
+                pieces: list[bytes] = []
+                while True:
+                    chunk = wav.readframes(CHUNK_FRAMES)
+                    if not chunk:
+                        break
+                    pieces.append(chunk)
+                frames_bytes = b"".join(pieces)
+                actual_frames = (
+                    len(frames_bytes) // (sample_width * channels)
+                ) if (sample_width and channels) else 0
+                duration = actual_frames / sample_rate if sample_rate else 0.0
+                audio_frames.append(frames_bytes)
 
             timings.append(PhraseTiming(
                 text=text,
@@ -203,3 +339,6 @@ def synthesize_script(
             for t in timings
         ],
     }
+# build-rev: 1778412627
+# build-rev: 1778417405
+# build-rev: 1778420423

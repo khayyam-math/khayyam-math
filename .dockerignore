@@ -1,0 +1,69 @@
+# Keep the build context lean — Docker COPY only what the runtime needs.
+# Everything matched here is invisible to the daemon during `docker build`.
+
+# Local virtualenvs / caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local config / secrets — must NEVER end up in an image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Git + IDE
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+
+# Docs, papers, deleted/old code — not needed at runtime
+docs/
+paper/
+old/
+*.md
+!README.md
+LICENSE
+NOTICE
+CITATION.cff
+
+# Tests — unit tests run in CI, not inside the image
+tests/
+
+# Build artefacts
+build/
+dist/
+*.svg
+*.pdf
+*.log
+out.svg
+out.ir.json
+out.trace.json
+
+# Local dev outputs
+SESSION_STATE.md
+
+# CI / scripts kept on the host (training runs externally on the 5090)
+scripts/
+
+# CDK / Terraform infra — not part of the runtime image; CDK builds the
+# image FROM this repo, and we don't want the IaC tree (or its cdk.out/
+# directory) recursing back into the build context.
+infra/
+cdk.out/
+
+# Telemetry DB / training corpora — runtime artefacts, not build inputs
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl

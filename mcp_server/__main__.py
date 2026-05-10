@@ -41,6 +41,8 @@ import time
 
 import uvicorn
 
+from service.secrets import bootstrap as _bootstrap_secrets
+
 from .server import configure, get_default_host, get_default_port, mcp, run_stdio
 
 
@@ -172,6 +174,7 @@ def main() -> None:
         format="[sevim-mcp %(levelname)s] %(message)s",
     )
 
+    _bootstrap_secrets()
     args = _parse_args()
 
     viewer_host = get_default_host()

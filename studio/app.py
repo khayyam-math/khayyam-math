@@ -28,12 +28,20 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from service.canvas import REGISTRY
+from studio.auth import (
+    clear_cookie,
+    current_user,
+    is_required as auth_is_required,
+    request_magic_link,
+    require_user,
+    verify_link_and_set_cookie,
+)
 
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -164,7 +172,7 @@ async def _execute_tool(
         context_canvases=context_canvases,
     )
     duration_s = _time.monotonic() - t0
-    cid = "express_" + secrets.token_hex(3)
+    cid = "express_" + secrets.token_hex(8)
     c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=False,
                       width=900, height=620)
     c.set_raw_svg(result["svg"])
@@ -197,6 +205,18 @@ async def _execute_tool(
             svg=result.get("svg", ""),
             narration=narration,
         )
+        for pair in result.get("repairs") or []:
+            tel.record_repair_pair(
+                session_id=session_id,
+                turn_id=turn_id,
+                attempt_index=pair.get("attempt_index", 0),
+                user_prompt=prompt,
+                bad_svg=pair.get("bad_svg"),
+                bad_narration=pair.get("bad_narration"),
+                critique=pair.get("critique"),
+                good_svg=pair.get("good_svg"),
+                good_narration=pair.get("good_narration"),
+            )
     return {
         "canvas_id": c.canvas_id,
         "view_url": f"/canvas/{c.canvas_id}/view",
@@ -259,41 +279,68 @@ class ChatReq(BaseModel):
 
 
 SYSTEM_PROMPT = (
-    "You are a real-time visual TUTOR.  Every user message is a request "
-    "for a diagram-with-narration.  You have exactly ONE tool: "
-    "``sevim_express(prompt)``.  Call it once with the user's request "
-    "(verbatim or lightly clarified to be self-contained), then end "
-    "your turn with at most one short acknowledgement sentence in "
-    "chat.  All audio + visuals come from the canvas — do NOT type "
-    "the lesson into chat.\n"
+    "You are a real-time visual TUTOR — like ChatGPT but with a live "
+    "diagram canvas next to the chat.  You have exactly ONE tool: "
+    "``sevim_express(prompt)``.  It draws/updates the canvas (SVG + "
+    "phrase-timed audio narration).  Calling it generates fresh audio "
+    "every time, so DO NOT call it for follow-ups that don't actually "
+    "change what's on the canvas.\n"
     "\n"
-    "How sevim_express works (so you know what's happening):\n"
-    "  • gpt-4o emits a complete SVG figure + phrase-timed narration "
-    "in one structured response.\n"
-    "  • Sevim renders the SVG to PNG and asks gpt-4o (vision) to "
-    "audit it against a strict math-teacher rubric.  Up to 3 retries.\n"
-    "  • piper TTS synthesises the narration; the canvas viewer plays "
-    "the audio and highlights elements as their phrase is spoken.\n"
-    "  • Result is shipped to the user's browser iframe.\n"
+    "DECISION RULE — call sevim_express, or just reply in chat?\n"
     "\n"
-    "If the user follows up to refine ('add the conclusion', 'use "
-    "different numbers', 'show the dot product step', 'combine this "
-    "with the matrix mult one'), call sevim_express again with a "
-    "prompt that bundles the original request plus the refinement.  "
-    "Studio AUTOMATICALLY attaches the most-recent canvas (the one "
-    "the user is currently looking at) AND any canvases the user has "
-    "pinned in the chat (📌 button) — gpt-4o sees their actual PNG "
-    "snapshots and the prompts that produced them, so you can refer "
-    "to them naturally in your new prompt without quoting canvas IDs.\n"
+    "  Call sevim_express WHEN:\n"
+    "    • the user asks for a new figure / visualization\n"
+    "    • the user asks to MODIFY the figure on screen ('add the "
+    "      conclusion', 'use different numbers', 'highlight the chord', "
+    "      'combine this with the matrix-mult one')\n"
+    "    • the user asks for a different example of the same concept\n"
     "\n"
-    "If the user asks something that is not a figure request "
-    "(general question, ambiguous), reply in chat asking what they'd "
-    "like to see drawn — don't call sevim_express on a vague prompt."
+    "  Reply in CHAT (no tool call) WHEN:\n"
+    "    • the user asks a complementary / clarifying question about "
+    "      the figure already on screen ('why is that true?', 'what's "
+    "      the area underneath?', 'what does the highlighted arc mean?', "
+    "      'explain step 3 again')\n"
+    "    • the user wants conceptual elaboration on something just "
+    "      discussed, where the existing figure already supports the "
+    "      explanation\n"
+    "    • greetings, acknowledgements, off-topic chat\n"
+    "    • the request is too vague to draw — ask a clarifying "
+    "      question instead\n"
+    "\n"
+    "WHEN YOU REPLY IN CHAT:\n"
+    "  • Be concise (1-4 sentences typically).  This is a chat reply, "
+    "    not a re-lesson — the canvas already has the diagram.\n"
+    "  • Reference the figure that's on screen ('see the orange arc — "
+    "    that's the supplementary angle…').\n"
+    "  • Do NOT re-narrate what the canvas's audio already covered.  "
+    "    Add NEW information; don't repeat the previous turn.\n"
+    "  • Do NOT call sevim_express just to redraw the same figure.\n"
+    "\n"
+    "WHEN YOU CALL sevim_express:\n"
+    "  • Studio AUTO-attaches the most-recent canvas + any pinned "
+    "    canvases as context — you can refer to them naturally in your "
+    "    sevim_express prompt without quoting canvas IDs.\n"
+    "  • For a refinement, write a prompt that bundles the original "
+    "    request plus the new change so the model has full context.\n"
+    "  • After the tool returns, end your turn with at most ONE short "
+    "    acknowledgement sentence in chat (e.g. 'Updated.' or 'Here it "
+    "    is.').  The canvas's narration covers the explanation.\n"
+    "\n"
+    "How sevim_express works internally (FYI): gpt-4o emits SVG + "
+    "phrase-timed narration in one structured response; Sevim audits "
+    "the figure against a math-teacher rubric (up to 3 retries) and "
+    "synthesises piper TTS audio with phrase highlights.  The "
+    "math-correctness inspector specifically catches false claims like "
+    "'angles of a triangle sum to 2π' (truth: π) — trust it."
 )
 
 
 @router.post("/chat")
-async def chat(req: ChatReq, request: Request):
+async def chat(
+    req: ChatReq,
+    request: Request,
+    user: str = Depends(require_user),
+):
     """Studio chat entrypoint.
 
     Pipeline order:
@@ -321,12 +368,22 @@ async def chat(req: ChatReq, request: Request):
     )
     from studio.safety import check_prompt
     tel = get_telemetry()
-    if tel is not None:
+    # Resolve the real client IP.  Behind an ALB / CloudFront the
+    # immediate request.client.host is the load balancer; the actual
+    # client's IP is the LEFTMOST entry in X-Forwarded-For (the chain
+    # is "client, proxy1, proxy2, ...").  Trust the header only when
+    # SEVIM_TRUST_PROXY=1 (default off; turn ON in the AWS deploy).
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded and os.environ.get("SEVIM_TRUST_PROXY", "0") == "1":
+        client_ip = forwarded.split(",")[0].strip() or None
+    else:
         client_ip = (request.client.host if request.client else None)
+    ip_hash_value = hash_ip(client_ip)
+    if tel is not None:
         tel.upsert_session(
             session_id=session_id,
             user_agent=request.headers.get("user-agent"),
-            ip_hash=hash_ip(client_ip),
+            ip_hash=ip_hash_value,
         )
 
     # 2. Content filter.
@@ -338,8 +395,9 @@ async def chat(req: ChatReq, request: Request):
                    "data": json.dumps({"stop_reason": "content_filter"})}
         return EventSourceResponse(deny_stream())
 
-    # 3. Rate limit + cost guard.
-    rl_msg = get_rate_limiter().check(session_id)
+    # 3. Rate limit + cost guard.  IP-bucket guards against the
+    # "clear localStorage to refresh session_id" bypass.
+    rl_msg = get_rate_limiter().check(session_id, ip_hash=ip_hash_value)
     if rl_msg is None:
         rl_msg = check_cost_guard(session_id)
     if rl_msg is not None:
@@ -375,7 +433,14 @@ async def chat(req: ChatReq, request: Request):
         return EventSourceResponse(pref_stream())
 
     # 5. Full express pipeline.
-    return EventSourceResponse(_stream_vllm_chat(req))
+    # ping=15 emits an SSE keepalive comment every 15 s.  Without it,
+    # the long gap between `tool_call` and `tool_result` (during which
+    # we're synthesising 10-15 OpenAI TTS phrases sequentially) looked
+    # like an idle connection to the ALB / browser, which dropped it,
+    # which raised asyncio.CancelledError in _execute_tool, which
+    # surfaced as `{"error": ""}` in the tool_result.  Keeping the
+    # socket warm prevents the cancellation entirely.
+    return EventSourceResponse(_stream_vllm_chat(req), ping=15)
 
 
 async def _stream_vllm_chat(req: ChatReq):
@@ -598,6 +663,7 @@ async def _stream_vllm_chat(req: ChatReq):
                         ctx_ids.append(sid)
                 if ctx_ids:
                     args["context_canvas_ids"] = ctx_ids
+            tool_failed = False
             try:
                 out = await _execute_tool(
                     tc.get("name") or "", args,
@@ -609,7 +675,16 @@ async def _stream_vllm_chat(req: ChatReq):
                     latest_canvas_id = out["canvas_id"]
                 body = json.dumps(out)
             except Exception as exc:  # noqa: BLE001
-                body = json.dumps({"error": str(exc)})
+                # Surface enough context to debug.  CancelledError /
+                # bare TimeoutError have empty str(); use repr() and
+                # a traceback so CloudWatch shows the actual problem.
+                import traceback
+                err_repr = repr(exc) or type(exc).__name__
+                traceback.print_exc(file=_sys.stderr)
+                print(f"[chat-loop] tool {tc.get('name')!r} FAILED: {err_repr}",
+                      flush=True, file=_sys.stderr)
+                body = json.dumps({"error": err_repr})
+                tool_failed = True
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id") or f"call_{idx}",
@@ -624,23 +699,194 @@ async def _stream_vllm_chat(req: ChatReq):
             # good express figure with a junk structured one.  Force a
             # clean stop here.
             if (tc.get("name") or "") == "sevim_express":
-                yield {"event": "text", "data": json.dumps({
-                    "text": "(figure built and narrated — see canvas →)"
-                })}
-                yield {"event": "done", "data": json.dumps({
-                    "stop_reason": "express_complete"
-                })}
+                if tool_failed:
+                    yield {"event": "text", "data": json.dumps({
+                        "text": (
+                            "Sorry — couldn't generate that figure. "
+                            "Please try again, or rephrase the request."
+                        )
+                    })}
+                    yield {"event": "done", "data": json.dumps({
+                        "stop_reason": "express_failed"
+                    })}
+                else:
+                    yield {"event": "text", "data": json.dumps({
+                        "text": "Done — see the canvas above."
+                    })}
+                    yield {"event": "done", "data": json.dumps({
+                        "stop_reason": "express_complete"
+                    })}
                 return
 
     yield {"event": "done", "data": json.dumps({"stop_reason": "max_steps"})}
 
 
 @router.post("/canvas/new")
-def new_canvas() -> dict[str, str]:
+def new_canvas(user: str = Depends(require_user)) -> dict[str, str]:
     """Spawn a fresh canvas owned by Studio (random id, math_mode, animate)."""
-    cid = "studio_" + secrets.token_hex(3)
+    # 8 hex bytes (64 bits) — unguessable.  Old 6-hex (24-bit) ids were
+    # brute-forceable in seconds; bumping defends the unauthenticated
+    # /canvas/<id>/view endpoint until per-canvas owner auth lands.
+    cid = "studio_" + secrets.token_hex(8)
     c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=True, width=820, height=520)
     return {"canvas_id": c.canvas_id, "view_url": f"/canvas/{c.canvas_id}/view"}
+
+
+# ---------------------------------------------------------------------------
+# Magic-link auth routes.  Active when SEVIM_AUTH_REQUIRED=1; harmless
+# (just unused endpoints) when it isn't.  Login UI is intentionally
+# minimal — a single email field + submit button, no JS, no theming.
+# ---------------------------------------------------------------------------
+
+_LOGIN_HTML = """<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+<title>Sign in to Khayyam Math</title>
+<style>
+ :root {
+   color-scheme: light dark;
+   --bg: #fafafa; --fg: #222; --muted: #666; --accent: #1f6fe0;
+   --border: #ddd; --field-bg: #fff;
+ }
+ @media (prefers-color-scheme: dark) {
+   :root { --bg: #1a1a1a; --fg: #eee; --muted: #aaa;
+           --border: #3a3a3a; --field-bg: #232323; }
+ }
+ *, *::before, *::after { box-sizing: border-box; }
+ html, body {
+   margin: 0; padding: 0; min-height: 100%;
+   background: var(--bg); color: var(--fg);
+   font: 16px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+ }
+ body {
+   /* Center the card vertically — empty space at the bottom of a
+      mostly-empty page felt unfinished. */
+   min-height: 100dvh;
+   display: flex; align-items: center; justify-content: center;
+   padding: max(1.5em, env(safe-area-inset-top))
+            max(1em, env(safe-area-inset-right))
+            max(1.5em, env(safe-area-inset-bottom))
+            max(1em, env(safe-area-inset-left));
+ }
+ .card { width: 100%; max-width: 26em; }
+ .brand { font-size: 1.8em; font-weight: 700; letter-spacing: -0.02em;
+          margin: 0 0 0.15em; }
+ .tagline { color: var(--muted); font-size: 0.95em; margin: 0 0 1.5em;
+            line-height: 1.45; }
+ form { display: flex; flex-direction: column; gap: 0.8em; }
+ input[type=email] {
+   padding: 0.75em 0.9em; width: 100%;
+   border: 1px solid var(--border); border-radius: 8px;
+   background: var(--field-bg); color: var(--fg);
+   font-size: 16px;  /* prevent iOS auto-zoom on focus */
+   min-height: 48px;
+ }
+ input[type=email]:focus {
+   outline: none;
+   border-color: var(--accent);
+   box-shadow: 0 0 0 3px rgba(31,111,224,0.18);
+ }
+ button {
+   padding: 0 1.4em; min-height: 48px;
+   font-size: 1em; font-weight: 500;
+   border: 0; border-radius: 8px; background: var(--accent); color: #fff;
+   cursor: pointer; transition: filter 120ms ease;
+ }
+ button:hover { filter: brightness(1.05); }
+ .ok { color: #2a7a3a; margin-top: 1em; font-size: 0.92em; }
+ @media (prefers-color-scheme: dark) { .ok { color: #4ade80; } }
+ .privacy { color: var(--muted); font-size: 0.78em;
+            margin-top: 1.6em; line-height: 1.5; }
+</style></head><body>
+<div class="card">
+  <h1 class="brand">Khayyam Math</h1>
+  <p class="tagline">A live diagram tutor — sign in with email, no password.</p>
+  <form method="POST" action="/studio/auth/request-link">
+    <input type="email" name="email" required autofocus
+           placeholder="you@example.com" autocomplete="email"
+           autocapitalize="off" spellcheck="false" inputmode="email">
+    <button type="submit">Email me a sign-in link</button>
+  </form>
+  __NOTICE__
+  <p class="privacy">Your email is used only as a stable identifier so we
+  can track usage against the daily quota. We don't share it.</p>
+  <p class="privacy" style="margin-top:0.6em">
+    <a href="/terms">Terms</a> · <a href="/contact">Contact</a>
+  </p>
+</div>
+<div id="cookie-banner" hidden style="
+     position:fixed; bottom:0; left:0; right:0;
+     background:#1a1d24; color:#eef0f3;
+     padding:0.9em 1.2em; padding-bottom:max(0.9em, env(safe-area-inset-bottom));
+     display:flex; flex-wrap:wrap; gap:0.8em; align-items:center;
+     justify-content:center; font-size:0.92em; z-index:1000;
+     box-shadow:0 -2px 12px rgba(0,0,0,0.18);">
+  <span style="flex:1; min-width:14em; line-height:1.45;">
+    Khayyam Math uses one essential cookie for sign-in.  No advertising
+    or analytics trackers.
+  </span>
+  <button id="cookie-ok" type="button" style="
+        padding:0.55em 1.2em; min-height:40px;
+        background:#1f6fe0; color:#fff; border:0;
+        border-radius:6px; font:inherit; cursor:pointer;">Got it</button>
+</div>
+<script>
+(function() {
+  try { if (localStorage.getItem('khayyam_cookie_consent') === '1') return; } catch (_) {}
+  var b = document.getElementById('cookie-banner');
+  if (!b) return;
+  b.hidden = false;
+  document.getElementById('cookie-ok').addEventListener('click', function () {
+    try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
+    b.style.opacity = '0';
+    setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+  });
+})();
+</script>
+</body></html>
+"""
+
+
+@router.get("/auth/login", response_class=HTMLResponse)
+def login_page() -> HTMLResponse:
+    return HTMLResponse(_LOGIN_HTML.replace("__NOTICE__", ""))
+
+
+@router.post("/auth/request-link", response_class=HTMLResponse)
+def auth_request_link(request: Request, email: str = Form(...)) -> HTMLResponse:
+    request_magic_link(email, request)
+    notice = (
+        '<p class="ok">If that address is valid, a sign-in link is on '
+        "its way. Check your inbox (and spam folder).</p>"
+    )
+    return HTMLResponse(_LOGIN_HTML.replace("__NOTICE__", notice))
+
+
+@router.get("/auth/verify")
+def auth_verify(t: str, request: Request) -> Response:
+    redirect = RedirectResponse(url="/studio", status_code=302)
+    email = verify_link_and_set_cookie(t, redirect)
+    if email is None:
+        return RedirectResponse(url="/studio/auth/login", status_code=302)
+    return redirect
+
+
+@router.post("/auth/logout")
+def auth_logout() -> Response:
+    response = RedirectResponse(url="/studio/auth/login", status_code=302)
+    clear_cookie(response)
+    return response
+
+
+@router.get("/auth/me")
+def auth_me(request: Request) -> dict[str, Any]:
+    """Front-end uses this to decide whether to show the login link."""
+    return {
+        "auth_required": auth_is_required(),
+        "user": current_user(request),
+    }
 
 
 @router.get("/preferences")
@@ -687,7 +933,12 @@ def health() -> dict[str, Any]:
 
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
-def studio_index() -> HTMLResponse:
+def studio_index(request: Request):
+    # Logged-out user landing here would otherwise see the SPA load,
+    # type a prompt, and get a confusing 401 from /studio/chat.  Bounce
+    # them straight to the login page instead.
+    if auth_is_required() and current_user(request) is None:
+        return RedirectResponse(url="/studio/auth/login", status_code=302)
     html_path = _STATIC / "studio.html"
     if not html_path.exists():
         raise HTTPException(500, "studio.html missing")

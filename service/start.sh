@@ -3,9 +3,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-# Override via the environment to point at any Python interpreter with
-# sevim + uvicorn importable; defaults to whatever `python3` resolves to.
-VENV_PY="${SEVIM_PY:-python3}"
+if [ -f .env ]; then
+  set -a; . ./.env; set +a
+fi
+
+VENV_PY="${SEVIM_PY:-.venv/bin/python}"
 LOG="${SEVIM_SERVICE_LOG:-/tmp/sevim_service.log}"
 
 nohup "$VENV_PY" -m uvicorn service.app:app \
