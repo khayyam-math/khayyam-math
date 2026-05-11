@@ -489,9 +489,14 @@
             asstEl.style.opacity = '1';
             // Visual streaming only — audio is the canvas's job.
           } else if (evt === 'tool_call') {
+            // Show a generic "Thinking…" placeholder rather than the
+            // raw tool name + args.  Learners don't care that the
+            // backend is calling sevim_express(); they care that the
+            // figure is being generated.  Failures still get a
+            // concise error summary on tool_result.
             const tEl = document.createElement('div');
             tEl.className = 'msg tool';
-            tEl.textContent = '→ ' + payload.name + '(' + (payload.args_keys || []).join(',') + ') …';
+            tEl.textContent = 'Thinking…';
             tEl.dataset.tool = payload.name;
             log.insertBefore(tEl, asstEl);
             log.scrollTop = log.scrollHeight;
@@ -503,21 +508,37 @@
             const last = pending[pending.length - 1];
             try {
               const r = JSON.parse(data);
-              let summary = ' ✓';
+              // Default: hide the placeholder entirely once the result
+              // arrives — by the time the canvas is updated and the
+              // assistant text streams in, the "Thinking…" line is
+              // just visual noise.  Only KEEP the line on failure so
+              // the learner sees what went wrong.
+              let summary = '';
               if (r.error) {
-                summary = ' ✗ ' + String(r.error).slice(0, 80);
+                summary = 'Couldn\'t generate that figure — ' + String(r.error).slice(0, 80);
               } else if (Array.isArray(r.results)) {
                 const ok = r.results.filter(x => !x.error).length;
                 const err = r.results.length - ok;
-                summary = err ? ` ⚠ ${ok} ok, ${err} err` : ` ✓ ${ok} ops`;
+                summary = err ? `Partial: ${ok} ok, ${err} err` : '';
               } else if (r.duration_s) {
-                summary = ` ✓ ${r.phrase_count || '?'} phrases, ${r.duration_s.toFixed(1)}s`;
+                summary = '';   // Canvas + narration already convey success.
               } else if (r.canvas_id) {
-                summary = ' ✓ ' + r.canvas_id;
+                // Canvas link is visible in the iframe already; no
+                // need to repeat the id in chat.
+                summary = '';
               }
               if (last) {
-                last.textContent = last.textContent.replace(/ …$/, '') + summary;
-                delete last.dataset.tool;
+                if (summary) {
+                  // Show the summary (failure or partial-success).
+                  last.textContent = summary;
+                  last.classList.add(r.error ? 'tool-error' : 'tool-partial');
+                  delete last.dataset.tool;
+                } else {
+                  // Success path: drop the "Thinking…" placeholder
+                  // entirely — the canvas + assistant text are the
+                  // real signal.
+                  last.remove();
+                }
               }
               if (r.canvas_id && r.canvas_id !== canvasId) {
                 canvasId = r.canvas_id;
