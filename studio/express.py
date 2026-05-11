@@ -535,7 +535,19 @@ async def express_figure(
         result = json.loads(content)
         _log(f"parsed: svg_len={len(result.get('svg',''))} phrases={len(result.get('narration',[]))}")
 
-        # 2. Render SVG → PNG and run vision review.
+        # 2a. Cheap deterministic structural review BEFORE the vision
+        # call.  Catches failures the vision LLM can't reliably detect
+        # from a rendered PNG alone — most importantly, narration
+        # phrases that reference SVG ids that don't exist (the
+        # "highlights don't fire" symptom the learner sees as
+        # "the artifact under attention was not highlighted").
+        structural_issues = _structural_review(
+            result.get("svg", ""), result.get("narration") or [],
+        )
+        if structural_issues:
+            _log(f"structural review: {len(structural_issues)} issue(s)")
+
+        # 2b. Render SVG → PNG and run vision review.
         verdict = await _vision_review(
             user_prompt=user_prompt,
             svg=result["svg"],
@@ -544,6 +556,22 @@ async def express_figure(
             api_key=api_key,
             narration=result.get("narration") or [],
         )
+
+        # Merge structural issues into the verdict so a single retry
+        # covers both classes.  If vision passed but structural failed,
+        # we still need to retry; if vision failed too, the critic
+        # checklist gets both kinds of fixes.
+        if structural_issues:
+            structural_block = (
+                "Structural review: FAIL.\n\n"
+                "Apply these specific fixes, in order:\n"
+                + "\n".join(f"  {i}. {s}" for i, s in enumerate(structural_issues, 1))
+            )
+            verdict = (
+                structural_block
+                if verdict is None
+                else verdict + "\n\n" + structural_block
+            )
         if verdict is None:  # PASS or unable to review
             # If a previous attempt failed and this one passed, the pair
             # is a repair triple worth keeping for distillation.
@@ -709,6 +737,102 @@ async def _vision_review(
 def _svg_to_png(svg: str, width: int = 1200) -> bytes:
     import cairosvg
     return cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=width)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic structural review of the (svg, narration) pair.  Runs on
+# the raw SVG text and the parsed narration array — it can therefore
+# catch failures that the vision reviewer cannot reliably detect from
+# the rendered PNG alone:
+#
+#   * narration_highlight_id_missing — a phrase's highlight array
+#     points at an SVG id that doesn't exist.  The viewer's
+#     getElementById(highlight) returns null, the .sevim-highlight
+#     class never gets attached, the learner sees no flashing
+#     element while the phrase is spoken.  This is the
+#     "the artifact under attention was not highlighted" failure.
+#
+#   * vertex_labels_missing — for graph-style figures the model
+#     sometimes emits the <circle> vertices but forgets to label
+#     them.  The text count being much lower than the circle count
+#     is a strong signal.  This is the
+#     "not all vertices were indicated on the graph" failure.
+# ---------------------------------------------------------------------------
+
+def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
+    """Return a list of structural issues with the (svg, narration) pair.
+
+    Empty list means structural review passes; non-empty list is
+    formatted into the critic's checklist for retry.
+    """
+    import re
+
+    issues: list[str] = []
+    if not svg or not isinstance(svg, str):
+        return issues
+
+    # All id="..." (and id='...') attributes in the SVG.
+    svg_ids: set[str] = set()
+    svg_ids.update(re.findall(r'id\s*=\s*"([^"]+)"', svg))
+    svg_ids.update(re.findall(r"id\s*=\s*'([^']+)'", svg))
+
+    # 1. Narration highlights must point at real SVG ids.
+    unknown_refs: list[tuple[int, str]] = []
+    for i, phrase in enumerate(narration or []):
+        highlights = phrase.get("highlight") or []
+        # Some models emit a single string instead of a list — be
+        # forgiving so we don't false-positive on a typing slip.
+        if isinstance(highlights, str):
+            highlights = [highlights]
+        for hid in highlights:
+            if not hid or not isinstance(hid, str):
+                continue
+            if hid not in svg_ids:
+                unknown_refs.append((i, hid))
+
+    if unknown_refs:
+        sample = ", ".join(
+            f"phrase[{i}] -> '{hid}'" for i, hid in unknown_refs[:5]
+        )
+        more = (f" (and {len(unknown_refs) - 5} more)"
+                if len(unknown_refs) > 5 else "")
+        issues.append(
+            "narration_highlight_id_missing: "
+            f"{len(unknown_refs)} narration phrase(s) reference SVG ids that "
+            f"do NOT exist in the emitted SVG ({sample}{more}). The viewer's "
+            "highlight machinery only fires when document.getElementById of "
+            "the highlight value succeeds, so this causes the learner to "
+            "see NOTHING flash while the phrase plays. Fix by EITHER giving "
+            "the referenced visual element a unique id matching the "
+            "highlight string OR removing the bogus id from the highlight "
+            "array (use [] for phrases that don't point at a specific "
+            "visual element). The svg currently has these ids: "
+            f"{sorted(svg_ids)[:30]}"
+        )
+
+    # 2. Graph-completeness heuristic: a figure with many <circle>
+    # vertices but very few <text> elements is almost certainly
+    # missing vertex labels.  Conservative threshold to avoid
+    # false-positive retries on figures that legitimately have few
+    # text labels (charts, dashed-line diagrams, etc.).
+    circles = re.findall(r'<circle\b[^>]*', svg)
+    ellipses = re.findall(r'<ellipse\b[^>]*', svg)
+    # Only count circles that look like nodes (carry an id).  Decorative
+    # circles in chart backgrounds, etc., usually don't have ids.
+    node_like_circles = [c for c in (circles + ellipses) if 'id=' in c]
+    texts = re.findall(r'<text\b', svg)
+    if len(node_like_circles) >= 4 and len(texts) < len(node_like_circles):
+        issues.append(
+            "vertex_labels_missing: SVG has "
+            f"{len(node_like_circles)} node-like circles/ellipses but only "
+            f"{len(texts)} <text> elements. Every vertex in a graph "
+            "figure must carry a visible label (vertex name or number) "
+            "as an adjacent <text> element. Add one <text> per vertex, "
+            "placed just above/right of the circle so it doesn't "
+            "overlap the node."
+        )
+
+    return issues
 
 
 def _build_user_content(

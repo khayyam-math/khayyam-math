@@ -104,9 +104,26 @@ def test_get_active_model_prefers_first_available_when_default_offline(monkeypat
 
 
 def test_get_active_model_picks_qwen_when_available(monkeypatch):
-    """Once Qwen vLLM is wired up, the marked default takes over."""
+    """Once Qwen vLLM is wired up AND the reachability probe passes,
+    the marked default takes over.  We stub the probe — the previous
+    test version only set the URL env, which is no longer sufficient
+    because catalog availability now also requires an HTTP probe."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
     monkeypatch.setenv("SEVIM_QWEN_VLLM_URL", "http://10.0.0.1:8000/v1")
     from studio import app as app_mod
     importlib.reload(app_mod)
+    monkeypatch.setattr(app_mod, "_qwen_lora_vllm_reachable", lambda: True)
     assert app_mod.get_active_model() == "qwen_lora_v4"
+
+
+def test_get_active_model_falls_back_when_qwen_unreachable(monkeypatch):
+    """Even if SEVIM_QWEN_VLLM_URL is set, an unreachable vLLM endpoint
+    (bootstrap, spot reclaim, OOM crash) must NOT route traffic to
+    Qwen — the catalog flips it to 'unavailable' and traffic flows to
+    gpt-4o."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+    monkeypatch.setenv("SEVIM_QWEN_VLLM_URL", "http://10.0.0.1:8000/v1")
+    from studio import app as app_mod
+    importlib.reload(app_mod)
+    monkeypatch.setattr(app_mod, "_qwen_lora_vllm_reachable", lambda: False)
+    assert app_mod.get_active_model() == "gpt-4o"
