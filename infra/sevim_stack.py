@@ -371,14 +371,18 @@ class SevimStack(Stack):
             qwen_sg = ec2.SecurityGroup(
                 self, "QwenVllmSg",
                 vpc=vpc,
-                description="Qwen vLLM serving SG — inbound 8000 from Fargate only",
+                # AWS EC2 SG descriptions must be ASCII only --- em-dashes
+                # and other Unicode characters fail with an InvalidRequest.
+                description="Qwen vLLM serving SG - inbound 8000 from Fargate only",
                 allow_all_outbound=True,
             )
             # Only Fargate tasks may hit the vLLM port.
             qwen_sg.add_ingress_rule(
                 peer=service.service.connections.security_groups[0],
                 connection=ec2.Port.tcp(8000),
-                description="Studio Fargate → Qwen vLLM",
+                # SG rule descriptions accept a tight character set:
+                # a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*  (no arrows allowed)
+                description="Studio Fargate to Qwen vLLM port 8000",
             )
 
             qwen_role = iam.Role(
@@ -468,22 +472,14 @@ class SevimStack(Stack):
                     ),
                 ],
             )
-            # Spot pricing — applied via CFN override since the L2
-            # ec2.Instance construct doesn't directly expose spot
-            # options.  $0.50 cap is well above the typical g6.xlarge
-            # spot price ($0.20--0.30/hr in us-east-1 as of May 2026),
-            # giving headroom for spot-price spikes without falling
-            # through to on-demand at $0.80/hr.  Acceptable because
-            # the Qwen path is gracefully degradable: if vLLM is
-            # reclaimed, the chat UI falls back to GPT-4o automatically.
-            cfn_instance = qwen_instance.node.default_child  # type: ignore[assignment]
-            cfn_instance.add_property_override(
-                "InstanceMarketOptions",
-                {"MarketType": "spot",
-                 "SpotOptions": {"SpotInstanceType": "persistent",
-                                 "InstanceInterruptionBehavior": "stop",
-                                 "MaxPrice": "0.50"}},
-            )
+            # On-demand pricing.  CloudFormation's bare AWS::EC2::Instance
+            # resource does not accept InstanceMarketOptions (that
+            # property only exists on Launch Templates), so the spot
+            # path requires an ASG-of-one + LaunchTemplate.  For the
+            # initial deploy we keep the simpler Instance construct on
+            # on-demand pricing (~$0.80/hr g6.xlarge in us-east-1) and
+            # migrate to spot once the path is proven; the Qwen route
+            # is gracefully degradable so the upgrade can roll any time.
 
             # Wire SEVIM_QWEN_VLLM_URL into the Fargate task env so the
             # studio dropdown's "Qwen" choice resolves to this instance.
