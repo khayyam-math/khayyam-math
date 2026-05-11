@@ -703,6 +703,114 @@ async def _stream_chat_completion(
     return content
 
 
+# ── Theory primer (streamed in parallel with figure generation) ───────────
+
+_PRIMER_SYSTEM = (
+    "You are a mathematics tutor.  The learner has asked a question that "
+    "will be answered visually by a separate figure generator running "
+    "in parallel.  Your job: write a short, spoken-style PRIMER (3 to 5 "
+    "sentences, MAXIMUM 80 words) that introduces the concept and "
+    "states the key formula(s) the learner needs to follow the upcoming "
+    "figure.\n\n"
+    "RULES:\n"
+    "  * Plain prose, no headings, no bullet lists, no markdown.\n"
+    "  * Write so it can be SPOKEN aloud at natural pace.\n"
+    "  * Inline math in LaTeX: $\\theta$, $\\sin^2 + \\cos^2 = 1$.  Use "
+    "    $$...$$ only when the formula is the centerpiece of the answer.\n"
+    "  * Do NOT describe the figure (you cannot see it).  Do NOT say "
+    "    'as shown below' or 'in the diagram.'  Speak only the theory.\n"
+    "  * Stop after the formula(s).  Do NOT add a closing summary.\n"
+    "  * NEVER mention that another component is generating a figure."
+)
+
+
+async def generate_theory_primer(
+    user_prompt: str,
+    base_url: str,
+    model: str,
+    api_key: str | None,
+    on_text_chunk: Callable[[str], Awaitable[None]] | None = None,
+) -> str:
+    """Quick parallel call that produces a 3-5 sentence theoretical
+    primer with LaTeX-formatted formulas for the learner's prompt.
+
+    Designed to run *concurrently* with ``express_figure`` so the
+    learner reads/hears the theory while the figure is still being
+    generated.  Each streamed text delta is forwarded to
+    ``on_text_chunk`` (raw delta, not cumulative) so the chat surface
+    can render and vocalise it in real time.  The full assembled
+    primer is returned for downstream use (e.g. telemetry, or as the
+    canvas's prelude string for non-streaming clients).
+
+    Errors do not raise — the primer is decorative; if the call
+    fails the chat just falls through to the figure with no primer.
+    """
+    headers = {"content-type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "model": model,
+        "max_tokens": 220,
+        "temperature": 0.3,
+        "stream": True,
+        "messages": [
+            {"role": "system", "content": _PRIMER_SYSTEM},
+            {"role": "user",   "content": user_prompt},
+        ],
+    }
+
+    import sys as _sys
+    def _log(msg: str) -> None:
+        print(f"[primer] {msg}", flush=True, file=_sys.stderr)
+
+    full: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers, json=payload,
+            ) as r:
+                if r.status_code != 200:
+                    body = (await r.aread()).decode(errors="replace")
+                    _log(f"primer non-200 status={r.status_code}: {body[:300]}")
+                    return ""
+                async for line in r.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content")
+                    if not delta:
+                        msg = choices[0].get("message") or {}
+                        delta = msg.get("content")
+                        if not delta:
+                            continue
+                    full.append(delta)
+                    if on_text_chunk is not None:
+                        try:
+                            await on_text_chunk(delta)
+                        except Exception as cb_exc:  # noqa: BLE001
+                            _log(
+                                f"on_text_chunk raised "
+                                f"{type(cb_exc).__name__}: {cb_exc}"
+                            )
+    except Exception as exc:  # noqa: BLE001
+        _log(f"primer call failed: {type(exc).__name__}: {exc}")
+        return ""
+
+    return "".join(full)
+
+
 # ── Pipeline entry point ──────────────────────────────────────────────────
 
 async def express_figure(

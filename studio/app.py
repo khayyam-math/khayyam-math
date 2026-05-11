@@ -359,6 +359,7 @@ async def _execute_tool(
     *,
     session_id: str | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
+    on_primer_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run the single Studio tool: ``sevim_express``.
 
@@ -403,14 +404,44 @@ async def _execute_tool(
     # might supply.  This keeps individual chat sessions from picking
     # the experimental Qwen path on their own.
     base_url, model_name, api_key, resolved_model_id = resolve_backend()
-    result = await express_figure(
+
+    # Theory primer runs CONCURRENTLY with the figure generation so the
+    # learner reads / hears the conceptual setup while the SVG is still
+    # rendering.  Primer is always synthesised by gpt-4o-mini (text-only,
+    # fast, ~$0.0001 per turn) regardless of which model is generating
+    # the figure — the in-house Qwen LoRA is figure-only.  When OpenAI
+    # creds aren't available (dev / CI) the primer task short-circuits
+    # to an empty string and the chat falls through to figure-only mode.
+    from studio.express import generate_theory_primer
+    _openai_key = os.environ.get("OPENAI_API_KEY")
+    primer_url = "https://api.openai.com/v1"
+    primer_model = os.environ.get("SEVIM_PRIMER_MODEL", "gpt-4o-mini")
+
+    async def _run_primer() -> str:
+        if on_primer_chunk is None or not _openai_key:
+            return ""
+        return await generate_theory_primer(
+            user_prompt=prompt,
+            base_url=primer_url,
+            model=primer_model,
+            api_key=_openai_key,
+            on_text_chunk=on_primer_chunk,
+        )
+
+    primer_task = asyncio.create_task(_run_primer())
+    figure_task = asyncio.create_task(express_figure(
         user_prompt=prompt,
         base_url=base_url,
         model=model_name,
         api_key=api_key,
         context_canvases=context_canvases,
         on_svg_chunk=on_svg_chunk,
-    )
+    ))
+    # Await figure first because the rest of _execute_tool unpacks its
+    # result.  The primer task runs to completion alongside; we collect
+    # the assembled string for telemetry / canvas prelude after.
+    result = await figure_task
+    primer_text = await primer_task
     duration_s = _time.monotonic() - t0
     cid = "express_" + secrets.token_hex(8)
     c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=False,
@@ -471,6 +502,11 @@ async def _execute_tool(
         "narration": narrate_out,
         "duration_s": duration_s,
         "cost_usd_estimate": cost_estimate,
+        # Empty when no OPENAI_API_KEY or when the primer call failed.
+        # The frontend already received the streamed chunks; this field
+        # is for clients that consume the JSON result directly (e.g.
+        # MCP, integration tests).
+        "primer": primer_text,
     }
 
 
@@ -917,54 +953,100 @@ async def _stream_vllm_chat(req: ChatReq):
                 # cheap), but we still yield as often as the network
                 # lets us.
                 tool_name = tc.get("name") or ""
-                chunk_queue: asyncio.Queue[str] | None = None
+                svg_queue: asyncio.Queue[str] | None = None
+                primer_queue: asyncio.Queue[str] | None = None
                 on_svg_chunk: (
                     Callable[[str], Awaitable[None]] | None
                 ) = None
+                on_primer_chunk: (
+                    Callable[[str], Awaitable[None]] | None
+                ) = None
                 if tool_name == "sevim_express":
-                    chunk_queue = asyncio.Queue()
+                    svg_queue = asyncio.Queue()
+                    primer_queue = asyncio.Queue()
 
                     async def _push_svg_chunk(
                         partial: str,
-                        _q: asyncio.Queue[str] = chunk_queue,
+                        _q: asyncio.Queue[str] = svg_queue,
                     ) -> None:
                         await _q.put(partial)
 
+                    async def _push_primer_chunk(
+                        delta: str,
+                        _q: asyncio.Queue[str] = primer_queue,
+                    ) -> None:
+                        await _q.put(delta)
+
                     on_svg_chunk = _push_svg_chunk
+                    on_primer_chunk = _push_primer_chunk
 
                 tool_task = asyncio.create_task(_execute_tool(
                     tool_name, args,
                     session_id=req.session_id,
                     on_svg_chunk=on_svg_chunk,
+                    on_primer_chunk=on_primer_chunk,
                 ))
 
-                if chunk_queue is not None:
-                    # Drain partial-SVG events until the tool finishes.
-                    # We collapse to the latest snapshot in the queue
-                    # so we don't ship every intermediate state, but we
-                    # do yield at least every ~25ms to keep the canvas
-                    # painting.
+                if svg_queue is not None and primer_queue is not None:
+                    # Two parallel streams to drain into SSE frames:
+                    #   * primer_chunk — raw deltas from the theory
+                    #     primer (gpt-4o-mini), forwarded in their
+                    #     natural order so SpeechSynthesis in the
+                    #     browser can speak them as they arrive.
+                    #   * svg_chunk — cumulative snapshots of the
+                    #     in-progress SVG; collapsed last-write-wins
+                    #     to keep the wire cheap.
                     while not tool_task.done():
-                        try:
-                            partial = await asyncio.wait_for(
-                                chunk_queue.get(), timeout=0.025,
-                            )
-                        except asyncio.TimeoutError:
-                            continue
-                        # Collapse any backlog onto the freshest one.
-                        while not chunk_queue.empty():
-                            partial = chunk_queue.get_nowait()
+                        flushed = False
+                        # Primer drain first (small text, low latency).
+                        while not primer_queue.empty():
+                            delta = primer_queue.get_nowait()
+                            yield {
+                                "event": "primer_chunk",
+                                "data": json.dumps({"text": delta}),
+                            }
+                            flushed = True
+                        # SVG drain second; collapse to latest.
+                        if not svg_queue.empty():
+                            partial = svg_queue.get_nowait()
+                            while not svg_queue.empty():
+                                partial = svg_queue.get_nowait()
+                            yield {
+                                "event": "svg_chunk",
+                                "data": json.dumps({"svg": partial}),
+                            }
+                            flushed = True
+                        if not flushed:
+                            # Nothing pending — sleep briefly so the
+                            # tool task can make progress.
+                            try:
+                                await asyncio.wait_for(
+                                    asyncio.shield(asyncio.sleep(0.025)),
+                                    timeout=0.025,
+                                )
+                            except asyncio.TimeoutError:
+                                pass
+                    # Drain whatever landed after .done() flipped.
+                    while not primer_queue.empty():
+                        delta = primer_queue.get_nowait()
+                        yield {
+                            "event": "primer_chunk",
+                            "data": json.dumps({"text": delta}),
+                        }
+                    if not svg_queue.empty():
+                        partial = svg_queue.get_nowait()
+                        while not svg_queue.empty():
+                            partial = svg_queue.get_nowait()
                         yield {
                             "event": "svg_chunk",
                             "data": json.dumps({"svg": partial}),
                         }
-                    # Drain anything queued after .done() flipped True.
-                    while not chunk_queue.empty():
-                        partial = chunk_queue.get_nowait()
-                        yield {
-                            "event": "svg_chunk",
-                            "data": json.dumps({"svg": partial}),
-                        }
+                    # Signal end-of-primer so the browser can stop
+                    # speaking and release the speech synthesiser.
+                    yield {
+                        "event": "primer_done",
+                        "data": json.dumps({}),
+                    }
 
                 out = await tool_task
                 # Track the most-recent canvas_id touched by any tool —

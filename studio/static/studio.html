@@ -6,6 +6,15 @@
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
 <title>Khayyam Math — visual tutor</title>
+<!-- KaTeX renders inline math in the theory primer that streams into the
+     assistant message before the figure is ready.  The auto-render
+     extension scans the message DOM for $...$ and $$...$$ delimiters
+     and replaces them with rendered math nodes; we run it manually
+     after each chunk arrives so partial LaTeX doesn't render until
+     the closing delimiter is in. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 <style>
   :root {
     --bg: #fafafa; --fg: #222; --muted: #777; --accent: #2a6df4;
@@ -65,6 +74,11 @@
     overflow-wrap: anywhere; }
   .msg.user { background: var(--user-bg); align-self: flex-end; }
   .msg.asst { background: var(--asst-bg); align-self: flex-start; }
+  /* Theory primer: same alignment as assistant, slightly accented border
+     so the learner can tell at a glance which line is the primer vs the
+     final "Done — see the canvas" line.  KaTeX renders inside. */
+  .msg.primer { border-left: 3px solid var(--accent); }
+  .msg.primer .katex { font-size: 1.02em; }
   .msg.tool { background: transparent; color: var(--muted); font-size: 0.8em;
     font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   .input-row { display: flex; gap: 0.4em; padding: 0.6em;
@@ -370,6 +384,98 @@
         frame.contentWindow.postMessage({type: 'sevim_pause_audio'}, '*');
       }
     } catch (_) { /* cross-origin or not loaded yet */ }
+    // Also stop the browser TTS speaking the primer.
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+    primerSpeaking = false;
+    primerEnded = false;
+  }
+
+  // ── Theory-primer state ──────────────────────────────────────────────
+  // The server streams a primer SSE event named primer_chunk containing
+  // a raw delta of text (LaTeX inline math via $...$ / $$...$$).  We
+  // accumulate the deltas in a dedicated DOM node, render LaTeX with
+  // KaTeX, and speak each sentence as it completes so the learner hears
+  // the theoretical setup while the figure is still rendering.
+  //
+  // Coordination with the canvas iframe: the iframe normally auto-plays
+  // its narration WAV on load, but we don't want it talking over our
+  // primer.  When primer_chunk arrives, we set primerSpeaking=true; the
+  // svg_chunk + tool_result handlers below post {sevim_pause_audio} to
+  // the iframe so its narration stays silent.  When primer TTS ends
+  // (utterance.onend or primer_done event), we post sevim_resume_audio
+  // so the iframe picks up its narration cleanly.
+  let primerEl = null;            // <div class="msg primer">
+  let primerRaw = '';             // accumulated raw text (deltas joined)
+  let primerSpokenUpto = 0;       // index up to which we've queued TTS
+  let primerSpeaking = false;     // any utterance currently scheduled
+  let primerEnded = false;        // primer_done received from server
+
+  function ensurePrimerEl() {
+    if (primerEl) return primerEl;
+    primerEl = document.createElement('div');
+    primerEl.className = 'msg asst primer';
+    log.insertBefore(primerEl, asstEl);
+    log.scrollTop = log.scrollHeight;
+    return primerEl;
+  }
+
+  function renderPrimerMath() {
+    if (!primerEl || !window.renderMathInElement) return;
+    try {
+      window.renderMathInElement(primerEl, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$',  right: '$',  display: false },
+        ],
+        throwOnError: false,
+      });
+    } catch (_) { /* partial LaTeX, ignore */ }
+  }
+
+  // Speak whatever sentence boundary we've passed since last speak.
+  // We never split mid-sentence — KaTeX delimiters could land inside a
+  // sentence and we don't want speech and rendering to fight over
+  // partial text.  When primer_done lands and there's residual text,
+  // we flush whatever remains.
+  function speakPrimerProgress(flush) {
+    if (!('speechSynthesis' in window)) return;
+    const buf = primerRaw.slice(primerSpokenUpto);
+    if (!buf) return;
+    // Sentence-boundary regex: end punctuation + whitespace OR end.
+    let endIdx = -1;
+    for (let m, re = /[.!?]\s/g; (m = re.exec(buf));) endIdx = m.index + 1;
+    if (endIdx < 0 && !flush) return;
+    const chunk = flush ? buf : buf.slice(0, endIdx);
+    if (!chunk.trim()) return;
+    primerSpokenUpto += chunk.length;
+    // Strip LaTeX inline-math delimiters from speech: $\theta$ → theta,
+    // $$E=mc^2$$ → E equals m c squared (rough — pure pronunciation).
+    const spoken = chunk
+      .replace(/\$\$([^$]*)\$\$/g, ' $1 ')
+      .replace(/\$([^$]*)\$/g, ' $1 ')
+      .replace(/\\([a-zA-Z]+)/g, ' $1 ')
+      .replace(/[\\{}^_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!spoken) return;
+    const u = new SpeechSynthesisUtterance(spoken);
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    primerSpeaking = true;
+    u.onend = () => {
+      // If more pending, more utterances are already queued; the LAST
+      // utterance's onend is the real end-of-primer.  Detect that by
+      // checking the synth queue.
+      if (window.speechSynthesis.pending || window.speechSynthesis.speaking) return;
+      primerSpeaking = false;
+      // Tell the canvas iframe it's safe to start narration.
+      try {
+        if (frame && frame.contentWindow) {
+          frame.contentWindow.postMessage({type: 'sevim_resume_audio'}, '*');
+        }
+      } catch (_) {}
+    };
+    try { window.speechSynthesis.speak(u); } catch (_) {}
   }
 
   // ── Voice input via Web Speech API ───────────────────────────────────
@@ -438,6 +544,13 @@
     const asstEl = appendMsg('asst', '…');
     asstEl.style.opacity = '0.5';
     let asstText = '';
+    // Reset primer state for this turn — a fresh primer node is created
+    // the first time primer_chunk lands.
+    primerEl = null;
+    primerRaw = '';
+    primerSpokenUpto = 0;
+    primerSpeaking = false;
+    primerEnded = false;
 
     // Stream from /studio/chat
     console.log('[studio] POST /studio/chat — sending', {user, canvasId});
@@ -488,6 +601,26 @@
             asstEl.textContent = asstText;
             asstEl.style.opacity = '1';
             // Visual streaming only — audio is the canvas's job.
+          } else if (evt === 'primer_chunk') {
+            // Theory primer streams in parallel with the figure.  Each
+            // delta is appended to the primer node; KaTeX re-renders
+            // after a debounce so math nodes flip from $...$ to real
+            // glyphs once the closing delimiter arrives.
+            const delta = payload && payload.text;
+            if (!delta) continue;
+            ensurePrimerEl();
+            primerRaw += delta;
+            primerEl.textContent = primerRaw;
+            renderPrimerMath();
+            speakPrimerProgress(false);
+            log.scrollTop = log.scrollHeight;
+          } else if (evt === 'primer_done') {
+            // Flush any tail-end residue that didn't hit a sentence
+            // boundary, and re-render LaTeX in case the last $..$ was
+            // still partial when the previous chunk arrived.
+            primerEnded = true;
+            renderPrimerMath();
+            speakPrimerProgress(true);
           } else if (evt === 'tool_call') {
             // Show a generic "Thinking…" placeholder rather than the
             // raw tool name + args.  Learners don't care that the
