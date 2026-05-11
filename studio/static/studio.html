@@ -410,11 +410,18 @@
   let primerSpeaking = false;     // any utterance currently scheduled
   let primerEnded = false;        // primer_done received from server
 
-  function ensurePrimerEl() {
+  function ensurePrimerEl(beforeEl) {
     if (primerEl) return primerEl;
     primerEl = document.createElement('div');
     primerEl.className = 'msg asst primer';
-    log.insertBefore(primerEl, asstEl);
+    // ``beforeEl`` is the assistant bubble for the current turn — we
+    // insert the primer *before* it so the chat reads top-to-bottom:
+    // user prompt → primer → final assistant note → canvas.
+    if (beforeEl && beforeEl.parentNode === log) {
+      log.insertBefore(primerEl, beforeEl);
+    } else {
+      log.appendChild(primerEl);
+    }
     log.scrollTop = log.scrollHeight;
     return primerEl;
   }
@@ -608,7 +615,7 @@
             // glyphs once the closing delimiter arrives.
             const delta = payload && payload.text;
             if (!delta) continue;
-            ensurePrimerEl();
+            ensurePrimerEl(asstEl);
             primerRaw += delta;
             primerEl.textContent = primerRaw;
             renderPrimerMath();
