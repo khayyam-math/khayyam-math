@@ -405,7 +405,10 @@ class SevimStack(Stack):
             user_data.add_commands(
                 "set -eux",
                 "exec > >(tee /var/log/sevim-bootstrap.log) 2>&1",
-                "apt-get update -y && apt-get install -y python3.11-venv python3-pip awscli",
+                # The DLAMI base ships with python3.10; pin to the
+                # plain python3-venv package so we don't fight whichever
+                # interpreter version the next AMI rev decides to ship.
+                "apt-get update -y && apt-get install -y python3-venv python3-pip awscli",
                 "python3 -m venv /opt/vllm",
                 "/opt/vllm/bin/pip install --upgrade pip",
                 # Pin vLLM to a version known to support Qwen2.5 + LoRA.

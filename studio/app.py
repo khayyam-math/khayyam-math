@@ -85,11 +85,51 @@ def _vllm_model() -> str:
 def _qwen_lora_vllm_url() -> str:
     """vLLM endpoint that hosts Qwen2.5-7B + Khayyam-Math LoRA adapters.
 
-    Lives at SEVIM_QWEN_VLLM_URL — populated by the production CDK
+    Lives at SEVIM_QWEN_VLLM_URL --- populated by the production CDK
     stack to point at the dedicated GPU instance (g6.xlarge spot)
     serving qwen_lora_v4.  Empty in dev unless the user sets it.
     """
     return (os.environ.get("SEVIM_QWEN_VLLM_URL") or "").rstrip("/")
+
+
+# Reachability cache for the Qwen vLLM endpoint.  Without this the
+# admin can flip the active model to qwen_lora_v4, but during a vLLM
+# bootstrap (first deploy, post-reboot model reload, OOM crash loop)
+# the endpoint is set in the env yet not yet serving --- chat
+# requests then time out instead of falling back to OpenAI.  The probe
+# keeps a (status, last_check_unix) pair and re-tests at most once
+# every PROBE_TTL_S seconds; one cheap GET /models per minute beats
+# a 180-second request timeout on every chat turn.
+import time as _ttime  # noqa: E402
+
+_PROBE_TTL_S = 30.0
+_qwen_probe_cache: dict[str, tuple[bool, float]] = {}
+
+
+def _qwen_lora_vllm_reachable() -> bool:
+    """Return True iff the Qwen vLLM endpoint answers a quick probe.
+
+    Returns False when SEVIM_QWEN_VLLM_URL is unset, the endpoint
+    refuses the connection, or the probe times out.  Cached for
+    PROBE_TTL_S seconds so the cost is one HTTP HEAD per minute per
+    Fargate task.
+    """
+    url = _qwen_lora_vllm_url()
+    if not url:
+        return False
+    now = _ttime.time()
+    cached = _qwen_probe_cache.get(url)
+    if cached and (now - cached[1]) < _PROBE_TTL_S:
+        return cached[0]
+    try:
+        import httpx
+        with httpx.Client(timeout=1.5) as c:
+            r = c.get(f"{url}/models")
+        ok = (r.status_code == 200)
+    except Exception:  # noqa: BLE001
+        ok = False
+    _qwen_probe_cache[url] = (ok, now)
+    return ok
 
 
 def model_catalog() -> list[dict[str, Any]]:
@@ -106,6 +146,17 @@ def model_catalog() -> list[dict[str, Any]]:
     """
     openai_ready = bool(os.environ.get("OPENAI_API_KEY"))
     qwen_url = _qwen_lora_vllm_url()
+    # Two-stage Qwen availability: the URL is configured AND a quick
+    # probe says it answers.  This way, if vLLM is bootstrapping
+    # (first deploy), reclaimed (spot), or OOM-crashing, we mark Qwen
+    # as unavailable so the fallback chain routes to OpenAI rather
+    # than timing out per-request.
+    qwen_reachable = bool(qwen_url) and _qwen_lora_vllm_reachable()
+    qwen_reason = (
+        "" if qwen_reachable else
+        ("SEVIM_QWEN_VLLM_URL is not configured" if not qwen_url
+         else "vLLM endpoint not responding (bootstrap / outage)")
+    )
     return [
         # Order matters: ``get_active_model()`` picks the first
         # available entry as a hard fallback when the admin setting
@@ -116,8 +167,8 @@ def model_catalog() -> list[dict[str, Any]]:
             "id": "qwen_lora_v4",
             "label": "Qwen 2.5-7B + Khayyam Math v4 (in-house LoRA)",
             "default": True,
-            "available": bool(qwen_url),
-            "reason": "" if qwen_url else "SEVIM_QWEN_VLLM_URL is not configured",
+            "available": qwen_reachable,
+            "reason": qwen_reason,
             "experimental": True,
             "cost_tier": "in-house",
         },
@@ -143,8 +194,8 @@ def model_catalog() -> list[dict[str, Any]]:
             "id": "qwen_base",
             "label": "Qwen 2.5-7B (base, no LoRA)",
             "default": False,
-            "available": bool(qwen_url),
-            "reason": "" if qwen_url else "SEVIM_QWEN_VLLM_URL is not configured",
+            "available": qwen_reachable,
+            "reason": qwen_reason,
             "experimental": False,
             "cost_tier": "in-house",
         },
