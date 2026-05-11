@@ -1030,8 +1030,11 @@ _LOGIN_HTML = """<!doctype html>
   b.hidden = false;
   document.getElementById('cookie-ok').addEventListener('click', function () {
     try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
+    // Inline style="display:flex" overrides the [hidden] attribute,
+    // so set display:none directly so the banner actually goes away.
+    b.style.transition = 'opacity 0.25s';
     b.style.opacity = '0';
-    setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+    setTimeout(function () { b.style.display = 'none'; }, 260);
   });
 })();
 </script>
