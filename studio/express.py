@@ -477,8 +477,27 @@ async def express_figure(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    # Build the user message — multi-modal when prior context exists.
+    # Build the user message --- multi-modal when prior context exists.
     user_content = _build_user_content(user_prompt, context_canvases or [])
+
+    # Text-only backends (Qwen2.5-7B-Instruct, base Qwen, etc.) reject
+    # multimodal image_url blocks with a 500.  The refinement intent is
+    # still preserved via the text portions (the prior SVG XML + the
+    # prompt that made it), so we just drop the image attachments when
+    # the target is text-only.  Detection by model name keeps this
+    # robust if SEVIM_QWEN_VLLM_URL is repointed at a different host.
+    text_only_models = ("qwen_lora_v4", "qwen_base",
+                        "Qwen/Qwen2.5-7B-Instruct")
+    if model in text_only_models and isinstance(user_content, list):
+        text_blocks = [b for b in user_content
+                       if isinstance(b, dict) and b.get("type") == "text"]
+        stripped_images = len(user_content) - len(text_blocks)
+        user_content = text_blocks if text_blocks else user_prompt
+        if stripped_images:
+            print(f"[express] stripped {stripped_images} image block(s) "
+                  f"for text-only backend {model!r}",
+                  flush=True, file=__import__("sys").stderr)
+
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": _EXPRESS_SYSTEM},
         {"role": "user", "content": user_content},
@@ -548,12 +567,24 @@ async def express_figure(
             _log(f"structural review: {len(structural_issues)} issue(s)")
 
         # 2b. Render SVG → PNG and run vision review.
+        # If the generator was text-only (Qwen), the same model can't
+        # see the PNG — route the vision review to GPT-4o via OpenAI
+        # so we still get a visual audit of the figure.  Costs an
+        # extra ~$0.005/turn but keeps the math-correctness inspector
+        # working for Qwen-served traffic.
+        if model in text_only_models:
+            review_url = (os.environ.get("SEVIM_VLLM_URL") or "").rstrip("/") \
+                         or "https://api.openai.com/v1"
+            review_model = "gpt-4o"
+            review_key = os.environ.get("OPENAI_API_KEY")
+        else:
+            review_url, review_model, review_key = base_url, model, api_key
         verdict = await _vision_review(
             user_prompt=user_prompt,
             svg=result["svg"],
-            base_url=base_url,
-            model=model,
-            api_key=api_key,
+            base_url=review_url,
+            model=review_model,
+            api_key=review_key,
             narration=result.get("narration") or [],
         )
 
@@ -606,25 +637,38 @@ async def express_figure(
         # 3. Inject critique + image, ask for a corrected response.
         if attempt >= max_retries:
             break
-        png = _svg_to_png(result["svg"])
-        b64 = base64.b64encode(png).decode("ascii")
+        retry_text = (
+            "Your previous figure failed review.  Below is the "
+            "rendered PNG and a structured list of specific fixes.  "
+            "APPLY EVERY LISTED FIX --- do not just regenerate a "
+            "near-identical SVG.  Each fix names a concrete action, "
+            "the element it applies to, where it goes, and the "
+            "exact content/values to use.\n\n"
+            + verdict +
+            "\n\nNow re-emit the corrected svg + narration in the "
+            "same JSON schema, with every numbered fix above "
+            "actually applied to the SVG."
+        )
         messages.append({"role": "assistant", "content": content})
-        messages.append({"role": "user", "content": [
-            {"type": "text", "text": (
-                "Your previous figure failed review.  Below is the "
-                "rendered PNG and a structured list of specific fixes.  "
-                "APPLY EVERY LISTED FIX — do not just regenerate a "
-                "near-identical SVG.  Each fix names a concrete action, "
-                "the element it applies to, where it goes, and the "
-                "exact content/values to use.\n\n"
-                + verdict +
-                "\n\nNow re-emit the corrected svg + narration in the "
-                "same JSON schema, with every numbered fix above "
-                "actually applied to the SVG."
-            )},
-            {"type": "image_url",
-             "image_url": {"url": f"data:image/png;base64,{b64}"}},
-        ]})
+        # Text-only backends can't see the PNG; send the prior SVG
+        # (which they can read literally) + the structured critique.
+        if model in text_only_models:
+            messages.append({
+                "role": "user",
+                "content": (
+                    retry_text
+                    + "\n\nFor reference, your previous SVG output was:\n"
+                    + "```svg\n" + result.get("svg", "")[:8000] + "\n```"
+                ),
+            })
+        else:
+            png = _svg_to_png(result["svg"])
+            b64 = base64.b64encode(png).decode("ascii")
+            messages.append({"role": "user", "content": [
+                {"type": "text", "text": retry_text},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ]})
 
     # Loop exited with a still-failing figure — return last attempt anyway.
     # No repair pair recorded: nothing was actually corrected.
