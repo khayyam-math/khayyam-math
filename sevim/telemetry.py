@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS turns (
     cost_usd_estimate  REAL,
     refined_within_s   REAL,
     intent             TEXT,
-    error              TEXT
+    error              TEXT,
+    model_id           TEXT NOT NULL DEFAULT 'gpt-4o'
 );
 
 CREATE TABLE IF NOT EXISTS canvases (
@@ -77,7 +78,8 @@ CREATE TABLE IF NOT EXISTS canvases (
     title            TEXT,
     svg              TEXT,
     narration_json   TEXT,
-    accepted         INTEGER NOT NULL DEFAULT 0
+    accepted         INTEGER NOT NULL DEFAULT 0,
+    model_id         TEXT NOT NULL DEFAULT 'gpt-4o'
 );
 
 CREATE TABLE IF NOT EXISTS repairs (
@@ -91,7 +93,15 @@ CREATE TABLE IF NOT EXISTS repairs (
     bad_narration_json TEXT,
     critique           TEXT,
     good_svg           TEXT,
-    good_narration_json TEXT
+    good_narration_json TEXT,
+    model_id           TEXT NOT NULL DEFAULT 'gpt-4o'
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    updated_by TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
@@ -126,7 +136,8 @@ CREATE TABLE IF NOT EXISTS turns (
     cost_usd_estimate  DOUBLE PRECISION,
     refined_within_s   DOUBLE PRECISION,
     intent             TEXT,
-    error              TEXT
+    error              TEXT,
+    model_id           TEXT NOT NULL DEFAULT 'gpt-4o'
 );
 
 CREATE TABLE IF NOT EXISTS canvases (
@@ -137,7 +148,8 @@ CREATE TABLE IF NOT EXISTS canvases (
     title            TEXT,
     svg              TEXT,
     narration_json   TEXT,
-    accepted         INTEGER NOT NULL DEFAULT 0
+    accepted         INTEGER NOT NULL DEFAULT 0,
+    model_id         TEXT NOT NULL DEFAULT 'gpt-4o'
 );
 
 CREATE TABLE IF NOT EXISTS repairs (
@@ -151,13 +163,29 @@ CREATE TABLE IF NOT EXISTS repairs (
     bad_narration_json TEXT,
     critique           TEXT,
     good_svg           TEXT,
-    good_narration_json TEXT
+    good_narration_json TEXT,
+    model_id           TEXT NOT NULL DEFAULT 'gpt-4o'
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at DOUBLE PRECISION NOT NULL,
+    updated_by TEXT
+);
+
+-- Additive migration for pre-existing deployments (Postgres-only;
+-- SQLite developer DBs get the column at CREATE-time above). All
+-- historical rows backfill to 'gpt-4o' (the only backend used to date).
+ALTER TABLE turns    ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
+ALTER TABLE canvases ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
+ALTER TABLE repairs  ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_turn ON repairs (turn_id);
+CREATE INDEX IF NOT EXISTS idx_turns_model ON turns (model_id, timestamp);
 """
 
 
@@ -364,8 +392,15 @@ class Telemetry:
         cost_usd_estimate: float | None = None,
         intent: str | None = None,
         error: str | None = None,
+        model_id: str = "gpt-4o",
     ) -> int | None:
-        """Record one user turn; return its turn_id (or None on failure)."""
+        """Record one user turn; return its turn_id (or None on failure).
+
+        ``model_id`` tags the row with the backend that produced it
+        (``gpt-4o``, ``qwen_lora_v4``, ``qwen_base``, …) so the
+        finetuning exporter can filter per-model when assembling
+        future training corpora.
+        """
         try:
             with self._lock:
                 # RETURNING works in both SQLite (≥3.35, shipped with
@@ -376,8 +411,8 @@ class Telemetry:
                                        canvas_id, prior_canvas_ids,
                                        n_phrases, retries_used, review_history,
                                        duration_s, cost_usd_estimate,
-                                       intent, error)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       intent, error, model_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING turn_id
                     """,
                     (
@@ -387,7 +422,7 @@ class Telemetry:
                         n_phrases, retries_used,
                         json.dumps(review_history or []),
                         duration_s, cost_usd_estimate,
-                        intent, error,
+                        intent, error, model_id,
                     ),
                 )
                 row = cur.fetchone()
@@ -453,25 +488,27 @@ class Telemetry:
         title: str | None,
         svg: str | None,
         narration: list[dict] | None,
+        model_id: str = "gpt-4o",
     ) -> None:
         # ON CONFLICT (canvas_id) DO UPDATE replaces SQLite-specific
         # `INSERT OR REPLACE`; portable to Postgres.
         self._exec(
             """
             INSERT INTO canvases (canvas_id, session_id, turn_id, timestamp,
-                                  title, svg, narration_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                                  title, svg, narration_json, model_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (canvas_id) DO UPDATE SET
                 session_id     = EXCLUDED.session_id,
                 turn_id        = EXCLUDED.turn_id,
                 timestamp      = EXCLUDED.timestamp,
                 title          = EXCLUDED.title,
                 svg            = EXCLUDED.svg,
-                narration_json = EXCLUDED.narration_json
+                narration_json = EXCLUDED.narration_json,
+                model_id       = EXCLUDED.model_id
             """,
             (
                 canvas_id, session_id, turn_id, time.time(),
-                title, svg, json.dumps(narration or []),
+                title, svg, json.dumps(narration or []), model_id,
             ),
         )
 
@@ -486,6 +523,7 @@ class Telemetry:
         critique: str | None,
         good_svg: str | None,
         good_narration: list[dict] | None,
+        model_id: str = "gpt-4o",
     ) -> None:
         """Persist a (failed_attempt, critique, corrected_attempt) triple.
 
@@ -500,8 +538,9 @@ class Telemetry:
                                  attempt_index, user_prompt,
                                  bad_svg, bad_narration_json,
                                  critique,
-                                 good_svg, good_narration_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 good_svg, good_narration_json,
+                                 model_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 turn_id, session_id, time.time(),
@@ -509,8 +548,84 @@ class Telemetry:
                 bad_svg, json.dumps(bad_narration or []),
                 critique,
                 good_svg, json.dumps(good_narration or []),
+                model_id,
             ),
         )
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        """Read a server-side setting (e.g.\\ active model selection).
+
+        Returns ``default`` (or None) when the key isn't set.  Used by
+        the admin page to persist operator choices across task restarts.
+        """
+        try:
+            cur = self._backend.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else default
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] get_setting({key!r}) failed: {exc}",
+                  flush=True, file=sys.stderr)
+            return default
+
+    def set_setting(self, key: str, value: str,
+                    updated_by: str | None = None) -> None:
+        """Upsert a server-side setting; ``updated_by`` is the operator
+        e-mail recorded for auditability."""
+        try:
+            with self._lock:
+                self._backend.execute(
+                    """
+                    INSERT INTO settings (key, value, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (key) DO UPDATE SET
+                        value      = EXCLUDED.value,
+                        updated_at = EXCLUDED.updated_at,
+                        updated_by = EXCLUDED.updated_by
+                    """,
+                    (key, value, time.time(), updated_by),
+                )
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] set_setting({key!r}) failed: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def usage_by_model(self, since_s: float = 86400.0) -> list[dict]:
+        """Aggregate turns by ``model_id`` over the last ``since_s``
+        seconds (default 24 h).  Returns a list of dicts with
+        ``model_id, turns, avg_duration_s, avg_retries, total_cost``.
+        """
+        cutoff = time.time() - since_s
+        try:
+            cur = self._backend.execute(
+                """
+                SELECT model_id,
+                       COUNT(*),
+                       COALESCE(AVG(duration_s), 0),
+                       COALESCE(AVG(CAST(retries_used AS REAL)), 0),
+                       COALESCE(SUM(cost_usd_estimate), 0),
+                       COALESCE(SUM(CASE WHEN error IS NULL OR error = ''
+                                         THEN 0 ELSE 1 END), 0)
+                FROM turns
+                WHERE timestamp >= ?
+                GROUP BY model_id
+                ORDER BY 2 DESC
+                """,
+                (cutoff,),
+            )
+            return [
+                {"model_id": r[0], "turns": int(r[1]),
+                 "avg_duration_s": float(r[2]),
+                 "avg_retries": float(r[3]),
+                 "total_cost": float(r[4]),
+                 "errors": int(r[5])}
+                for r in cur.fetchall()
+            ]
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] usage_by_model failed: {exc}",
+                  flush=True, file=sys.stderr)
+            return []
 
     def session_cost(self, session_id: str, since_s: float = 86400.0) -> float:
         cutoff = time.time() - since_s

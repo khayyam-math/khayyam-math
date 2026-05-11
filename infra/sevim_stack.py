@@ -213,6 +213,13 @@ class SevimStack(Stack):
             "SEVIM_AUTH_REQUIRED": "1",
             "SEVIM_VLLM_URL": "https://api.openai.com/v1",
             "SEVIM_VLLM_MODEL": "gpt-4o",
+            # Admin dashboard (/studio/admin) is gated by an email
+            # whitelist; only signed-in users whose magic-link cookie
+            # carries one of these e-mails can see it.  Everyone else
+            # gets a 404, so the route is effectively invisible.
+            "SEVIM_ADMIN_EMAILS": (
+                "arash_kermani@yahoo.com,arash_kermani@yahoo.com"
+            ),
             "SEVIM_STORAGE_URL": f"s3://{canvas_bucket.bucket_name}",
             "SEVIM_EXPORT_S3_BUCKET": training_bucket.bucket_name,
             "SEVIM_LORA_S3_BUCKET": lora_bucket.bucket_name,
@@ -348,6 +355,147 @@ class SevimStack(Stack):
                         permanent=True,  # 301
                     ),
                 )
+
+        # ── 7c. (Optional) Qwen vLLM GPU instance ────────────────────
+        # Spins up a g6.xlarge (NVIDIA L4, 24 GB) running vLLM with
+        # --enable-lora, preloaded with qwen_lora_v4 from the LoRA S3
+        # bucket.  Exposes the OpenAI-compatible chat-completions API
+        # on the private VPC at port 8000.  Fargate's env var
+        # SEVIM_QWEN_VLLM_URL is wired to its private DNS name.
+        #
+        # Opt-in: deploy with ``cdk deploy -c enable_qwen=1`` to spin
+        # this up.  Default off — bare provision adds ~$0.30/hr (spot)
+        # or ~$0.80/hr (on-demand) every hour the stack is alive.
+        enable_qwen = bool(self.node.try_get_context("enable_qwen"))
+        if enable_qwen:
+            qwen_sg = ec2.SecurityGroup(
+                self, "QwenVllmSg",
+                vpc=vpc,
+                description="Qwen vLLM serving SG — inbound 8000 from Fargate only",
+                allow_all_outbound=True,
+            )
+            # Only Fargate tasks may hit the vLLM port.
+            qwen_sg.add_ingress_rule(
+                peer=service.service.connections.security_groups[0],
+                connection=ec2.Port.tcp(8000),
+                description="Studio Fargate → Qwen vLLM",
+            )
+
+            qwen_role = iam.Role(
+                self, "QwenInstanceRole",
+                assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
+                managed_policies=[
+                    iam.ManagedPolicy.from_aws_managed_policy_name(
+                        "AmazonSSMManagedInstanceCore"),
+                    iam.ManagedPolicy.from_aws_managed_policy_name(
+                        "CloudWatchAgentServerPolicy"),
+                ],
+            )
+            lora_bucket.grant_read(qwen_role)
+
+            # User-data: install vLLM, pull the LoRA from S3, run vLLM
+            # as a systemd unit.  AWS Deep Learning Base GPU AMI ships
+            # with the NVIDIA driver + CUDA toolkit + Python 3.11
+            # preinstalled — no driver dance required.
+            user_data = ec2.UserData.for_linux()
+            user_data.add_commands(
+                "set -eux",
+                "exec > >(tee /var/log/sevim-bootstrap.log) 2>&1",
+                "apt-get update -y && apt-get install -y python3.11-venv python3-pip awscli",
+                "python3 -m venv /opt/vllm",
+                "/opt/vllm/bin/pip install --upgrade pip",
+                # Pin vLLM to a version known to support Qwen2.5 + LoRA.
+                "/opt/vllm/bin/pip install 'vllm==0.6.6.post1' huggingface_hub",
+                # Pull the adapter — bucket name interpolated from CDK.
+                "mkdir -p /opt/loras",
+                f"aws s3 sync s3://{lora_bucket.bucket_name}/qwen_lora_v4/ "
+                "/opt/loras/qwen_lora_v4/",
+                # Systemd unit.
+                "cat >/etc/systemd/system/vllm.service <<'UNIT'",
+                "[Unit]",
+                "Description=vLLM Qwen2.5-7B + Khayyam Math LoRA",
+                "After=network-online.target",
+                "Wants=network-online.target",
+                "",
+                "[Service]",
+                "Type=simple",
+                "ExecStart=/opt/vllm/bin/python -m vllm.entrypoints.openai.api_server "
+                "  --model Qwen/Qwen2.5-7B-Instruct "
+                "  --host 0.0.0.0 --port 8000 "
+                "  --enable-lora "
+                "  --lora-modules qwen_lora_v4=/opt/loras/qwen_lora_v4 "
+                "  --max-model-len 6144 "
+                "  --dtype bfloat16",
+                "Restart=on-failure",
+                "RestartSec=10",
+                "",
+                "[Install]",
+                "WantedBy=multi-user.target",
+                "UNIT",
+                "systemctl daemon-reload",
+                "systemctl enable vllm",
+                "systemctl start vllm",
+            )
+
+            # AMI: use the AWS-published "Deep Learning Base OSS Nvidia
+            # Driver GPU AMI (Ubuntu 22.04)" via its SSM parameter — the
+            # parameter always resolves to the latest published AMI ID,
+            # so we don't have to bump a date string each release.
+            qwen_ami = ec2.MachineImage.from_ssm_parameter(
+                "/aws/service/deeplearning/ami/x86_64/"
+                "base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id",
+                os=ec2.OperatingSystemType.LINUX,
+            )
+
+            qwen_instance = ec2.Instance(
+                self, "QwenVllmInstance",
+                instance_type=ec2.InstanceType("g6.xlarge"),
+                machine_image=qwen_ami,
+                vpc=vpc,
+                vpc_subnets=ec2.SubnetSelection(
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+                security_group=qwen_sg,
+                role=qwen_role,
+                user_data=user_data,
+                block_devices=[
+                    ec2.BlockDevice(
+                        device_name="/dev/sda1",
+                        volume=ec2.BlockDeviceVolume.ebs(
+                            volume_size=100,
+                            volume_type=ec2.EbsDeviceVolumeType.GP3,
+                            delete_on_termination=True,
+                        ),
+                    ),
+                ],
+            )
+            # Spot pricing — applied via CFN override since the L2
+            # ec2.Instance construct doesn't directly expose spot
+            # options.  $0.50 cap is well above the typical g6.xlarge
+            # spot price ($0.20--0.30/hr in us-east-1 as of May 2026),
+            # giving headroom for spot-price spikes without falling
+            # through to on-demand at $0.80/hr.  Acceptable because
+            # the Qwen path is gracefully degradable: if vLLM is
+            # reclaimed, the chat UI falls back to GPT-4o automatically.
+            cfn_instance = qwen_instance.node.default_child  # type: ignore[assignment]
+            cfn_instance.add_property_override(
+                "InstanceMarketOptions",
+                {"MarketType": "spot",
+                 "SpotOptions": {"SpotInstanceType": "persistent",
+                                 "InstanceInterruptionBehavior": "stop",
+                                 "MaxPrice": "0.50"}},
+            )
+
+            # Wire SEVIM_QWEN_VLLM_URL into the Fargate task env so the
+            # studio dropdown's "Qwen" choice resolves to this instance.
+            service.task_definition.default_container.add_environment(
+                "SEVIM_QWEN_VLLM_URL",
+                f"http://{qwen_instance.instance_private_ip}:8000/v1",
+            )
+
+            CfnOutput(self, "QwenInstancePrivateIp",
+                      value=qwen_instance.instance_private_ip)
+            CfnOutput(self, "QwenInstanceId",
+                      value=qwen_instance.instance_id)
 
         # ── 7. Outputs ───────────────────────────────────────────────
         url = f"https://{domain}" if domain else f"http://{service.load_balancer.load_balancer_dns_name}"

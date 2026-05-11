@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Khayyam Math — Admin</title>
+<style>
+  :root {
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --accent: #1a4f8b;
+    --warn: #b8732e;
+    --danger: #b91c1c;
+    --ok: #15803d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font: 15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: var(--fg); background: var(--bg);
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px;
+  }
+  .card h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em;
+    margin: 0 0 12px; color: var(--muted); font-weight: 700;
+  }
+  .active-row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .active-row code {
+    background: #eef2f7; padding: 4px 8px; border-radius: 4px;
+    font-size: 14px;
+  }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 12px; font-weight: 600;
+  }
+  .pill.ok { background: #dcfce7; color: var(--ok); }
+  .pill.warn { background: #fef3c7; color: var(--warn); }
+  .pill.danger { background: #fee2e2; color: var(--danger); }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  .tabs {
+    display: flex; gap: 4px; margin-bottom: 12px;
+  }
+  .tab {
+    background: transparent; border: 1px solid var(--line);
+    padding: 4px 10px; border-radius: 4px; cursor: pointer;
+    font: inherit; font-size: 12px; color: var(--muted);
+  }
+  .tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+  label.model-option {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 6px; cursor: pointer;
+    margin-bottom: 8px;
+  }
+  label.model-option.selected { border-color: var(--accent); background: #eff6ff; }
+  label.model-option.disabled { opacity: 0.55; cursor: not-allowed; }
+  label.model-option input { margin-right: 8px; }
+  .model-id { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+  .model-note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .btn {
+    background: var(--accent); color: white; border: none;
+    padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    font: inherit; font-weight: 600;
+  }
+  .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .toast {
+    position: fixed; bottom: 16px; right: 16px;
+    background: var(--ok); color: white; padding: 10px 16px;
+    border-radius: 6px; font-size: 14px;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--danger); }
+  .footer {
+    margin-top: 24px; font-size: 12px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<h1>Khayyam Math — Admin</h1>
+<div class="subtitle">Operator dashboard. <span id="who"></span></div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Active model</h2>
+    <div id="active-active">Loading…</div>
+    <div id="model-options" style="margin-top: 12px;"></div>
+    <button id="save-btn" class="btn" disabled>Save selection</button>
+    <div class="model-note" style="margin-top:8px;">
+      Changes take effect on the next chat request — no Fargate redeploy needed.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Usage by model</h2>
+    <div class="tabs">
+      <button class="tab active" data-window="24h">last 24h</button>
+      <button class="tab" data-window="7d">last 7d</button>
+      <button class="tab" data-window="30d">last 30d</button>
+      <button class="tab" data-window="all">all time</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th class="num">Turns</th>
+          <th class="num">Avg s</th>
+          <th class="num">Avg retries</th>
+          <th class="num">Errors</th>
+          <th class="num">Cost USD</th>
+        </tr>
+      </thead>
+      <tbody id="usage-body"><tr><td colspan="6" style="color:var(--muted);">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  Admin access is gated by <code>SEVIM_ADMIN_EMAILS</code>.
+  This page returns 404 to non-admin sessions, so its URL is not enumerable.
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+let MODELS = [];
+let ACTIVE = '';
+let CHOICE = '';
+let WINDOWS = {};
+let CURRENT_WINDOW = '24h';
+
+function fmt(n, digits = 2) {
+  if (n === null || n === undefined || Number.isNaN(n)) return '–';
+  return Number(n).toFixed(digits);
+}
+
+function fmtMoney(n) {
+  if (!n) return '$0.00';
+  return '$' + Number(n).toFixed(n < 1 ? 4 : 2);
+}
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isError);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function renderModels() {
+  const box = document.getElementById('model-options');
+  box.innerHTML = '';
+  for (const m of MODELS) {
+    const wrap = document.createElement('label');
+    wrap.className = 'model-option' +
+      (CHOICE === m.id ? ' selected' : '') +
+      (m.available ? '' : ' disabled');
+    const radio = document.createElement('input');
+    radio.type = 'radio'; radio.name = 'model'; radio.value = m.id;
+    radio.disabled = !m.available;
+    radio.checked = (CHOICE === m.id);
+    radio.addEventListener('change', () => {
+      CHOICE = m.id;
+      renderModels();
+      document.getElementById('save-btn').disabled = (CHOICE === ACTIVE);
+    });
+    const head = document.createElement('div');
+    head.innerHTML = '<strong>' + m.label + '</strong>'
+                   + (m.experimental ? ' <span class="pill warn">experimental</span>' : '')
+                   + (!m.available ? ' <span class="pill danger">not configured</span>' : '')
+                   + (m.id === ACTIVE ? ' <span class="pill ok">live</span>' : '');
+    head.prepend(radio);
+    wrap.appendChild(head);
+    const idLine = document.createElement('div');
+    idLine.className = 'model-id'; idLine.textContent = m.id;
+    wrap.appendChild(idLine);
+    if (!m.available && m.reason) {
+      const reason = document.createElement('div');
+      reason.className = 'model-note';
+      reason.textContent = m.reason;
+      wrap.appendChild(reason);
+    }
+    box.appendChild(wrap);
+  }
+  document.getElementById('active-active').innerHTML =
+    'Currently routing every chat request to <code>' + ACTIVE + '</code>.';
+}
+
+function renderUsage() {
+  const tbody = document.getElementById('usage-body');
+  const rows = WINDOWS[CURRENT_WINDOW] || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No traffic in this window.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td><code>' + r.model_id + '</code></td>'
+                 + '<td class="num">' + r.turns + '</td>'
+                 + '<td class="num">' + fmt(r.avg_duration_s, 2) + '</td>'
+                 + '<td class="num">' + fmt(r.avg_retries, 2) + '</td>'
+                 + '<td class="num">' + r.errors + '</td>'
+                 + '<td class="num">' + fmtMoney(r.total_cost) + '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadAll() {
+  try {
+    const [m, s] = await Promise.all([
+      fetch('/studio/admin/models').then(r => r.json()),
+      fetch('/studio/admin/stats').then(r => r.json()),
+    ]);
+    MODELS = (m && m.models) || [];
+    ACTIVE = (m && m.active) || (s && s.active_model) || 'gpt-4o';
+    CHOICE = ACTIVE;
+    WINDOWS = (s && s.windows) || {};
+    renderModels();
+    renderUsage();
+    document.getElementById('save-btn').disabled = true;
+  } catch (e) {
+    showToast('Failed to load admin data: ' + e, true);
+  }
+}
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    CURRENT_WINDOW = t.dataset.window;
+    renderUsage();
+  });
+});
+
+document.getElementById('save-btn').addEventListener('click', async () => {
+  if (!CHOICE || CHOICE === ACTIVE) return;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/studio/admin/active-model', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({model_id: CHOICE}),
+    });
+    if (!resp.ok) {
+      const body = await resp.text();
+      showToast('Save failed: ' + resp.status + ' ' + body, true);
+      btn.disabled = false;
+      return;
+    }
+    const j = await resp.json();
+    ACTIVE = j.active_model;
+    showToast('Now serving ' + ACTIVE);
+    renderModels();
+    // Refresh stats after a beat so the next traffic shows up.
+    setTimeout(loadAll, 800);
+  } catch (e) {
+    showToast('Save failed: ' + e, true);
+    btn.disabled = false;
+  }
+});
+
+loadAll();
+// Auto-refresh stats every 30 seconds so the table stays warm.
+setInterval(async () => {
+  try {
+    const s = await fetch('/studio/admin/stats').then(r => r.json());
+    WINDOWS = (s && s.windows) || {};
+    renderUsage();
+  } catch (_) {}
+}, 30_000);
+</script>
+</body>
+</html>

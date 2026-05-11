@@ -67,6 +67,187 @@ def _vllm_url() -> str:
 def _vllm_model() -> str:
     return os.environ.get("SEVIM_VLLM_MODEL") or _DEFAULT_VLLM_MODEL
 
+
+# --------------------------------------------------------------------
+# Multi-backend selector.  Each entry is presented as a choice in the
+# UI dropdown (see studio/static/studio.html) and resolved to a
+# (base_url, model, api_key, model_id) tuple at request time.
+#
+# The "id" field is what gets persisted in the telemetry model_id
+# column so future fine-tuning corpora can be filtered per backend.
+# Display names are user-facing; ids stay stable across renames.
+#
+# A backend whose env vars resolve to an empty URL is considered
+# unconfigured: it stays in the catalog (so the UI can show "not
+# configured") but cannot be chosen.
+# --------------------------------------------------------------------
+
+def _qwen_lora_vllm_url() -> str:
+    """vLLM endpoint that hosts Qwen2.5-7B + Khayyam-Math LoRA adapters.
+
+    Lives at SEVIM_QWEN_VLLM_URL — populated by the production CDK
+    stack to point at the dedicated GPU instance (g6.xlarge spot)
+    serving qwen_lora_v4.  Empty in dev unless the user sets it.
+    """
+    return (os.environ.get("SEVIM_QWEN_VLLM_URL") or "").rstrip("/")
+
+
+def model_catalog() -> list[dict[str, Any]]:
+    """Return the list of selectable backends in the order the UI
+    should present them.  Each entry is a dict with stable fields:
+
+      id            persisted in telemetry.model_id; never user-facing
+      label         shown in the admin page
+      default       true for the entry pre-selected when nothing is set
+      available     false if the backend cannot serve traffic right now
+      reason        human-readable reason when available=false
+      experimental  display a small "experimental" badge in the UI
+      cost_tier     informational hint ("quality" / "cheap" / "in-house")
+    """
+    openai_ready = bool(os.environ.get("OPENAI_API_KEY"))
+    qwen_url = _qwen_lora_vllm_url()
+    return [
+        # Order matters: ``get_active_model()`` picks the first
+        # available entry as a hard fallback when the admin setting
+        # and the marked default are both unreachable.  The in-house
+        # Qwen LoRA is the preferred backend once it's wired up; if
+        # the GPU isn't running we cleanly fall back to OpenAI.
+        {
+            "id": "qwen_lora_v4",
+            "label": "Qwen 2.5-7B + Khayyam Math v4 (in-house LoRA)",
+            "default": True,
+            "available": bool(qwen_url),
+            "reason": "" if qwen_url else "SEVIM_QWEN_VLLM_URL is not configured",
+            "experimental": True,
+            "cost_tier": "in-house",
+        },
+        {
+            "id": "gpt-4o",
+            "label": "GPT-4o (OpenAI)",
+            "default": False,
+            "available": openai_ready,
+            "reason": "" if openai_ready else "OPENAI_API_KEY is not configured",
+            "experimental": False,
+            "cost_tier": "quality",
+        },
+        {
+            "id": "gpt-4o-mini",
+            "label": "GPT-4o mini (OpenAI · cheap)",
+            "default": False,
+            "available": openai_ready,
+            "reason": "" if openai_ready else "OPENAI_API_KEY is not configured",
+            "experimental": False,
+            "cost_tier": "cheap",
+        },
+        {
+            "id": "qwen_base",
+            "label": "Qwen 2.5-7B (base, no LoRA)",
+            "default": False,
+            "available": bool(qwen_url),
+            "reason": "" if qwen_url else "SEVIM_QWEN_VLLM_URL is not configured",
+            "experimental": False,
+            "cost_tier": "in-house",
+        },
+    ]
+
+
+def get_active_model() -> str:
+    """Return the model id that should serve the next chat request.
+
+    Resolution order:
+      1. The admin's ``active_model`` setting from telemetry, if it
+         points to an available backend.
+      2. The catalog entry marked ``default=True``, if it is available.
+      3. The first ``available=True`` entry in catalog order.
+      4. The marked default (even if unavailable) — so the caller still
+         gets a deterministic string to log.
+
+    This way the operator can set Qwen as the preferred backend, but
+    if its vLLM endpoint is offline (spot reclaim, GPU instance not
+    yet deployed) traffic seamlessly falls through to OpenAI.
+    """
+    catalog_list = model_catalog()
+    catalog = {m["id"]: m for m in catalog_list}
+    try:
+        from sevim.telemetry import get_telemetry
+        tel = get_telemetry()
+        chosen = tel.get_setting("active_model") if tel is not None else None
+    except Exception:  # noqa: BLE001
+        chosen = None
+    if chosen and chosen in catalog and catalog[chosen]["available"]:
+        return chosen
+    for m in catalog_list:
+        if m["default"] and m["available"]:
+            return m["id"]
+    for m in catalog_list:
+        if m["available"]:
+            return m["id"]
+    return next((m["id"] for m in catalog_list if m["default"]), "gpt-4o")
+
+
+def resolve_backend() -> tuple[str, str, str | None, str]:
+    """Resolve the admin-selected backend to
+    ``(base_url, model_name, api_key, model_id)``.
+
+    Falls back to the catalog default (``gpt-4o``) when the admin
+    setting is unset or names an unavailable backend.  The chat
+    pipeline calls this with no arguments — the user has no input
+    into the choice.
+    """
+    chosen = get_active_model()
+    if chosen == "gpt-4o":
+        # The base URL still comes from SEVIM_VLLM_URL so dev can
+        # point this at a local OpenAI-compatible server; the model
+        # name is hard-coded here because the admin choice should
+        # not be overridden by SEVIM_VLLM_MODEL env-var drift.
+        return (_vllm_url(), "gpt-4o",
+                os.environ.get("OPENAI_API_KEY"), "gpt-4o")
+    if chosen == "gpt-4o-mini":
+        return (_vllm_url(), "gpt-4o-mini",
+                os.environ.get("OPENAI_API_KEY"), "gpt-4o-mini")
+    if chosen == "qwen_lora_v4":
+        # vLLM with --enable-lora exposes the adapter as a separate
+        # "model" name.  Convention: the adapter id is the served
+        # model name; the base lives under "Qwen/Qwen2.5-7B-Instruct".
+        return (_qwen_lora_vllm_url(), "qwen_lora_v4",
+                os.environ.get("SEVIM_QWEN_VLLM_KEY"), "qwen_lora_v4")
+    if chosen == "qwen_base":
+        return (_qwen_lora_vllm_url(), "Qwen/Qwen2.5-7B-Instruct",
+                os.environ.get("SEVIM_QWEN_VLLM_KEY"), "qwen_base")
+    # Should not reach.
+    return (_vllm_url(), _vllm_model(), os.environ.get("OPENAI_API_KEY"), "gpt-4o")
+
+
+# --------------------------------------------------------------------
+# Admin auth.  Comma-separated whitelist in SEVIM_ADMIN_EMAILS; the
+# user's e-mail from the signed magic-link cookie must match.  When
+# unset there is NO admin — the page returns 404 to everyone.
+# --------------------------------------------------------------------
+
+def _admin_emails() -> set[str]:
+    raw = os.environ.get("SEVIM_ADMIN_EMAILS") or ""
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def is_admin(request: Request) -> bool:
+    from studio.auth import current_user
+    user = current_user(request)
+    if not user:
+        return False
+    return user.lower() in _admin_emails()
+
+
+def require_admin(request: Request) -> str:
+    """FastAPI dependency: 404 (NOT 401) for non-admin callers, so the
+    admin URL is undiscoverable.  Returns the operator e-mail on
+    success — used as the ``updated_by`` audit trail in settings.
+    """
+    from studio.auth import current_user
+    user = current_user(request)
+    if not user or user.lower() not in _admin_emails():
+        raise HTTPException(404, "Not Found")
+    return user
+
 router = APIRouter(prefix="/studio")
 
 
@@ -164,11 +345,17 @@ async def _execute_tool(
             "narration": (pc.narration_manifest or {}).get("phrases") or [],
         })
     t0 = _time.monotonic()
+    # Backend selection is admin-controlled, not request-controlled:
+    # ``resolve_backend()`` consults the server-side ``active_model``
+    # setting (set from the admin page) rather than anything the user
+    # might supply.  This keeps individual chat sessions from picking
+    # the experimental Qwen path on their own.
+    base_url, model_name, api_key, resolved_model_id = resolve_backend()
     result = await express_figure(
         user_prompt=prompt,
-        base_url=_vllm_url(),
-        model=_vllm_model(),
-        api_key=os.environ.get("OPENAI_API_KEY"),
+        base_url=base_url,
+        model=model_name,
+        api_key=api_key,
         context_canvases=context_canvases,
     )
     duration_s = _time.monotonic() - t0
@@ -196,6 +383,7 @@ async def _execute_tool(
             duration_s=duration_s,
             cost_usd_estimate=cost_estimate,
             intent="express",
+            model_id=resolved_model_id,
         )
         tel.record_canvas(
             canvas_id=c.canvas_id,
@@ -204,6 +392,7 @@ async def _execute_tool(
             title=result.get("title", ""),
             svg=result.get("svg", ""),
             narration=narration,
+            model_id=resolved_model_id,
         )
         for pair in result.get("repairs") or []:
             tel.record_repair_pair(
@@ -216,6 +405,7 @@ async def _execute_tool(
                 critique=pair.get("critique"),
                 good_svg=pair.get("good_svg"),
                 good_narration=pair.get("good_narration"),
+                model_id=resolved_model_id,
             )
     return {
         "canvas_id": c.canvas_id,
@@ -896,6 +1086,78 @@ def preferences() -> dict[str, Any]:
     values to its DOM/audio elements."""
     from studio.preferences import get_settings
     return get_settings()
+
+
+@router.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, _user: str = Depends(require_admin)):
+    """Operator-only dashboard.  Returns 404 to anyone whose signed
+    cookie e-mail isn't in ``SEVIM_ADMIN_EMAILS``, so the URL is
+    effectively undiscoverable.
+
+    The page itself is a small SPA that polls ``/studio/admin/stats``
+    and ``/studio/admin/models`` and posts to
+    ``/studio/admin/active-model``.  All authentication is the same
+    magic-link cookie the regular chat surface uses.
+    """
+    html_path = _STATIC / "admin.html"
+    if not html_path.exists():
+        raise HTTPException(500, "admin.html missing")
+    return HTMLResponse(
+        html_path.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/admin/stats")
+def admin_stats(_user: str = Depends(require_admin)) -> dict[str, Any]:
+    """Per-model usage roll-ups for the operator dashboard."""
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"available": False, "reason": "telemetry disabled"}
+    return {
+        "available": True,
+        "active_model": get_active_model(),
+        "windows": {
+            "24h":  tel.usage_by_model(since_s=86_400),
+            "7d":   tel.usage_by_model(since_s=7 * 86_400),
+            "30d":  tel.usage_by_model(since_s=30 * 86_400),
+            "all":  tel.usage_by_model(since_s=10**12),
+        },
+    }
+
+
+@router.get("/admin/models")
+def admin_models(_user: str = Depends(require_admin)) -> dict[str, Any]:
+    """List the selectable LLM backends — same catalog the routing
+    layer consumes, but only exposed to admins."""
+    return {"models": model_catalog(), "active": get_active_model()}
+
+
+class SetActiveModelReq(BaseModel):
+    model_id: str
+
+
+@router.post("/admin/active-model")
+def admin_set_active_model(
+    req: SetActiveModelReq,
+    user: str = Depends(require_admin),
+) -> dict[str, Any]:
+    """Set the production-traffic model.  Persists to the telemetry
+    ``settings`` table; takes effect on the *next* chat request.
+    """
+    catalog = {m["id"]: m for m in model_catalog()}
+    if req.model_id not in catalog:
+        raise HTTPException(400, f"unknown model {req.model_id!r}")
+    if not catalog[req.model_id]["available"]:
+        raise HTTPException(409, f"backend {req.model_id!r} is not configured: "
+                                 f"{catalog[req.model_id]['reason']}")
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        raise HTTPException(503, "telemetry unavailable; cannot persist setting")
+    tel.set_setting("active_model", req.model_id, updated_by=user)
+    return {"ok": True, "active_model": req.model_id, "updated_by": user}
 
 
 @router.get("/health")

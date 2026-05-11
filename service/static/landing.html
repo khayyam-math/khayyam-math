@@ -446,9 +446,13 @@
   b.hidden = false;
   document.getElementById('cookie-ok').addEventListener('click', function () {
     try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
+    // The banner has inline style="display:flex" which overrides the
+    // [hidden] attribute's implicit display:none.  Set display:none
+    // directly so the banner actually disappears on click.  The fade-
+    // out animation keeps the visual touch from the earlier version.
     b.style.transition = 'opacity 0.25s';
     b.style.opacity = '0';
-    setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+    setTimeout(function () { b.style.display = 'none'; }, 260);
   });
 })();
 </script>

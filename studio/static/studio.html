@@ -614,9 +614,11 @@
     b.hidden = false;
     document.getElementById('cookie-ok').addEventListener('click', function () {
       try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
+      // Inline style="display:flex" overrides [hidden], so use
+      // display:none explicitly so the banner truly disappears.
       b.style.transition = 'opacity 0.25s';
       b.style.opacity = '0';
-      setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+      setTimeout(function () { b.style.display = 'none'; }, 260);
     });
   })();
 </script>
