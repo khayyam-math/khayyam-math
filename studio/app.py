@@ -25,7 +25,7 @@ import json
 import os
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -358,6 +358,7 @@ async def _execute_tool(
     args: dict[str, Any],
     *,
     session_id: str | None = None,
+    on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run the single Studio tool: ``sevim_express``.
 
@@ -408,6 +409,7 @@ async def _execute_tool(
         model=model_name,
         api_key=api_key,
         context_canvases=context_canvases,
+        on_svg_chunk=on_svg_chunk,
     )
     duration_s = _time.monotonic() - t0
     cid = "express_" + secrets.token_hex(8)
@@ -906,10 +908,65 @@ async def _stream_vllm_chat(req: ChatReq):
                     args["context_canvas_ids"] = ctx_ids
             tool_failed = False
             try:
-                out = await _execute_tool(
-                    tc.get("name") or "", args,
+                # Progressive-SVG plumbing: only the express tool emits
+                # partial SVG.  Every time the streaming JSON parser
+                # makes progress on the 'svg' field, the callback pushes
+                # a snapshot onto this queue, which we drain into SSE
+                # frames while the tool task is running.  Last-write-
+                # wins inside the queue (collapse to keep the wire
+                # cheap), but we still yield as often as the network
+                # lets us.
+                tool_name = tc.get("name") or ""
+                chunk_queue: asyncio.Queue[str] | None = None
+                on_svg_chunk: (
+                    Callable[[str], Awaitable[None]] | None
+                ) = None
+                if tool_name == "sevim_express":
+                    chunk_queue = asyncio.Queue()
+
+                    async def _push_svg_chunk(
+                        partial: str,
+                        _q: asyncio.Queue[str] = chunk_queue,
+                    ) -> None:
+                        await _q.put(partial)
+
+                    on_svg_chunk = _push_svg_chunk
+
+                tool_task = asyncio.create_task(_execute_tool(
+                    tool_name, args,
                     session_id=req.session_id,
-                )
+                    on_svg_chunk=on_svg_chunk,
+                ))
+
+                if chunk_queue is not None:
+                    # Drain partial-SVG events until the tool finishes.
+                    # We collapse to the latest snapshot in the queue
+                    # so we don't ship every intermediate state, but we
+                    # do yield at least every ~25ms to keep the canvas
+                    # painting.
+                    while not tool_task.done():
+                        try:
+                            partial = await asyncio.wait_for(
+                                chunk_queue.get(), timeout=0.025,
+                            )
+                        except asyncio.TimeoutError:
+                            continue
+                        # Collapse any backlog onto the freshest one.
+                        while not chunk_queue.empty():
+                            partial = chunk_queue.get_nowait()
+                        yield {
+                            "event": "svg_chunk",
+                            "data": json.dumps({"svg": partial}),
+                        }
+                    # Drain anything queued after .done() flipped True.
+                    while not chunk_queue.empty():
+                        partial = chunk_queue.get_nowait()
+                        yield {
+                            "event": "svg_chunk",
+                            "data": json.dumps({"svg": partial}),
+                        }
+
+                out = await tool_task
                 # Track the most-recent canvas_id touched by any tool —
                 # this is what the post-stop audit will inspect.
                 if isinstance(out, dict) and out.get("canvas_id"):

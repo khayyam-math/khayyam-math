@@ -20,9 +20,160 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
+
+
+# ---------------------------------------------------------------------
+# Streaming SVG extractor — pulls the value of the top-level "svg"
+# field out of a streaming JSON response as it arrives, character by
+# character.  Used by ``express_figure`` to surface a partial SVG to
+# the chat surface so the figure appears on the canvas while the rest
+# of the response (narration, title) is still being emitted.
+#
+# Works on the raw concatenated text of all streamed content deltas
+# from an OpenAI-compatible /chat/completions endpoint.  The express
+# schema declares fields in property order ``[svg, narration, title]``
+# so the SVG arrives first; once we see its closing unescaped quote
+# we stop scanning.
+#
+# Handles standard JSON string escapes (\" \\ \/ \n \r \t \b \f) and
+# is tolerant of partial escape sequences across feed() boundaries.
+# Unicode \uXXXX escapes are passed through as the literal '?' so
+# the partial render doesn't break; the full JSON parse at the end
+# of the stream recovers the actual character.
+# ---------------------------------------------------------------------
+
+class _StreamingSvgExtractor:
+    """Stateful extractor for the 'svg' field of a streaming JSON
+    response.  Feed accumulated deltas via ``.feed(chunk)``; after
+    each call ``.partial_svg`` returns the decoded SVG seen so far,
+    ``.done`` flips True once the SVG value's closing quote arrives.
+    """
+
+    # Three states:  before_field → in_value → after_value.
+    _BEFORE = 0
+    _IN     = 1
+    _AFTER  = 2
+
+    def __init__(self) -> None:
+        self._buf: list[str] = []         # pending text not yet scanned
+        self._state = self._BEFORE
+        self._svg: list[str] = []         # decoded SVG chars
+        self._escape = False              # last char was '\\' while in value
+        self._unicode_left = 0            # remaining hex digits of a \\uXXXX
+
+    @property
+    def partial_svg(self) -> str:
+        return "".join(self._svg)
+
+    @property
+    def done(self) -> bool:
+        return self._state == self._AFTER
+
+    def feed(self, text: str) -> bool:
+        """Append ``text`` to the buffer; advance the state machine.
+
+        Returns True iff new SVG content was produced.  The caller can
+        then read ``.partial_svg`` and emit it to the client.
+        """
+        if not text or self._state == self._AFTER:
+            return False
+        before_len = len(self._svg)
+
+        if self._state == self._BEFORE:
+            # Append to pending buffer and look for the opening
+            # `"svg":"` sequence.  Tolerate whitespace around the colon
+            # and the field separator.
+            self._buf.append(text)
+            joined = "".join(self._buf)
+            # Find `"svg"` first (case-sensitive — JSON keys are exact).
+            key_idx = joined.find('"svg"')
+            if key_idx < 0:
+                # Keep only the last ~5 chars in the buffer so we don't
+                # grow unbounded.  '"svg"' is 5 chars; an opening quote
+                # we need to recognise may straddle a feed boundary.
+                if len(joined) > 64:
+                    self._buf = [joined[-64:]]
+                return False
+            j = key_idx + len('"svg"')
+            # Skip whitespace + colon + whitespace.
+            while j < len(joined) and joined[j] in " \t\n\r":
+                j += 1
+            if j >= len(joined) or joined[j] != ":":
+                # Not enough data yet — wait for more.
+                self._buf = [joined[key_idx:]]
+                return False
+            j += 1
+            while j < len(joined) and joined[j] in " \t\n\r":
+                j += 1
+            if j >= len(joined):
+                self._buf = [joined[key_idx:]]
+                return False
+            if joined[j] != '"':
+                # Value is not a string?  Unusual under our schema; bail.
+                self._state = self._AFTER
+                return False
+            # Enter value state; the rest of joined is value-content.
+            self._state = self._IN
+            self._buf = []
+            self._consume_value(joined[j + 1:])
+        else:
+            # Already inside the value.
+            self._consume_value(text)
+
+        return len(self._svg) > before_len
+
+    def _consume_value(self, chunk: str) -> None:
+        """Walk ``chunk`` char-by-char inside the SVG string value,
+        appending decoded chars to ``self._svg`` and flipping state
+        to AFTER when an unescaped closing quote is seen."""
+        for ch in chunk:
+            if self._state != self._IN:
+                return
+            if self._unicode_left > 0:
+                # Mid-\uXXXX escape; just skip the hex chars.  We
+                # already emitted '?' as a placeholder when the \u
+                # was first seen.  Final JSON parse at the end of
+                # streaming recovers the real character.
+                self._unicode_left -= 1
+                continue
+            if self._escape:
+                if ch == '"':
+                    self._svg.append('"')
+                elif ch == "\\":
+                    self._svg.append("\\")
+                elif ch == "/":
+                    self._svg.append("/")
+                elif ch == "n":
+                    self._svg.append("\n")
+                elif ch == "t":
+                    self._svg.append("\t")
+                elif ch == "r":
+                    self._svg.append("\r")
+                elif ch == "b":
+                    self._svg.append("\b")
+                elif ch == "f":
+                    self._svg.append("\f")
+                elif ch == "u":
+                    # 4-hex-digit unicode escape.  Emit a placeholder
+                    # and skip the 4 hex chars.
+                    self._svg.append("?")
+                    self._unicode_left = 4
+                else:
+                    # Unknown escape — pass through.
+                    self._svg.append(ch)
+                self._escape = False
+                continue
+            if ch == "\\":
+                self._escape = True
+                continue
+            if ch == '"':
+                # End of SVG value.
+                self._state = self._AFTER
+                return
+            self._svg.append(ch)
 
 
 # ── JSON schema the LLM is forced to follow ───────────────────────────────
@@ -471,6 +622,87 @@ def _review_user_prompt(
     )
 
 
+# ── Streaming chat-completion helper ──────────────────────────────────────
+
+async def _stream_chat_completion(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    on_svg_chunk: Callable[[str], Awaitable[None]],
+    log: Callable[[str], None],
+) -> str:
+    """Issue a streaming chat-completion request; while deltas arrive,
+    pull the partial 'svg' field out and surface it to the caller via
+    ``on_svg_chunk``.  Returns the accumulated raw JSON content the
+    same way the non-streaming branch does, so the rest of the
+    pipeline (structural review, vision review, retries) is unchanged.
+
+    Errors are surfaced the same way as the non-streaming branch:
+    HTTP errors raise via ``raise_for_status``; any other exception
+    propagates up to ``express_figure``'s outer try.
+    """
+    extractor = _StreamingSvgExtractor()
+    last_emitted_len = 0
+    full = []
+
+    try:
+        async with client.stream(
+            "POST", url, headers=headers, json=payload,
+        ) as r:
+            log(f"main request returned status={r.status_code} (stream)")
+            if r.status_code != 200:
+                body = (await r.aread()).decode(errors="replace")
+                log(f"main request body: {body[:500]}")
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line:
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                choices = obj.get("choices") or []
+                if not choices:
+                    continue
+                delta = (choices[0].get("delta") or {}).get("content")
+                if not delta:
+                    # Final chunk may carry the full content under
+                    # 'message' instead of 'delta' (OpenAI behaviour
+                    # on stream finish for some response_format
+                    # variants); pick it up if so.
+                    msg = choices[0].get("message") or {}
+                    delta = msg.get("content")
+                    if not delta:
+                        continue
+                full.append(delta)
+                if extractor.feed(delta):
+                    partial = extractor.partial_svg
+                    if len(partial) > last_emitted_len:
+                        last_emitted_len = len(partial)
+                        try:
+                            await on_svg_chunk(partial)
+                        except Exception as cb_exc:  # noqa: BLE001
+                            log(
+                                f"on_svg_chunk raised "
+                                f"{type(cb_exc).__name__}: {cb_exc} "
+                                f"(continuing)"
+                            )
+    except Exception as exc:  # noqa: BLE001
+        log(f"main request errored (stream): {type(exc).__name__}: {exc}")
+        raise
+
+    content = "".join(full)
+    log(f"stream finished total_len={len(content)} svg_emitted={last_emitted_len}")
+    return content
+
+
 # ── Pipeline entry point ──────────────────────────────────────────────────
 
 async def express_figure(
@@ -480,6 +712,7 @@ async def express_figure(
     api_key: str | None,
     max_retries: int = 1,
     context_canvases: list[dict[str, Any]] | None = None,
+    on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run the SVG-direct + vision-review loop.
 
@@ -555,21 +788,38 @@ async def express_figure(
             },
             "messages": messages,
         }
+        # Streaming variant lights up only on the first attempt of a
+        # turn — retries already have an SVG on the canvas, so a
+        # partial-SVG replay there would briefly wipe a finished
+        # figure mid-correction.  The non-streaming branch matches
+        # the original behaviour for any caller that didn't supply a
+        # chunk callback.
+        stream_this_attempt = on_svg_chunk is not None and attempt == 0
         async with httpx.AsyncClient(timeout=180) as client:
-            try:
-                r = await client.post(
-                    f"{base_url.rstrip('/')}/chat/completions",
-                    headers=headers, json=payload,
+            if stream_this_attempt:
+                content = await _stream_chat_completion(
+                    client=client,
+                    url=f"{base_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    payload={**payload, "stream": True},
+                    on_svg_chunk=on_svg_chunk,
+                    log=_log,
                 )
-            except Exception as exc:  # noqa: BLE001
-                _log(f"main request errored: {type(exc).__name__}: {exc}")
-                raise
-            _log(f"main request returned status={r.status_code}")
-            if r.status_code != 200:
-                body = (await r.aread()).decode(errors="replace")
-                _log(f"main request body: {body[:500]}")
-            r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"]
+            else:
+                try:
+                    r = await client.post(
+                        f"{base_url.rstrip('/')}/chat/completions",
+                        headers=headers, json=payload,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    _log(f"main request errored: {type(exc).__name__}: {exc}")
+                    raise
+                _log(f"main request returned status={r.status_code}")
+                if r.status_code != 200:
+                    body = (await r.aread()).decode(errors="replace")
+                    _log(f"main request body: {body[:500]}")
+                r.raise_for_status()
+                content = r.json()["choices"][0]["message"]["content"]
         _log(f"got content length={len(content)}")
         result = json.loads(content)
         _log(f"parsed: svg_len={len(result.get('svg',''))} phrases={len(result.get('narration',[]))}")

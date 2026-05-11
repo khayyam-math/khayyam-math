@@ -550,6 +550,21 @@
       if (!audio.paused) audio.pause();
       clearHighlight();
       activePhraseIndex = -1;
+    } else if (ev.data.type === 'sevim_partial_svg') {
+      // Studio is streaming a new figure: the express LLM has emitted
+      // enough SVG markup that we can paint the in-progress shape over
+      // the prior one.  Partial markup is fine — unclosed elements just
+      // don't render, and the next chunk re-replaces the whole stage.
+      // We silence any narration that was still playing for the
+      // previous figure since highlight IDs won't match the new SVG.
+      const partial = ev.data.svg;
+      if (typeof partial !== 'string' || !partial) return;
+      if (!intro.paused) intro.pause();
+      if (!audio.paused) audio.pause();
+      clearHighlight();
+      activePhraseIndex = -1;
+      stage.innerHTML = partial;
+      stage.classList.remove('pulse');
     }
   });
 

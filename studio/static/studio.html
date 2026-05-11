@@ -500,6 +500,24 @@
             tEl.dataset.tool = payload.name;
             log.insertBefore(tEl, asstEl);
             log.scrollTop = log.scrollHeight;
+          } else if (evt === 'svg_chunk') {
+            // Progressive figure render: the express tool emits a
+            // partial SVG as soon as the model has streamed enough of
+            // it.  We forward to the canvas iframe; the iframe paints
+            // the partial markup into its #stage so the learner sees
+            // the figure draw itself instead of pop in fully formed.
+            // First-turn (iframe not loaded yet) silently drops the
+            // chunk — the full SVG arrives via tool_result a moment
+            // later anyway.
+            const partial = payload && payload.svg;
+            if (partial && frame && frame.contentWindow &&
+                frame.style.display !== 'none') {
+              try {
+                frame.contentWindow.postMessage({
+                  type: 'sevim_partial_svg', svg: partial,
+                }, '*');
+              } catch (_) {}
+            }
           } else if (evt === 'tool_result') {
             // Find the most-recent in-flight tool_call line and decorate
             // it with a success/failure summary so the user sees that
