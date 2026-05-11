@@ -114,3 +114,48 @@ def test_empty_inputs():
     assert _structural_review("", []) == []
     assert _structural_review("", None) == []
     assert _structural_review("<svg/>", []) == []
+
+
+# ---------------------------------------------------------------------
+# Label-inside-wrong-vertex: catches the failure where a vertex label
+# letter ends up sitting inside a different vertex's circle.
+# ---------------------------------------------------------------------
+
+def test_label_in_correct_vertex_passes():
+    svg = (
+        '<svg>'
+        '<circle id="A" cx="100" cy="100" r="20"/>'
+        '<circle id="B" cx="200" cy="100" r="20"/>'
+        '<text x="100" y="100">A</text>'
+        '<text x="200" y="100">B</text>'
+        '</svg>'
+    )
+    assert _structural_review(svg, []) == []
+
+
+def test_label_inside_wrong_vertex_flagged():
+    # Vertex A is at (100,100), B at (200,100); but the "A" label is
+    # placed at (200,100) — inside B's circle.
+    svg = (
+        '<svg>'
+        '<circle id="A" cx="100" cy="100" r="20"/>'
+        '<circle id="B" cx="200" cy="100" r="20"/>'
+        '<text x="200" y="100">A</text>'
+        '<text x="100" y="100">B</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("label_inside_wrong_vertex" in i for i in issues), issues
+
+
+def test_long_caption_inside_vertex_not_flagged():
+    # A multi-word caption that happens to land near a vertex is NOT
+    # treated as a mis-placed letter — only short (<= 5 char) tokens
+    # are eligible.
+    svg = (
+        '<svg>'
+        '<circle id="A" cx="100" cy="100" r="20"/>'
+        '<text x="100" y="100">starting node</text>'
+        '</svg>'
+    )
+    assert _structural_review(svg, []) == []

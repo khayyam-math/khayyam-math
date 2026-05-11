@@ -588,6 +588,38 @@ def _review_user_prompt(
         "leader lines; dimensions don't match the request; text "
         "completely overlapping text.\n"
         "\n"
+        "(A.1) Label placement — every text label must sit at or "
+        "ADJACENT to the element it names, not floating in empty space "
+        "and not on top of an unrelated element.  FAIL when:\n"
+        "  • A vertex label letter (A, B, v_1, …) lands inside a "
+        "    different vertex's circle, or far away from its own "
+        "    vertex (more than ~one vertex diameter).\n"
+        "  • An edge weight / edge label sits on a different edge "
+        "    than the one it labels, or far from any edge.\n"
+        "  • An axis-tick number is on the wrong side of the axis or "
+        "    not aligned with its tick.\n"
+        "  • A caption that names an element points at empty space "
+        "    instead of that element, OR its leader line crosses "
+        "    through other figure content.\n"
+        "  • Two labels collide so the text becomes unreadable.\n"
+        "Light overlap that doesn't obscure either label is fine.\n"
+        "\n"
+        "(A.2) Lines / arrows logic — every drawn edge, arrow, "
+        "chord, or connector must connect endpoints that are "
+        "logically related by the figure's topic.  FAIL when:\n"
+        "  • An arrow's direction contradicts the claim (causal "
+        "    arrow pointing from effect to cause; flow arrow "
+        "    pointing against the flow).\n"
+        "  • A graph edge connects two vertices that the prompt or "
+        "    narration says are NOT adjacent, OR a claimed edge is "
+        "    missing from the figure.\n"
+        "  • A line crosses through a vertex/region it shouldn't "
+        "    (e.g. a chord drawn outside the circle, a radius not "
+        "    starting at the center).\n"
+        "  • An arrow's head is at the wrong end (origin vs target "
+        "    swapped relative to the narration / caption).\n"
+        "  • A connector ends in empty space with no clear endpoint.\n"
+        "\n"
         "(B) Math-correctness inspection.  Check each narration phrase "
         "AND each on-canvas caption/label for factual truth and for "
         "consistency with the figure.  FAIL on:\n"
@@ -1348,6 +1380,84 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             "as an adjacent <text> element. Add one <text> per vertex, "
             "placed just above/right of the circle so it doesn't "
             "overlap the node."
+        )
+
+    # 3. Label-inside-wrong-vertex: a short <text> (looks like a vertex
+    # name — single letter, two chars, "v_1", etc.) whose centre falls
+    # INSIDE a different vertex's circle.  The deterministic check uses
+    # the (cx, cy, r) of each circle and the (x, y) of each text node;
+    # text whose distance to its OWN circle's centre is > r, but whose
+    # distance to ANOTHER circle's centre is <= r * 0.9, is mis-placed.
+    # Conservative: we only flag when the wrongly-claimed circle has an
+    # id matching the label text — otherwise we'd false-positive on
+    # captions sitting inside their target.
+    # Pull each <circle.../> | <ellipse.../> tag whole, then extract
+    # cx, cy, r, id in any order — attribute ordering varies between
+    # generators and a positional regex was missing common shapes.
+    tag_re = re.compile(r'<(?:circle|ellipse)\b[^>]*?/?>', re.S)
+    text_tag_re = re.compile(r'<text\b[^>]*?>([^<]{1,12})</text>', re.S)
+    attr_re = re.compile(r'\b([A-Za-z_-]+)\s*=\s*"([^"]*)"')
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {m.group(1): m.group(2) for m in attr_re.finditer(tag)}
+
+    circles_with_geom: list[tuple[float, float, float, str]] = []
+    for m in tag_re.finditer(svg):
+        a = _attrs(m.group(0))
+        try:
+            cx = float(a.get("cx", "")); cy = float(a.get("cy", ""))
+            r = float(a.get("r") or a.get("rx") or "")
+        except ValueError:
+            continue
+        cid = (a.get("id") or "").strip()
+        circles_with_geom.append((cx, cy, r, cid))
+
+    short_texts: list[tuple[float, float, str]] = []
+    for m in text_tag_re.finditer(svg):
+        a = _attrs(m.group(0)[: m.group(0).index(">") + 1])
+        try:
+            tx = float(a.get("x", "")); ty = float(a.get("y", ""))
+        except ValueError:
+            continue
+        inner = m.group(1).strip()
+        if inner:
+            short_texts.append((tx, ty, inner))
+    mis_placed: list[str] = []
+    for (tx, ty, label) in short_texts:
+        if len(label) > 5:
+            continue
+        inside: list[tuple[float, str]] = []
+        for (cx, cy, r, cid) in circles_with_geom:
+            if r <= 0:
+                continue
+            d2 = (tx - cx) ** 2 + (ty - cy) ** 2
+            if d2 <= (r * 0.9) ** 2 and cid:
+                inside.append((d2 ** 0.5, cid))
+        if not inside:
+            continue
+        # Pick the closest containing circle's id.
+        inside.sort(key=lambda t: t[0])
+        host_id = inside[0][1]
+        # Heuristic: if the label text is a single letter / short token
+        # AND it doesn't match the host circle's id (case-insensitive,
+        # ignoring common prefixes like 'v', 'vertex_', 'node_'), it's
+        # almost certainly the wrong vertex's label.
+        host_norm = host_id.lower().lstrip("v").lstrip("_")
+        label_norm = label.lower().lstrip("v").lstrip("_")
+        if host_norm != label_norm and host_id.lower() != f"v{label.lower()}":
+            mis_placed.append(f"text '{label}' inside circle id='{host_id}'")
+    if mis_placed:
+        sample = "; ".join(mis_placed[:5])
+        more = (f" (and {len(mis_placed) - 5} more)"
+                if len(mis_placed) > 5 else "")
+        issues.append(
+            "label_inside_wrong_vertex: " + str(len(mis_placed)) +
+            " short text label(s) sit INSIDE the wrong vertex's "
+            "circle: " + sample + more + ". Each vertex label must be "
+            "placed adjacent to its own circle (just above-right is "
+            "conventional), not inside a neighbouring vertex.  Move "
+            "each label so its (x, y) lies at most ~one radius outside "
+            "its own circle's centre."
         )
 
     return issues
