@@ -810,6 +810,33 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             f"{sorted(svg_ids)[:30]}"
         )
 
+    # 1b. All-empty highlights: every phrase has highlight=[] (or
+    # missing).  Technically legal per the schema, but in practice
+    # means the narration plays with no visual cue — exactly the
+    # "no item was highlighted" failure the learner reported.  Only
+    # flag when there are enough phrases for this to be intentional
+    # silence (a 1-phrase explanation might legitimately not target
+    # anything).
+    if narration and len(narration) >= 4:
+        non_empty = 0
+        for phrase in narration:
+            h = phrase.get("highlight")
+            if isinstance(h, str) and h.strip():
+                non_empty += 1
+            elif isinstance(h, list) and any(x for x in h if isinstance(x, str) and x.strip()):
+                non_empty += 1
+        if non_empty == 0:
+            issues.append(
+                "all_highlights_empty: every narration phrase has an "
+                "empty highlight array. The viewer cannot spotlight any "
+                "element while the narration plays, which leaves the "
+                "figure visually inert. For each phrase that names a "
+                "specific element ('the vertex v_3', 'this edge', "
+                "'the highlighted chord'), populate its highlight "
+                "array with the id of that element. At minimum, one or "
+                "two phrases should reference a concrete id."
+            )
+
     # 2. Graph-completeness heuristic: a figure with many <circle>
     # vertices but very few <text> elements is almost certainly
     # missing vertex labels.  Conservative threshold to avoid

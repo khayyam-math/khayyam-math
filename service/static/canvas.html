@@ -80,13 +80,27 @@
     0%   { box-shadow: 0 0 0 0 rgba(42,109,244,0.5); }
     100% { box-shadow: 0 0 0 12px rgba(42,109,244,0); }
   }
-  /* Narration highlight: applied to <g data-nid> or <g data-eid> when
-     the audio cursor is inside that phrase's [start_s, end_s) window.
-     Designed to be unmistakable even on tiny point dots — thick yellow
-     stroke + pulsing drop-shadow halo. */
+  /* Narration highlight: applied to whichever element matches the
+     narration phrase's highlight id.  Two SVG-emission styles to
+     cover:
+       (a) wrapped — <g id="v1"><circle/><text>1</text></g>; class
+           goes on the <g>, child rules below style each inner shape.
+       (b) flat — <circle id="v1"/>; class goes directly on the
+           <circle>, so the rules must also match the shape itself.
+     Without the "self" variant a flat-emitted figure (the GPT-4o
+     default) animated only its drop-shadow halo, which on a small
+     leaf element looked like nothing was highlighted at all. */
   #stage svg .sevim-highlight {
     animation: sevim-highlight-pulse 0.9s ease-in-out infinite;
   }
+  /* Highlighted element OR its inner shapes — both get the yellow
+     stroke treatment so the spot is unmistakable. */
+  #stage svg rect.sevim-highlight,
+  #stage svg circle.sevim-highlight,
+  #stage svg ellipse.sevim-highlight,
+  #stage svg polygon.sevim-highlight,
+  #stage svg path.sevim-highlight,
+  #stage svg line.sevim-highlight,
   #stage svg .sevim-highlight rect,
   #stage svg .sevim-highlight circle,
   #stage svg .sevim-highlight ellipse,
@@ -97,17 +111,27 @@
     stroke-width: 5 !important;
   }
   /* Tiny point circles have radius ~4-5 px — a 5 px stroke can swallow
-     them.  Override fill to bright yellow on circles inside .sevim-highlight
-     so the dot itself glows. */
+     them.  Override fill to bright yellow so the dot itself glows. */
+  #stage svg circle.sevim-highlight,
   #stage svg .sevim-highlight circle {
     fill: var(--highlight) !important;
   }
   /* Edges (paths/lines) get a thicker, fully opaque highlight stroke
      so they remain visible against the background. */
+  #stage svg path.sevim-highlight,
+  #stage svg line.sevim-highlight,
   #stage svg .sevim-highlight path,
   #stage svg .sevim-highlight line {
     stroke-width: 4 !important;
     stroke-opacity: 1 !important;
+  }
+  /* Text labels (vertex numbers, axis labels) — also legitimate
+     highlight targets.  Outline them in the highlight colour so the
+     glyphs stay readable instead of being filled-over. */
+  #stage svg text.sevim-highlight,
+  #stage svg .sevim-highlight text {
+    fill: var(--highlight) !important;
+    font-weight: 800 !important;
   }
   @keyframes sevim-highlight-pulse {
     0%, 100% { filter: drop-shadow(0 0 4px rgba(251,191,36,0.8)); }
