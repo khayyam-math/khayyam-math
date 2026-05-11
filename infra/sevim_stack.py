@@ -213,6 +213,14 @@ class SevimStack(Stack):
             "SEVIM_AUTH_REQUIRED": "1",
             "SEVIM_VLLM_URL": "https://api.openai.com/v1",
             "SEVIM_VLLM_MODEL": "gpt-4o",
+            # Figure-review backend (math-correctness inspector).
+            # Default: gpt-4o-mini in SVG-as-text mode -- ~15x cheaper
+            # than gpt-4o-vision and works regardless of which model
+            # generated the figure.  Flip to PNG-vision review by
+            # changing SEVIM_REVIEW_MODE=vision and (optionally)
+            # SEVIM_REVIEW_MODEL=gpt-4o.
+            "SEVIM_REVIEW_MODE": "text",
+            "SEVIM_REVIEW_MODEL": "gpt-4o-mini",
             # Admin dashboard (/studio/admin) is gated by an email
             # whitelist; only signed-in users whose magic-link cookie
             # carries one of these e-mails can see it.  Everyone else

@@ -387,7 +387,26 @@ REVIEW_SCHEMA: dict[str, Any] = {
 def _review_user_prompt(
     user_prompt: str,
     narration: list[dict[str, Any]] | None = None,
+    svg_text: str | None = None,
 ) -> str:
+    """Build the user message body for a figure review.
+
+    When ``svg_text`` is provided (text-mode review), the SVG source is
+    inlined so a text-only reviewer can read structure/ids directly.
+    When None (vision-mode review), the caller attaches the rendered
+    PNG separately as a multi-modal image_url block.
+    """
+    svg_block = ""
+    if svg_text:
+        # Keep this bounded so a runaway SVG doesn't blow the context.
+        # 16 KB is enough for any reasonable figure (the express
+        # schema's max useful output is ~6-8 KB).
+        if len(svg_text) > 16_000:
+            svg_text = svg_text[:16_000] + "\n<!-- truncated for review -->"
+        svg_block = (
+            "\nSVG source (literal text, ids and attributes intact):\n"
+            "```svg\n" + svg_text + "\n```\n"
+        )
     narration_block = ""
     if narration:
         lines = []
@@ -405,7 +424,8 @@ def _review_user_prompt(
         )
     return (
         f"User asked: {user_prompt!r}\n"
-        f"{narration_block}\n"
+        f"{narration_block}"
+        f"{svg_block}\n"
         "Review the figure AND the narration together.  Two independent "
         "judgements:\n"
         "\n"
@@ -566,25 +586,19 @@ async def express_figure(
         if structural_issues:
             _log(f"structural review: {len(structural_issues)} issue(s)")
 
-        # 2b. Render SVG → PNG and run vision review.
-        # If the generator was text-only (Qwen), the same model can't
-        # see the PNG — route the vision review to GPT-4o via OpenAI
-        # so we still get a visual audit of the figure.  Costs an
-        # extra ~$0.005/turn but keeps the math-correctness inspector
-        # working for Qwen-served traffic.
-        if model in text_only_models:
-            review_url = (os.environ.get("SEVIM_VLLM_URL") or "").rstrip("/") \
-                         or "https://api.openai.com/v1"
-            review_model = "gpt-4o"
-            review_key = os.environ.get("OPENAI_API_KEY")
-        else:
-            review_url, review_model, review_key = base_url, model, api_key
+        # 2b. Figure review.  _vision_review consults _review_config()
+        # internally for mode/model/url/key, so we always pass the
+        # same three positional args for backwards-compat; they're
+        # ignored on the routing front.  By default the reviewer is
+        # gpt-4o-mini in SVG-as-text mode (cheap, works for any
+        # generator backend).  Flip to PNG-vision review by setting
+        # SEVIM_REVIEW_MODE=vision and SEVIM_REVIEW_MODEL=gpt-4o.
         verdict = await _vision_review(
             user_prompt=user_prompt,
             svg=result["svg"],
-            base_url=review_url,
-            model=review_model,
-            api_key=review_key,
+            base_url=base_url,  # unused, kept for signature stability
+            model=model,        # unused, kept for signature stability
+            api_key=api_key,    # unused, kept for signature stability
             narration=result.get("narration") or [],
         )
 
@@ -682,6 +696,51 @@ async def express_figure(
     }
 
 
+# ---------------------------------------------------------------------
+# Figure review.  Default path: send SVG-as-text + narration JSON to a
+# cheap text-capable reviewer (gpt-4o-mini).  This works for any
+# generator backend (Qwen, GPT, anything that emits structured JSON)
+# at a fraction of the per-turn cost of a vision-PNG review, and gives
+# the reviewer literal access to ids and attributes that a rasterised
+# PNG flattens away.
+#
+# Override knobs (env vars, all optional):
+#
+#   SEVIM_REVIEW_MODE   text  (default)  -- send SVG + narration as text
+#                       vision           -- rasterise to PNG, send image_url
+#                       off              -- skip the review entirely
+#
+#   SEVIM_REVIEW_MODEL  reviewer model name (default: gpt-4o-mini)
+#
+#   SEVIM_REVIEW_URL    base_url for the reviewer (default: OpenAI)
+#
+#   SEVIM_REVIEW_KEY_ENV
+#                       env var name to pull the reviewer API key from
+#                       (default: OPENAI_API_KEY)
+#
+# Future operators can flip to vision review on a heavier model by
+# setting SEVIM_REVIEW_MODE=vision and SEVIM_REVIEW_MODEL=gpt-4o
+# without any code changes.
+# ---------------------------------------------------------------------
+
+def _review_config() -> tuple[str, str, str, str | None]:
+    """Return (mode, model, base_url, api_key) for the reviewer.
+
+    Mode is one of 'text', 'vision', 'off'.  Defaults match the
+    "GPT-4o-mini reviews SVG-as-text" recommendation; flip via env.
+    """
+    mode = (os.environ.get("SEVIM_REVIEW_MODE") or "text").lower().strip()
+    if mode not in ("text", "vision", "off"):
+        mode = "text"
+    model = os.environ.get("SEVIM_REVIEW_MODEL") or "gpt-4o-mini"
+    base_url = (os.environ.get("SEVIM_REVIEW_URL")
+                or os.environ.get("SEVIM_VLLM_URL")
+                or "https://api.openai.com/v1").rstrip("/")
+    key_env = os.environ.get("SEVIM_REVIEW_KEY_ENV") or "OPENAI_API_KEY"
+    api_key = os.environ.get(key_env)
+    return mode, model, base_url, api_key
+
+
 async def _vision_review(
     user_prompt: str,
     svg: str,
@@ -690,52 +749,82 @@ async def _vision_review(
     api_key: str | None,
     narration: list[dict[str, Any]] | None = None,
 ) -> str | None:
-    """Render SVG to PNG, ask the LLM to review it via the structured
-    REVIEW_SCHEMA.  Returns ``None`` on PASS (or if the review call
-    itself fails); returns a formatted critique string on FAIL that
-    lists each fix as 'ACTION: what — where — details'.
+    """Ask the reviewer LLM to audit the (svg, narration) pair via the
+    structured REVIEW_SCHEMA.  Returns ``None`` on PASS (or if the
+    review call itself fails); returns a formatted critique string on
+    FAIL that lists each fix as 'ACTION: what -- where -- details'.
 
-    The structured schema forces the reviewer to produce concrete,
-    actionable fixes (with specific values and positions) rather than
-    vague prose.  The retry prompt formats them as a numbered checklist
-    so the generator has a literal diff to apply.
+    The reviewer's *mode*, *model*, *url* and *key* are pulled from
+    ``_review_config()`` and ignore the generator's own (base_url,
+    model, api_key) -- those parameters are kept for backwards-
+    compatibility with older callers but are no longer used to route
+    the review.  This way we can have Qwen generate while GPT reviews,
+    or flip back to PNG-vision review on gpt-4o, without touching the
+    express call site.
     """
     import sys as _sys
     def _log(msg: str) -> None:
         print(f"[express:review] {msg}", flush=True, file=_sys.stderr)
 
-    try:
-        png = _svg_to_png(svg)
-        _log(f"rendered SVG ({len(svg)} chars) → PNG ({len(png)} bytes)")
-    except Exception as exc:  # noqa: BLE001
-        _log(f"PNG render FAILED: {type(exc).__name__}: {exc} — skipping review")
+    review_mode, review_model, review_url, review_key = _review_config()
+    if review_mode == "off":
+        _log("mode=off -- skipping review")
         return None
-    b64 = base64.b64encode(png).decode("ascii")
+
+    _log(f"mode={review_mode}  model={review_model}  url={review_url[:40]}...")
 
     headers = {"content-type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if review_key:
+        headers["Authorization"] = f"Bearer {review_key}"
+
+    if review_mode == "text":
+        # Send SVG-as-text + narration.  No rasterisation, no
+        # multi-modal block, works on any text LLM.  The reviewer has
+        # literal access to ids/attrs/structure that a PNG would hide.
+        user_msg = _review_user_prompt(user_prompt, narration, svg_text=svg)
+        messages = [
+            {"role": "system", "content": _REVIEW_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ]
+    else:
+        # Vision mode: rasterise to PNG and ship as image_url.  Use
+        # only when the reviewer model supports image input (gpt-4o,
+        # gpt-4o-mini, gpt-4-vision, etc.).
+        try:
+            png = _svg_to_png(svg)
+            _log(f"rendered SVG ({len(svg)} chars) -> PNG ({len(png)} bytes)")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"PNG render FAILED: {type(exc).__name__}: {exc} -- skipping review")
+            return None
+        b64 = base64.b64encode(png).decode("ascii")
+        messages = [
+            {"role": "system", "content": _REVIEW_SYSTEM},
+            {"role": "user", "content": [
+                {"type": "text",
+                 "text": _review_user_prompt(user_prompt, narration)},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ]},
+        ]
+
     payload = {
-        "model": model,
+        "model": review_model,
         "max_tokens": 1200,
         "temperature": 0.0,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
-                "name": "vision_review",
+                "name": "figure_review",
                 "schema": REVIEW_SCHEMA,
                 "strict": True,
             },
         },
-        "messages": [
-            {"role": "system", "content": _REVIEW_SYSTEM},
-            {"role": "user", "content": [
-                {"type": "text", "text": _review_user_prompt(user_prompt, narration)},
-                {"type": "image_url",
-                 "image_url": {"url": f"data:image/png;base64,{b64}"}},
-            ]},
-        ],
+        "messages": messages,
     }
+    # The caller used to supply base_url, but the reviewer now takes
+    # its config from _review_config() exclusively.  Rebind for the
+    # request below.
+    base_url = review_url
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
