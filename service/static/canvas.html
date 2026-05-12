@@ -74,7 +74,21 @@
     background: white;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
-  #stage svg { display: block; max-width: 100%; height: auto; }
+  /* SVG must fit in BOTH dimensions of the stage container.  The
+     previous rule (max-width:100%, height:auto) scaled by width only,
+     so on a short iframe (mobile, 240px tall) a portrait figure
+     overflowed the bottom edge and clipped labels like sin(π/4).
+     `max-height:100%` + width:auto + `aspect-ratio:auto` lets the
+     browser pick whichever axis is the binding constraint while
+     preserving the SVG's intrinsic aspect ratio. */
+  #stage svg { display: block;
+               max-width: 100%; max-height: 100%;
+               width: auto; height: auto;
+               margin: 0 auto; }
+  /* Centre the stage in its main container even when the SVG
+     ends up narrower than the available width.  Without this the
+     SVG ends up flush-left on phones and leaves uneven margins. */
+  main { display: flex; align-items: center; justify-content: center; }
   .pulse { animation: pulse 400ms ease-out; }
   @keyframes pulse {
     0%   { box-shadow: 0 0 0 0 rgba(42,109,244,0.5); }
@@ -163,6 +177,22 @@
   }
   .play-overlay h3, .play-overlay p { display: none; }
   .play-overlay.hidden { display: none; }
+  /* When the viewer is embedded inside Studio's iframe the parent
+     window already shows a Play button in its own chrome, so this
+     floating overlay is redundant — and on mobile the small iframe
+     content area makes it sit on top of the figure (it covered the
+     cos(π/4) label in the audit screenshots).  The .embedded class
+     is set by JS when window !== window.top. */
+  body.embedded .play-overlay { display: none !important; }
+  /* Mobile: hide the developer-oriented meta info in the canvas
+     header (canvas_id, revision number, node/edge counts, clock).
+     They're useful on the standalone viewer for debugging but waste
+     ~40px of premium vertical space on a 390px-wide phone. */
+  @media (max-width: 640px) {
+    body.embedded header .meta { display: none; }
+    body.embedded header { padding: 0.25em 0.5em; gap: 0.35em; }
+    body.embedded header .title { font-size: 0.85em; }
+  }
 </style>
 </head>
 <body>
@@ -190,6 +220,13 @@
   </div>
 </div>
 <script>
+  // Mark the body as `embedded` when this viewer is loaded inside an
+  // iframe (Studio's canvas pane).  The CSS rules above use this class
+  // to (a) hide the redundant floating Play overlay that otherwise
+  // covers figure content on small mobile viewports, and (b) compact
+  // the dev-debug meta info in the header.
+  if (window !== window.top) document.body.classList.add('embedded');
+
   const cid = document.body.dataset.cid || (() => {
     const m = window.location.pathname.match(/\/canvas\/([^/]+)\/view/);
     return m ? m[1] : null;

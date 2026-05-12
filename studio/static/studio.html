@@ -165,6 +165,40 @@
   }
   .placeholder .example-chip:hover { border-color: var(--accent); }
   .placeholder .example-chip:active { background: var(--user-bg); }
+  /* Mobile chat-log welcome card (see #chat-empty in markup).  Hidden
+     on desktop because the canvas-pane already shows this content;
+     hidden once any message exists in the log. */
+  .chat-empty {
+    display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; gap: 0.7em; padding: 1.5em 1em;
+    color: var(--muted); margin: auto 0;
+  }
+  .chat-empty .empty-brand {
+    font-size: 1.4em; font-weight: 700; color: var(--fg);
+    letter-spacing: -0.02em;
+  }
+  .chat-empty .empty-tagline { font-size: 0.9em; line-height: 1.45; max-width: 22em; }
+  .chat-empty .empty-examples {
+    display: flex; flex-wrap: wrap; gap: 0.45em; justify-content: center;
+    margin-top: 0.4em;
+  }
+  .chat-empty .example-chip {
+    background: var(--asst-bg); color: var(--fg); border: 1px solid var(--border);
+    padding: 0.5em 0.85em; border-radius: 999px;
+    font: inherit; font-size: 0.82em; cursor: pointer; min-height: 40px;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .chat-empty .example-chip:hover { border-color: var(--accent); }
+  .chat-empty .example-chip:active { background: var(--user-bg); }
+  /* Container needs flex layout so the welcome card vertically centers. */
+  .chat-log { display: flex; flex-direction: column; }
+  /* Show the chat empty-state only on mobile, only when no other
+     children exist in chat-log (i.e. no messages yet). */
+  @media (max-width: 900px) {
+    .chat-log:has(.chat-empty:first-child:last-child) { justify-content: center; }
+    body:not(.has-canvas) .chat-empty { display: flex; }
+  }
   /* The clear button + canvas badge inherit chat-header sizing; force
      them to be tappable on touch. */
   .chat-header button, .chat-header [type=button] {
@@ -185,6 +219,25 @@
       order: -1;
       border-bottom: 1px solid var(--border);
     }
+    /* Initial state (no canvas yet) — collapse the canvas-pane to a
+       small banner so the chat takes the whole viewport.  Users land
+       on a familiar chat layout where the input is reachable without
+       scrolling and the example prompts (rendered inside the chat
+       log on mobile, see below) are immediately visible.  Once a
+       canvas exists, body.has-canvas flips the grid back to the
+       38vh/1fr split. */
+    body:not(.has-canvas) .layout {
+      /* Single full-height row so the chat fills the screen.  We
+         CAN'T just `grid-template-rows: 0 1fr` with `display:none` on
+         the canvas-pane — the chat (order:-1 ahead of it) lands in
+         the 0-height first track because display:none removes the
+         pane from the grid entirely.  A single-row template puts
+         the chat in the only slot. */
+      grid-template-rows: 1fr;
+    }
+    body:not(.has-canvas) .canvas-pane {
+      display: none;
+    }
     .chat { border-right: none; }
     .chat-header {
       padding: 0.55em 0.8em;
@@ -192,6 +245,11 @@
       font-size: 0.9em;
     }
     .chat-header .status { font-size: 0.7em; max-width: 8em; }
+    /* Hide the developer-oriented canvas_id badge on mobile — it
+       eats ~140px of header width and adds zero learner value.
+       Power users can still see it on desktop / on the standalone
+       /canvas/<id>/view page. */
+    .chat-header #canvas-badge { display: none; }
     .chat-log { padding: 0.5em 0.6em; }
     .msg { font-size: 1em; max-width: 92%; }
     .msg.tool { font-size: 0.78em; }
@@ -224,7 +282,23 @@
       <button id="clear-btn" type="button" title="Clear conversation"
               aria-label="Clear conversation">clear</button>
     </div>
-    <div class="chat-log" id="log"></div>
+    <div class="chat-log" id="log">
+      <!-- Mobile-only welcome card.  On desktop the canvas-pane shows
+           the same content (see #placeholder below); on mobile that
+           pane is collapsed until a figure exists, so the welcome
+           lives here where the user is already looking.  Removed by
+           sendMessage() as soon as the first turn is committed. -->
+      <div class="chat-empty" id="chat-empty">
+        <div class="empty-brand">Khayyam Math</div>
+        <div class="empty-tagline">A live diagram tutor — ask in words, watch a figure appear.</div>
+        <div class="empty-examples" role="group" aria-label="Example prompts">
+          <button type="button" class="example-chip" data-prompt="Show how the angles of a triangle sum to π">Triangle angle sum</button>
+          <button type="button" class="example-chip" data-prompt="Draw the unit circle with sin and cos labelled at 30°, 45°, 60°">Unit circle (sin / cos)</button>
+          <button type="button" class="example-chip" data-prompt="Illustrate matrix multiplication with two 3×3 matrices and a worked cell">Matrix multiplication</button>
+          <button type="button" class="example-chip" data-prompt="Show the area under y = x² from 0 to 2 as a Riemann sum, then the integral">Area under x²</button>
+        </div>
+      </div>
+    </div>
     <div class="input-row">
       <button class="mic" id="mic-btn" type="button"
               title="Voice input" aria-label="Voice input">
@@ -546,6 +620,10 @@
     input.disabled = true;
     sendBtn.disabled = true;
     sendBtn.classList.add('loading');
+    // First turn — remove the mobile welcome card so the chat starts
+    // from a clean log.  Idempotent: removing a non-child is a no-op.
+    const chatEmpty = document.getElementById('chat-empty');
+    if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
     appendMsg('user', user);
 
     const asstEl = appendMsg('asst', '…');
@@ -616,6 +694,16 @@
             const delta = payload && payload.text;
             if (!delta) continue;
             ensurePrimerEl(asstEl);
+            // The primer is now the loading indicator.  Hide the
+            // redundant "Thinking…" tool bubble and the empty
+            // assistant "…" placeholder so the chat doesn't show
+            // three competing in-progress states at once.
+            log.querySelectorAll('.msg.tool[data-tool]').forEach(t => {
+              t.style.display = 'none';
+            });
+            if (!asstText) {
+              asstEl.style.display = 'none';
+            }
             primerRaw += delta;
             primerEl.textContent = primerRaw;
             renderPrimerMath();
@@ -703,6 +791,11 @@
                 placeholder.style.display = 'none';
                 frame.style.display = 'block';
                 frame.src = '/canvas/' + canvasId + '/view';
+                // body.has-canvas tells the mobile CSS to switch from
+                // chat-fills-screen back to the 38vh canvas / chat
+                // split.  Setting it once is enough — the class
+                // persists for the lifetime of the session.
+                document.body.classList.add('has-canvas');
                 if (canvasBadge) canvasBadge.textContent = canvasId;
                 // Stash the canvasId on the assistant element so the pin
                 // button (added on 'done') knows which canvas to pin.
@@ -711,9 +804,20 @@
               }
             } catch {}
           } else if (evt === 'done') {
-            if (!asstText) {
-              asstEl.textContent = '(figure built — see canvas →)';
-              asstEl.style.opacity = '0.6';
+            // Pick where to anchor the 📌 pin button:
+            //   * primer node if the primer streamed anything — that's
+            //     the meatiest assistant bubble on the screen, so the
+            //     pin attaches to it visually;
+            //   * otherwise the assistant placeholder (un-hidden, since
+            //     we suppressed it while the primer was streaming).
+            let anchorEl = primerEl;
+            if (!anchorEl) {
+              if (!asstText) {
+                asstEl.style.display = '';
+                asstEl.textContent = '(figure built — see canvas →)';
+                asstEl.style.opacity = '0.6';
+              }
+              anchorEl = asstEl;
             }
             // If this asst turn produced a canvas, attach a 📌 pin
             // button.  Clicking it adds the canvas to pinnedCanvasIds
@@ -744,10 +848,10 @@
                 }
                 refreshLabel();
               });
-              asstEl.appendChild(pinBtn);
+              anchorEl.appendChild(pinBtn);
             }
             history.push({role: 'user', content: user});
-            history.push({role: 'assistant', content: asstText});
+            history.push({role: 'assistant', content: asstText || primerRaw});
             persistHistory();
           } else if (evt === 'error') {
             asstEl.textContent = '(error: ' + (payload.detail || 'unknown') + ')';

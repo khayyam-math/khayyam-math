@@ -1090,9 +1090,15 @@ async def _stream_vllm_chat(req: ChatReq):
                         "stop_reason": "express_failed"
                     })}
                 else:
-                    yield {"event": "text", "data": json.dumps({
-                        "text": "Done — see the canvas above."
-                    })}
+                    # No "Done — see the canvas above." status line:
+                    # by this point the primer panel has already
+                    # delivered the explanation in the chat AND the
+                    # canvas is rendered, so a third "done" bubble is
+                    # just visual noise (worse on mobile where the
+                    # chat is already tight).  Front-end's 'done'
+                    # handler still attaches the 📌 pin button to
+                    # the primer / assistant node so the canvas can
+                    # be carried forward to the next prompt.
                     yield {"event": "done", "data": json.dumps({
                         "stop_reason": "express_complete"
                     })}
