@@ -531,3 +531,83 @@ def test_non_overlapping_groups_unchanged():
         '</svg>'
     )
     assert reflow_overlapping_groups(svg) == svg
+
+
+# ---------------------------------------------------------------------
+# normalize_matrix_layout — recompute cell positions on a true lattice.
+# ---------------------------------------------------------------------
+
+from studio.express import normalize_matrix_layout
+
+
+def test_matrix_4x4_with_3_cols_plus_stragglers_rebuilt():
+    """The screenshot failure: 4×4 matrix where col 4 got stacked
+    below cols 1–3 instead of beside them.  Normaliser must put all
+    16 cells on a regular 4-column lattice."""
+    cells = []
+    for i in range(1, 5):
+        for j in range(1, 5):
+            if j < 4:
+                x = 20 + (j-1) * 130
+                y = 100 + (i-1) * 40
+            else:
+                # Col 4 stranded at x=20 below the others (the bug).
+                x = 20
+                y = 300 + (i-1) * 40
+            cells.append(f'<text x="{x}" y="{y}" font-size="20">a_{{{i}{j}}} = 0</text>')
+    svg = '<svg viewBox="0 0 900 650">' + ''.join(cells) + '</svg>'
+    out = normalize_matrix_layout(svg)
+    # All cells with the same i (row) now share a y.
+    import re
+    rows = {}
+    for m in re.finditer(r'<text x="(\d+)" y="(\d+)"[^>]*>a_\{(\d)(\d)\}', out):
+        x, y, i, j = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+        rows.setdefault(i, []).append((j, x, y))
+    for i, items in rows.items():
+        ys = {it[2] for it in items}
+        assert len(ys) == 1, f"row {i} cells on different ys: {ys}"
+        # And columns within a row monotonically increasing x.
+        items.sort()
+        xs = [it[1] for it in items]
+        assert xs == sorted(xs), f"row {i} xs not monotonic: {xs}"
+
+
+def test_unicode_subscript_cells_normalised():
+    """The Unicode form a₁₁, a₂₂, … is recognised the same way as
+    a_11, a_{1,1}, etc."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="40" y="100" font-size="20">a₁₁ = 4</text>'
+        '<text x="40" y="140" font-size="20">a₂₁ = 3</text>'
+        '<text x="200" y="100" font-size="20">a₁₂ = 2</text>'
+        '<text x="200" y="140" font-size="20">a₂₂ = 1</text>'
+        '</svg>'
+    )
+    out = normalize_matrix_layout(svg)
+    # Final layout: row 1 (i=1) at one y; row 2 (i=2) at another.
+    import re
+    cells = re.findall(r'<text x="(\d+)" y="(\d+)"[^>]*>(a[₀-₉]+)', out)
+    assert len(cells) == 4
+    y_by_row = {}
+    for x, y, content in cells:
+        # extract i
+        sub = content[1:]
+        UNI_SUB = "₀₁₂₃₄₅₆₇₈₉"
+        i = UNI_SUB.index(sub[0])
+        y_by_row.setdefault(i, set()).add(y)
+    for i, ys in y_by_row.items():
+        assert len(ys) == 1, f"row {i} ys: {ys}"
+
+
+def test_incomplete_matrix_left_alone():
+    """If only 3 cells of a supposed 2×2 are present, don't try to
+    re-layout — the model might be doing something intentional."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="100" y="100" font-size="20">a_{11} = 1</text>'
+        '<text x="200" y="100" font-size="20">a_{12} = 2</text>'
+        '<text x="100" y="150" font-size="20">a_{21} = 3</text>'
+        '</svg>'
+    )
+    # Should pass through unchanged.
+    assert normalize_matrix_layout(svg) == svg

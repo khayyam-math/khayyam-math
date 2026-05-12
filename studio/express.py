@@ -1191,6 +1191,21 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"fix_html_subsup FAILED: {type(exc).__name__}: {exc}")
+        # Matrix-grid normaliser: when text elements look like cell
+        # labels (a_11=4, a₁₂=3, …), re-layout them on a regular N×M
+        # lattice anchored at the original (min x, min y).  Fixes the
+        # "4×4 matrix laid out as 3 columns + 1 stacked separately"
+        # failure mode that no overlap pass can repair on its own.
+        try:
+            fixed_svg = normalize_matrix_layout(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"normalize_matrix_layout: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"normalize_matrix_layout FAILED: {type(exc).__name__}: {exc}")
         try:
             fixed_svg = autofit_group_rects(result["svg"])
             if fixed_svg != result["svg"]:
@@ -1587,6 +1602,166 @@ def _svg_to_png(svg: str, width: int = 1200) -> bytes:
 #     is a strong signal.  This is the
 #     "not all vertices were indicated on the graph" failure.
 # ---------------------------------------------------------------------------
+
+def normalize_matrix_layout(svg: str) -> str:
+    """Detect text elements that look like matrix cells (`a₁₁ = 4`,
+    `a_{1,2} = 3`, etc.) and re-layout them on a clean N×N grid.
+
+    The LLM frequently produces a 4×4 matrix as 3 columns × 4 rows
+    plus the 4th column stacked separately, because it doesn't
+    actually compute (x, y) for each cell — it just picks an x for
+    each row and increments y.  This pass:
+
+      1. Scans every top-level <text> for content matching the
+         cell pattern `<name>(_<i>_<j>|_{i,j}|<unicode_subs>)
+         (= <value>)?`.
+      2. Groups cells by their letter name.  Each name with N*M
+         matching cells (where N = max_i, M = max_j) is treated
+         as one matrix.
+      3. Computes a regular lattice: cell_w = max-text-est-width +
+         20 px, cell_h = max-font-size * 1.8.
+      4. Rewrites each cell text's x and y attributes to land on
+         the correct grid position; the matrix anchors at the
+         minimum (x, y) of the original cells so we preserve the
+         model's intended placement on the canvas.
+
+    Idempotent — a cell already on the lattice gets re-set to
+    almost-the-same coords (rounded), no visible change.
+    """
+    import re
+
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    # Map Unicode subscript digits back to ASCII.
+    UNI_SUB = "₀₁₂₃₄₅₆₇₈₉"
+    def _strip_subs(s: str) -> tuple[str, str]:
+        """Pull the leading letter + subscript digits.  Returns
+        (letter, digits) or ("", "") if not a cell-shaped token."""
+        m = re.match(rf"([A-Za-z])([{UNI_SUB}]+)", s)
+        if m:
+            digits = "".join(str(UNI_SUB.index(c)) for c in m.group(2))
+            return m.group(1), digits
+        # ASCII form: a_11, a_{1,2}, a_1_2
+        m = re.match(r"([A-Za-z])_\{(\d+),?(\d+)?\}", s)
+        if m:
+            return m.group(1), m.group(2) + (m.group(3) or "")
+        m = re.match(r"([A-Za-z])_(\d)_(\d)", s)
+        if m:
+            return m.group(1), m.group(2) + m.group(3)
+        m = re.match(r"([A-Za-z])_(\d{2})", s)
+        if m:
+            return m.group(1), m.group(2)
+        return "", ""
+
+    # Find all <text> elements (top-level or inside <g>).  Cells can
+    # live anywhere; we don't filter by parent.
+    text_iter = list(re.finditer(
+        r'<text\b([^>]*)>([^<]+)</text>', svg, re.S,
+    ))
+    if not text_iter:
+        return svg
+
+    # Collect candidate cells: (start, end, x, y, fs, letter, i, j,
+    # value_repr, original_tag).
+    cells: list[dict] = []
+    for m in text_iter:
+        head = m.group(0).split('>', 1)[0] + '>'
+        a = _attrs(head)
+        try:
+            x = float(a.get("x", "")); y = float(a.get("y", ""))
+        except ValueError:
+            continue
+        try:
+            fs = float(a.get("font-size", "16").rstrip("pxptem"))
+        except ValueError:
+            fs = 16.0
+        content = m.group(2).strip()
+        # Try to parse as "letter+sub" optionally followed by "= value".
+        token = content.split("=")[0].strip()
+        letter, digits = _strip_subs(token)
+        if not letter or len(digits) != 2:
+            continue
+        i, j = int(digits[0]), int(digits[1])
+        if i < 1 or j < 1 or i > 9 or j > 9:
+            continue
+        cells.append({
+            "start": m.start(), "end": m.end(),
+            "x": x, "y": y, "fs": fs,
+            "letter": letter, "i": i, "j": j,
+            "content": content,
+        })
+
+    if not cells:
+        return svg
+
+    # Group cells by letter.
+    by_letter: dict[str, list[dict]] = {}
+    for c in cells:
+        by_letter.setdefault(c["letter"], []).append(c)
+
+    edits: list[tuple[int, int, str]] = []
+    for letter, group in by_letter.items():
+        max_i = max(c["i"] for c in group)
+        max_j = max(c["j"] for c in group)
+        # Require a COMPLETE matrix: every (i, j) in 1..max_i × 1..max_j
+        # present exactly once.  Partial matrices stay as the model
+        # placed them.
+        if len(group) != max_i * max_j:
+            continue
+        ij_set = {(c["i"], c["j"]) for c in group}
+        if len(ij_set) != max_i * max_j:
+            continue
+        # Compute lattice geometry.  cell_w from longest content,
+        # cell_h from largest font size, both inflated.
+        max_w = 0.0
+        max_fs = 0.0
+        for c in group:
+            est = len(c["content"]) * c["fs"] * 0.6
+            max_w = max(max_w, est)
+            max_fs = max(max_fs, c["fs"])
+        cell_w = max_w + 24.0
+        cell_h = max_fs * 1.9
+        # Anchor at the (min x, min y) of the original cell positions.
+        # This preserves the model's intended placement on the canvas
+        # while fixing the internal layout.
+        base_x = min(c["x"] for c in group)
+        base_y = min(c["y"] for c in group)
+        for c in group:
+            new_x = base_x + (c["j"] - 1) * cell_w
+            new_y = base_y + (c["i"] - 1) * cell_h
+            if abs(new_x - c["x"]) < 0.5 and abs(new_y - c["y"]) < 0.5:
+                continue
+            head = svg[c["start"]:c["end"]].split('>', 1)[0] + '>'
+            # Replace x= and y= in the head.
+            def _set(attr: str, val: float, tag: str) -> str:
+                new = f'{attr}="{val:.0f}"'
+                pat_dq = re.compile(rf'\b{attr}\s*=\s*"[^"]*"')
+                pat_sq = re.compile(rf"\b{attr}\s*=\s*'[^']*'")
+                if pat_dq.search(tag):
+                    return pat_dq.sub(new, tag, count=1)
+                if pat_sq.search(tag):
+                    return pat_sq.sub(new, tag, count=1)
+                return re.sub(r'>$', f' {new}>', tag, count=1)
+            new_head = _set("x", new_x, head)
+            new_head = _set("y", new_y, new_head)
+            edits.append((c["start"], c["start"] + len(head), new_head))
+
+    if not edits:
+        return svg
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for s, e, repl in edits:
+        out = out[:s] + repl + out[e:]
+    return out
+
 
 def fix_html_subsup(svg: str) -> str:
     """SVG renderers don't honour HTML `<sup>` / `<sub>` — they show
