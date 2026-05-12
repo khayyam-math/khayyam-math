@@ -449,6 +449,34 @@ async def _execute_tool(
     c.set_raw_svg(result["svg"])
     c.genesis_prompt = prompt
     narration = result.get("narration") or []
+    # Diagnostic: how many phrases ship with a non-empty highlight
+    # array?  When the answer is "0", the figure renders but the
+    # learner sees nothing flash while the audio plays — the
+    # "no highlight is happening" complaint surfaced exactly this
+    # way.  Also count phrases that reference an id that DOES
+    # exist in the served SVG so we can tell a missing-id failure
+    # apart from a missing-id-emission failure.
+    if narration:
+        import re as _re
+        svg_ids = set(_re.findall(r"id\s*=\s*['\"]([^'\"]+)['\"]",
+                                  result.get("svg", "")))
+        with_h = 0
+        unmatched = 0
+        for ph in narration:
+            h = ph.get("highlight") or []
+            if isinstance(h, str):
+                h = [h]
+            if any(x for x in h if isinstance(x, str) and x.strip()):
+                with_h += 1
+                for x in h:
+                    if isinstance(x, str) and x.strip() and x not in svg_ids:
+                        unmatched += 1
+        print(
+            f"[express] narration highlight density: "
+            f"phrases={len(narration)} with_highlight={with_h} "
+            f"unmatched_ids={unmatched} svg_ids={len(svg_ids)}",
+            flush=True, file=__import__("sys").stderr,
+        )
     narrate_out = c.narrate(narration) if narration else {}
     retries_used = result.get("retries_used", 0)
     cost_estimate = estimate_express_cost(retries_used=retries_used)
