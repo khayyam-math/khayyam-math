@@ -642,3 +642,54 @@ def test_toplevel_text_avoids_group_internal_text():
     assert y >= 625 or x >= 400, (
         f"top-level text at ({x},{y}) still overlaps group text at (20,610)"
     )
+
+
+# ---------------------------------------------------------------------
+# clamp_text_to_viewbox — pull negative-y / negative-x text back inside
+# the canvas before any reflow pass runs.
+# ---------------------------------------------------------------------
+
+from studio.express import clamp_text_to_viewbox
+
+
+def test_clamp_pulls_negative_y_inside():
+    """Model occasionally places section headers at y=-36 hoping for
+    clipping; clamp must pull them back to TOP_MARGIN inside vb."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="-36">Clause Gadgets:</text>'
+        '<text x="20" y="-36">Variable Gadgets:</text>'
+        '</svg>'
+    )
+    out = clamp_text_to_viewbox(svg)
+    import re
+    ys = [int(y) for y in re.findall(r'y="(\-?\d+)"', out)]
+    assert all(y >= 20 for y in ys), f"clamp left negative ys: {ys}"
+
+
+def test_clamp_idempotent_on_inside_text():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="50" y="100">already inside</text>'
+        '</svg>'
+    )
+    assert clamp_text_to_viewbox(svg) == svg
+
+
+def test_clamp_then_reflow_separates_stacked_headers():
+    """Three headers at the same negative y must end up at three
+    distinct positive ys after clamp + reflow."""
+    from studio.express import reflow_overlapping_text
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="-36" font-size="20">A:</text>'
+        '<text x="20" y="-36" font-size="20">B:</text>'
+        '<text x="20" y="-36" font-size="20">C:</text>'
+        '</svg>'
+    )
+    out = reflow_overlapping_text(clamp_text_to_viewbox(svg))
+    import re
+    ys = [int(y) for y in re.findall(r'y="(\d+)"', out)]
+    assert len(ys) == 3 and len(set(ys)) == 3, f"ys not distinct: {ys}"
+    for prev, cur in zip(ys, ys[1:]):
+        assert cur > prev, f"ys not monotonic: {ys}"

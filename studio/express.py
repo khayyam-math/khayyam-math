@@ -1177,6 +1177,21 @@ async def express_figure(
         # rect expanded to wrap everything.  Idempotent: a correctly-
         # sized group passes through unchanged.  Errors are swallowed
         # because layout polish must never block a working figure.
+        # Earliest polish pass: pull every <text> back inside the
+        # viewBox.  Model occasionally puts section headers at y=-36
+        # hoping for clipping — instead they all stack visually at
+        # the top edge.  Clamp first, then the structural critic +
+        # other passes can work with sane coordinates.
+        try:
+            fixed_svg = clamp_text_to_viewbox(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"clamp_text_to_viewbox: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"clamp_text_to_viewbox FAILED: {type(exc).__name__}: {exc}")
         # First polish pass: convert HTML <sup>/<sub> tags to the
         # proper SVG <tspan baseline-shift='...'> form.  SVG ignores
         # HTML inline tags, so `A<sup>-1</sup>` rendered as the
@@ -1753,6 +1768,93 @@ def normalize_matrix_layout(svg: str) -> str:
             new_head = _set("x", new_x, head)
             new_head = _set("y", new_y, new_head)
             edits.append((c["start"], c["start"] + len(head), new_head))
+
+    if not edits:
+        return svg
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for s, e, repl in edits:
+        out = out[:s] + repl + out[e:]
+    return out
+
+
+def clamp_text_to_viewbox(svg: str) -> str:
+    """Pull every <text> back inside the SVG's viewBox.  The model
+    occasionally places section headers at y = -36 or y = -10 hoping
+    the SVG will clip them — instead the negative-y texts all stack
+    visually at the same place (or above the visible canvas), which
+    surfaces in the user audit as the "Clause Gadgets / Variable
+    Gadgets / Vertex Cover all overlap 100%" failure.
+
+    For each text whose anchor (x, y) lies outside the viewBox by
+    more than a small tolerance, snap the offending axis back to the
+    margin (20 px from each edge).  Idempotent for already-inside
+    text.  The subsequent reflow_overlapping_text pass then resolves
+    any same-y collisions the clamping introduces.
+    """
+    import re
+
+    vb_match = re.search(
+        r'<svg\b[^>]*?\bviewBox\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+        svg, re.S,
+    )
+    if not vb_match:
+        return svg
+    vb_raw = vb_match.group(1) if vb_match.group(1) is not None else vb_match.group(2)
+    try:
+        parts = vb_raw.replace(",", " ").split()
+        vb_x, vb_y, vb_w, vb_h = (float(parts[0]), float(parts[1]),
+                                   float(parts[2]), float(parts[3]))
+    except (ValueError, IndexError):
+        return svg
+
+    TOP_MARGIN = 20.0
+    LEFT_MARGIN = 20.0
+
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    def _set_attr(tag: str, name: str, val: float) -> str:
+        new = f'{name}="{val:.0f}"'
+        pat_dq = re.compile(rf'\b{name}\s*=\s*"[^"]*"')
+        pat_sq = re.compile(rf"\b{name}\s*=\s*'[^']*'")
+        if pat_dq.search(tag):
+            return pat_dq.sub(new, tag, count=1)
+        if pat_sq.search(tag):
+            return pat_sq.sub(new, tag, count=1)
+        return re.sub(r'>$', f' {new}>', tag, count=1)
+
+    edits: list[tuple[int, int, str]] = []
+    for m in re.finditer(r'<text\b[^>]*>([^<]*)</text>', svg, re.S):
+        head = m.group(0).split('>', 1)[0] + '>'
+        a = _attrs(head)
+        try:
+            x = float(a.get("x", ""))
+            y = float(a.get("y", ""))
+        except ValueError:
+            continue
+        new_x = x
+        new_y = y
+        if y < vb_y + TOP_MARGIN:
+            new_y = vb_y + TOP_MARGIN
+        if x < vb_x + LEFT_MARGIN:
+            new_x = vb_x + LEFT_MARGIN
+        if abs(new_x - x) < 0.5 and abs(new_y - y) < 0.5:
+            continue
+        new_head = head
+        if abs(new_x - x) >= 0.5:
+            new_head = _set_attr(new_head, "x", new_x)
+        if abs(new_y - y) >= 0.5:
+            new_head = _set_attr(new_head, "y", new_y)
+        start = m.start()
+        edits.append((start, start + len(head), new_head))
 
     if not edits:
         return svg
