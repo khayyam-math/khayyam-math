@@ -1192,6 +1192,21 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"clamp_text_to_viewbox FAILED: {type(exc).__name__}: {exc}")
+        # Group-transform clamp: when a <g transform="translate(150 0)">
+        # has children at local y=0, the rendered glyphs poke above
+        # the viewBox top and get clipped (Q=, Λ=, Qᵀ= disappeared in
+        # the spectral-theorem audit).  Raise dy so the topmost
+        # child's glyph top sits at TOP_MARGIN.
+        try:
+            fixed_svg = clamp_group_transforms(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"clamp_group_transforms: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"clamp_group_transforms FAILED: {type(exc).__name__}: {exc}")
         # First polish pass: convert HTML <sup>/<sub> tags to the
         # proper SVG <tspan baseline-shift='...'> form.  SVG ignores
         # HTML inline tags, so `A<sup>-1</sup>` rendered as the
@@ -1768,6 +1783,109 @@ def normalize_matrix_layout(svg: str) -> str:
             new_head = _set("x", new_x, head)
             new_head = _set("y", new_y, new_head)
             edits.append((c["start"], c["start"] + len(head), new_head))
+
+    if not edits:
+        return svg
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for s, e, repl in edits:
+        out = out[:s] + repl + out[e:]
+    return out
+
+
+def clamp_group_transforms(svg: str) -> str:
+    """Adjust `<g transform="translate(dx dy)">` so the group's
+    children don't poke above the viewBox top edge.
+
+    The model frequently writes `transform="translate(150 0)"` —
+    intending the group to be in a horizontal row — but child texts
+    use local y=0 (which renders at the very top of the canvas and
+    gets clipped because glyphs extend ABOVE the baseline).
+
+    For each top-level `<g>` with a translate transform:
+      1. Parse current dx, dy.
+      2. Find the minimum text-baseline y of any direct text child.
+      3. If `dy + min_y - font_size < TOP_MARGIN`, raise dy so the
+         topmost glyph clears TOP_MARGIN.
+
+    Idempotent — already-clear groups pass through unchanged.
+    """
+    import re
+
+    vb_match = re.search(
+        r'<svg\b[^>]*?\bviewBox\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+        svg, re.S,
+    )
+    if not vb_match:
+        return svg
+    vb_raw = vb_match.group(1) if vb_match.group(1) is not None else vb_match.group(2)
+    try:
+        parts = vb_raw.replace(",", " ").split()
+        vb_x, vb_y = float(parts[0]), float(parts[1])
+    except (ValueError, IndexError):
+        return svg
+
+    TOP_MARGIN = 20.0
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    group_re = re.compile(r'<g\b[^>]*?>.*?</g>', re.S)
+    translate_re = re.compile(
+        r'translate\s*\(\s*([\-0-9.]+)[,\s]+([\-0-9.]+)\s*\)'
+    )
+
+    edits: list[tuple[int, int, str]] = []
+    for gm in group_re.finditer(svg):
+        body = gm.group(0)
+        head_end = body.find('>')
+        if head_end < 0:
+            continue
+        head = body[:head_end + 1]
+        # Pull current transform translate (if any).
+        tr = translate_re.search(head)
+        if not tr:
+            continue
+        try:
+            dx = float(tr.group(1))
+            dy = float(tr.group(2))
+        except ValueError:
+            continue
+        # Compute min child text top edge (local y minus font_size).
+        min_top = None
+        for tm in re.finditer(r'<text\b[^>]*>', body):
+            a = _attrs(tm.group(0))
+            try:
+                y = float(a.get("y", ""))
+            except ValueError:
+                continue
+            try:
+                fs = float(a.get("font-size", "16").rstrip("pxptem"))
+            except ValueError:
+                fs = 16.0
+            top = y - fs * 0.9  # top of glyph (above baseline)
+            if min_top is None or top < min_top:
+                min_top = top
+        if min_top is None:
+            continue
+        # If absolute top of glyph (dy + min_top) is above TOP_MARGIN,
+        # raise dy.
+        if dy + min_top >= vb_y + TOP_MARGIN:
+            continue
+        new_dy = (vb_y + TOP_MARGIN) - min_top
+        new_head = translate_re.sub(
+            f"translate({dx:.0f} {new_dy:.0f})", head, count=1,
+        )
+        if new_head == head:
+            continue
+        start = gm.start()
+        edits.append((start, start + len(head), new_head))
 
     if not edits:
         return svg
