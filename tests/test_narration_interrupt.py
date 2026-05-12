@@ -73,9 +73,21 @@ def test_studio_posts_pause_on_user_interaction():
     assert send_section and "interruptNarration()" in send_section.group(1), (
         "sendMessage must call interruptNarration as its first line"
     )
-    # 3-4. Textarea focus + input listeners
-    assert "input.addEventListener('focus', interruptNarration)" in html
-    assert "input.addEventListener('input', interruptNarration)" in html
+    # NOTE: focus+input listeners were INTENTIONALLY removed (2026-05-12).
+    # On mobile, a casual tap on the input bar after the first
+    # narration phrase silenced the remaining phrases — surfaced as
+    # the "narrative was just one sentence" complaint.  The mic and
+    # send triggers above remain; the user can also use the Play /
+    # Pause buttons inside the canvas viewer to control playback
+    # explicitly.
+    assert "input.addEventListener('focus', interruptNarration)" not in html, (
+        "focus listener was removed on 2026-05-12; if you're re-adding "
+        "it, also update this test and consider why a casual tap on the "
+        "input bar should silence the entire narration."
+    )
+    assert "input.addEventListener('input', interruptNarration)" not in html, (
+        "input listener was removed on 2026-05-12 for the same reason."
+    )
 
 
 def test_pause_message_does_not_intercept_unrelated_messages():

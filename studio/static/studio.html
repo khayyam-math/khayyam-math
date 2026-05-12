@@ -909,12 +909,15 @@
       sendMessage();
     }
   });
-  // Pause narration the moment the user starts engaging with the
-  // chat — focusing the textarea or pressing the first key.  Both
-  // paths are safe to call repeatedly (postMessage is idempotent and
-  // the iframe pause is a no-op when audio is already paused).
-  input.addEventListener('focus', interruptNarration);
-  input.addEventListener('input', interruptNarration);
+  // We INTENTIONALLY do NOT bind interruptNarration to input focus or
+  // every keystroke — on mobile a casual tap on the input bar after
+  // the first narration phrase plays would silence the remaining 14
+  // phrases (the user complaint that surfaced as "narrative was just
+  // one sentence").  The only places that genuinely need to stop the
+  // old audio are (a) submitting a new turn — handled inside
+  // sendMessage() — and (b) clicking the mic to dictate, which is
+  // handled in the mic-button's own click handler.  Letting the
+  // narration play to completion is the desired default.
   input.focus();
 
   // One-line "page is alive" log so it's obvious in DevTools whether
