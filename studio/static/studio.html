@@ -517,11 +517,22 @@
     if (!primerEl || !window.renderMathInElement) return;
     try {
       window.renderMathInElement(primerEl, {
+        // Cover the four common LaTeX delimiter styles.  The primer
+        // model was tutored on `$..$` / `$$..$$`, but in practice it
+        // also reaches for `\(..\)` and `\[..\]` (those are the
+        // OpenAI assistant defaults), so KaTeX must match all four —
+        // otherwise the literal backslash form leaks through to the
+        // user as raw source.
         delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '$',  right: '$',  display: false },
+          { left: '$$',  right: '$$',  display: true  },
+          { left: '\\[', right: '\\]', display: true  },
+          { left: '$',   right: '$',   display: false },
+          { left: '\\(', right: '\\)', display: false },
         ],
         throwOnError: false,
+        // Don't try to render inside our own already-styled spans
+        // (avoids re-rendering KaTeX output on subsequent chunks).
+        ignoredClasses: ['katex-html', 'katex'],
       });
     } catch (_) { /* partial LaTeX, ignore */ }
   }
@@ -706,6 +717,23 @@
             // glyphs once the closing delimiter arrives.
             const delta = payload && payload.text;
             if (!delta) continue;
+            // Server-side rescue sentinel: when the primer's
+            // bare-LaTeX wrapper finds and fixes math that wasn't
+            // wrapped in `$...$` delimiters, it sends one final
+            // chunk prefixed with `\x00REPLACE\x00<full_text>`.
+            // We wipe the streamed-so-far primerRaw and re-render
+            // from the corrected text so KaTeX picks up the
+            // newly-wrapped math.
+            const REPLACE_PREFIX = '[[KMTRP_REPLACE_PRIMER]]';
+            if (delta.startsWith(REPLACE_PREFIX)) {
+              ensurePrimerEl(asstEl);
+              primerRaw = delta.slice(REPLACE_PREFIX.length);
+              primerEl.textContent = primerRaw;
+              renderPrimerMath();
+              // Don't re-speak — the user already heard the original
+              // (which sounded fine; only the rendered text changed).
+              continue;
+            }
             ensurePrimerEl(asstEl);
             // The primer is now the loading indicator.  Hide the
             // redundant "Thinking…" tool bubble and the empty

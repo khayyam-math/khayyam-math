@@ -824,13 +824,77 @@ _PRIMER_SYSTEM = (
     "RULES:\n"
     "  * Plain prose, no headings, no bullet lists, no markdown.\n"
     "  * Write so it can be SPOKEN aloud at natural pace.\n"
-    "  * Inline math in LaTeX: $\\theta$, $\\sin^2 + \\cos^2 = 1$.  Use "
-    "    $$...$$ only when the formula is the centerpiece of the answer.\n"
+    "  * MATH NOTATION — every mathematical symbol or formula MUST be "
+    "    wrapped in `$...$` (inline) or `$$...$$` (display).  This is "
+    "    a hard rule.  KaTeX renders ONLY content inside `$` "
+    "    delimiters; ANY LaTeX outside `$` (e.g. a bare `\\theta` "
+    "    or `\\sum_{i=1}^n` floating in prose) will be shown to the "
+    "    learner as raw source like `\\theta` — never acceptable.\n"
+    "    Examples:\n"
+    "      RIGHT:  'The angle $\\theta$ satisfies $\\sin^2\\theta + "
+    "              \\cos^2\\theta = 1$.'\n"
+    "      WRONG:  'The angle \\theta satisfies sin^2 + cos^2 = 1.'\n"
+    "      WRONG:  'For a 3x3 matrix A, det(A) = a_{11}(...).'\n"
+    "      RIGHT:  'For a $3 \\times 3$ matrix $A$, $\\det(A) = "
+    "              a_{11}(\\dots)$.'\n"
+    "    EVERY variable name, every formula, every `_{...}`, every "
+    "    backslash-command goes inside `$...$`.  When in doubt, wrap.\n"
     "  * Do NOT describe the figure (you cannot see it).  Do NOT say "
     "    'as shown below' or 'in the diagram.'  Speak only the theory.\n"
     "  * Stop after the formula(s).  Do NOT add a closing summary.\n"
     "  * NEVER mention that another component is generating a figure."
 )
+
+
+# Defensive post-processor: catches bare LaTeX (commands or subscripts
+# not wrapped in $...$) that slipped past the prompt and wraps them.
+# Runs on the full assembled primer string (after streaming ends) so
+# we don't have to handle chunk boundaries.
+
+_BARE_LATEX_RE = __import__("re").compile(
+    r"""
+    (?<!\$)              # not already preceded by a $
+    (
+        \\[A-Za-z]+      # a backslash command like \theta, \sum
+        (?:_\{[^}]*\})?  # optional subscript
+        (?:\^\{[^}]*\})? # optional superscript
+        |
+        [A-Za-z]_\{[^}]*\}   # variable with subscript like a_{ij}
+        |
+        [A-Za-z]\^\{[^}]*\}  # variable with superscript like x^{2}
+    )
+    (?!\$)               # not followed by a $
+    """,
+    __import__("re").VERBOSE,
+)
+
+
+def wrap_bare_latex(text: str) -> str:
+    """Wrap any bare LaTeX command/subscript that ESCAPED the primer's
+    `$...$` rule.  Idempotent — text whose math is already wrapped
+    passes through unchanged.
+
+    Conservatively skips spans already inside `$` (single OR double)
+    so we don't double-wrap valid `$\\theta$`.  Also skips spans
+    inside `\\(..\\)` / `\\[..\\]` which KaTeX also recognises.
+    """
+    import re
+
+    # Split text into "math regions" (inside $...$ / $$...$$ / \\(..\\) /
+    # \\[..\\]) and "prose regions" (everything else).  Only run the
+    # bare-LaTeX wrapper on prose regions.
+    delim_re = re.compile(
+        r"(\$\$[^$]*\$\$|\$[^$\n]*\$|\\\([^)]*\\\)|\\\[[^\]]*\\\])"
+    )
+    out: list[str] = []
+    cursor = 0
+    for m in delim_re.finditer(text):
+        prose = text[cursor:m.start()]
+        out.append(_BARE_LATEX_RE.sub(r"$\1$", prose))
+        out.append(m.group(0))
+        cursor = m.end()
+    out.append(_BARE_LATEX_RE.sub(r"$\1$", text[cursor:]))
+    return "".join(out)
 
 
 async def generate_theory_primer(
@@ -922,6 +986,36 @@ async def generate_theory_primer(
 
     out = "".join(full)
     _log(f"done total_len={len(out)} chunks_emitted={chunks_emitted}")
+    # Server-side rescue: if the model emitted bare LaTeX (a `\theta`
+    # or `a_{ij}` floating in prose without `$...$` delimiters), wrap
+    # it.  Streaming has already finished by now so this is a no-cost
+    # post-process on the assembled string.  The wrapper is
+    # idempotent — already-wrapped text passes through unchanged.
+    fixed = wrap_bare_latex(out)
+    if fixed != out:
+        delta = fixed[len(out):] if fixed.startswith(out) else fixed
+        # Send the FULL corrected text as one final chunk so the
+        # frontend can replace what it streamed earlier.  Use a
+        # special leading marker the chat handler recognises:
+        # primerEl.textContent = primerRaw will reset to clean text.
+        if on_text_chunk is not None:
+            try:
+                # Emit a sentinel: the prefix
+                # "[[KMTRP_REPLACE_PRIMER]]" tells the chat handler
+                # to wipe primerRaw and re-render from this string
+                # instead of appending.  Chosen to never collide with
+                # legitimate math or prose content.
+                await on_text_chunk("[[KMTRP_REPLACE_PRIMER]]" + fixed)
+                _log(
+                    f"bare-LaTeX rescue: wrapped {fixed.count('$') - out.count('$')} "
+                    "extra delimiters"
+                )
+            except Exception as cb_exc:  # noqa: BLE001
+                _log(
+                    f"on_text_chunk replace raised "
+                    f"{type(cb_exc).__name__}: {cb_exc}"
+                )
+        out = fixed
     return out
 
 
