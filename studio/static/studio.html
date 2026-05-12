@@ -133,8 +133,44 @@
     0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
     50%     { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
   }
-  .canvas-pane { display: flex; flex-direction: column; min-height: 0; }
+  .canvas-pane { display: flex; flex-direction: column; min-height: 0;
+    position: relative; }
   .canvas-pane iframe { flex: 1; border: 0; width: 100%; }
+  /* "Preparing visualisation" overlay — sits absolutely over the
+     canvas-pane so the prior turn's iframe content isn't mistaken
+     for in-progress work.  Hidden by the `hidden` attribute by
+     default; sendMessage() un-hides it, the first svg_chunk OR
+     tool_result re-hides it. */
+  .canvas-pane .canvas-loading {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 0.9em; padding: 1.5em;
+    text-align: center;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    z-index: 5;
+    animation: cl-fadein 180ms ease-out;
+  }
+  .canvas-pane .canvas-loading[hidden] { display: none; }
+  .canvas-pane .canvas-loading .cl-spinner {
+    width: 36px; height: 36px;
+    border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: cl-spin 0.9s linear infinite;
+  }
+  .canvas-pane .canvas-loading .cl-headline {
+    font-size: 1.05em; font-weight: 600; color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .canvas-pane .canvas-loading .cl-sub {
+    font-size: 0.85em; color: var(--muted);
+    max-width: 24em; line-height: 1.45;
+  }
+  @keyframes cl-spin { to { transform: rotate(360deg); } }
+  @keyframes cl-fadein { from { opacity: 0; } to { opacity: 1; } }
   /* Empty state: branded title + tagline + tappable example prompts.
      Replaces the bare "Ask a question…" italic line that left the
      canvas-pane feeling unowned and offered no scaffolding for a new
@@ -361,6 +397,16 @@
       </div>
     </div>
     <iframe id="canvas-frame" style="display:none" title="Khayyam Math canvas"></iframe>
+    <!-- "Preparing visualisation" overlay — shown by sendMessage() from
+         the moment the user submits a prompt and hidden by the first
+         svg_chunk OR tool_result event.  Sits on top of the iframe so
+         the prior turn's canvas isn't mistaken for the in-progress
+         one. -->
+    <div class="canvas-loading" id="canvas-loading" hidden>
+      <div class="cl-spinner" aria-hidden="true"></div>
+      <div class="cl-headline">Preparing visualization…</div>
+      <div class="cl-sub">Drafting the SVG, running structural checks, and synthesising narration.</div>
+    </div>
   </main>
 </div>
 <script>
@@ -666,6 +712,15 @@
     // from a clean log.  Idempotent: removing a non-child is a no-op.
     const chatEmpty = document.getElementById('chat-empty');
     if (chatEmpty && chatEmpty.parentNode) chatEmpty.remove();
+    // Show the "Preparing visualisation" overlay on the canvas pane
+    // so the user has a clear signal a figure is being built — the
+    // first svg_chunk (partial paint) OR the tool_result event will
+    // hide it.  Also force the canvas pane visible so first-turn
+    // (which normally collapses the pane on mobile) shows the
+    // overlay too.
+    const loadingEl = document.getElementById('canvas-loading');
+    if (loadingEl) loadingEl.hidden = false;
+    document.body.classList.add('has-canvas');
     appendMsg('user', user);
 
     const asstEl = appendMsg('asst', '…');
@@ -804,6 +859,9 @@
                   type: 'sevim_partial_svg', svg: partial,
                 }, '*');
               } catch (_) {}
+              // First visible SVG ink: hide the "Preparing…" overlay.
+              const lo = document.getElementById('canvas-loading');
+              if (lo) lo.hidden = true;
             }
           } else if (evt === 'tool_result') {
             // Find the most-recent in-flight tool_call line and decorate
@@ -845,6 +903,13 @@
                   last.remove();
                 }
               }
+              // Tool finished: the canvas iframe is about to swap to
+              // the new canvas_id (handled below).  Hide the
+              // "Preparing…" overlay if it's somehow still showing
+              // (e.g. attempt-0 streaming was disabled by the active
+              // model and no svg_chunks fired).
+              const lo = document.getElementById('canvas-loading');
+              if (lo) lo.hidden = true;
               if (r.canvas_id && r.canvas_id !== canvasId) {
                 canvasId = r.canvas_id;
                 placeholder.style.display = 'none';
@@ -943,6 +1008,12 @@
     } finally {
       input.disabled = false;
       sendBtn.disabled = false;
+      // Always tear down the "Preparing visualisation" overlay when
+      // the turn ends, regardless of how — success, server error,
+      // network failure, user cancel.  Leaving the spinner up would
+      // strand the user wondering whether the turn is still alive.
+      const lo = document.getElementById('canvas-loading');
+      if (lo) lo.hidden = true;
       sendBtn.classList.remove('loading');
       input.focus();
     }
