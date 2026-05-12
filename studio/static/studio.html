@@ -585,45 +585,20 @@
   // sentence and we don't want speech and rendering to fight over
   // partial text.  When primer_done lands and there's residual text,
   // we flush whatever remains.
-  function speakPrimerProgress(flush) {
-    if (!('speechSynthesis' in window)) return;
-    const buf = primerRaw.slice(primerSpokenUpto);
-    if (!buf) return;
-    // Sentence-boundary regex: end punctuation + whitespace OR end.
-    let endIdx = -1;
-    for (let m, re = /[.!?]\s/g; (m = re.exec(buf));) endIdx = m.index + 1;
-    if (endIdx < 0 && !flush) return;
-    const chunk = flush ? buf : buf.slice(0, endIdx);
-    if (!chunk.trim()) return;
-    primerSpokenUpto += chunk.length;
-    // Strip LaTeX inline-math delimiters from speech: $\theta$ → theta,
-    // $$E=mc^2$$ → E equals m c squared (rough — pure pronunciation).
-    const spoken = chunk
-      .replace(/\$\$([^$]*)\$\$/g, ' $1 ')
-      .replace(/\$([^$]*)\$/g, ' $1 ')
-      .replace(/\\([a-zA-Z]+)/g, ' $1 ')
-      .replace(/[\\{}^_]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!spoken) return;
-    const u = new SpeechSynthesisUtterance(spoken);
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    primerSpeaking = true;
-    u.onend = () => {
-      // If more pending, more utterances are already queued; the LAST
-      // utterance's onend is the real end-of-primer.  Detect that by
-      // checking the synth queue.
-      if (window.speechSynthesis.pending || window.speechSynthesis.speaking) return;
-      primerSpeaking = false;
-      // Tell the canvas iframe it's safe to start narration.
-      try {
-        if (frame && frame.contentWindow) {
-          frame.contentWindow.postMessage({type: 'sevim_resume_audio'}, '*');
-        }
-      } catch (_) {}
-    };
-    try { window.speechSynthesis.speak(u); } catch (_) {}
+  //
+  // 2026-05-12: This function used to drive browser SpeechSynthesis to
+  // narrate the primer as it streamed.  The result was unreliable —
+  // every OS / browser ships a different voice, Linux & Android voices
+  // butchered math notation ("nonsense speech at the beginning" was
+  // the actual user complaint), and the primer voice frequently
+  // overlapped with the figure narration WAV when the user pressed
+  // Play.  The figure narration is high-quality OpenAI tts-1; that's
+  // what speaks.  The primer is now a TEXT-ONLY explanation in the
+  // chat panel, KaTeX-rendered for math.
+  function speakPrimerProgress(_flush) {
+    // No-op kept so existing call sites don't need to change; remove
+    // entirely once we're confident the silent primer is right.
+    return;
   }
 
   // ── Voice input via Web Speech API ───────────────────────────────────

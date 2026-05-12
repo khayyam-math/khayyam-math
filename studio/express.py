@@ -1045,7 +1045,13 @@ async def express_figure(
     base_url: str,
     model: str,
     api_key: str | None,
-    max_retries: int = 1,
+    # max_retries=2 (was 1) gives the reviewer + the model THREE total
+    # attempts to produce a clean figure on hard prompts (4×4
+    # determinant, NP-hardness reductions).  Cost adder: ~$0.001 per
+    # turn for a third gpt-4o-mini call.  Materially better quality
+    # on the prompts that need it; cheap turns still complete after
+    # attempt 0 because the loop short-circuits on PASS.
+    max_retries: int = 2,
     context_canvases: list[dict[str, Any]] | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
