@@ -1871,7 +1871,12 @@ def clamp_group_transforms(svg: str) -> str:
             dy = float(tr.group(2))
         except ValueError:
             continue
-        # Compute min child text top edge (local y minus font_size).
+        # Compute the min top edge of any CHILD bbox in local
+        # coordinates.  Considers text (y - font_size for the glyph
+        # cap), rect (y), and circle/ellipse (cy - r).  Without this
+        # an "empty matrix" group (only <rect> children, no text)
+        # would skip clamping and leave the boxes at y=0 — they'd
+        # render above/over the canvas title.
         min_top = None
         for tm in re.finditer(r'<text\b[^>]*>', body):
             a = _attrs(tm.group(0))
@@ -1883,7 +1888,24 @@ def clamp_group_transforms(svg: str) -> str:
                 fs = float(a.get("font-size", "16").rstrip("pxptem"))
             except ValueError:
                 fs = 16.0
-            top = y - fs * 0.9  # top of glyph (above baseline)
+            top = y - fs * 0.9
+            if min_top is None or top < min_top:
+                min_top = top
+        for rm in re.finditer(r'<rect\b[^>]*?/?>', body):
+            a = _attrs(rm.group(0))
+            try:
+                ry = float(a.get("y", ""))
+            except ValueError:
+                continue
+            if min_top is None or ry < min_top:
+                min_top = ry
+        for cm in re.finditer(r'<(?:circle|ellipse)\b[^>]*?/?>', body):
+            a = _attrs(cm.group(0))
+            try:
+                cy = float(a.get("cy", "")); r = float(a.get("r", a.get("ry", "")))
+            except ValueError:
+                continue
+            top = cy - r
             if min_top is None or top < min_top:
                 min_top = top
         if min_top is None:
@@ -2412,68 +2434,134 @@ def reflow_overlapping_groups(svg: str) -> str:
         )
         return new_open + body[open_m.end():]
 
-    # For each top-level <g>, pull bbox from its first <rect> child.
+    # For each top-level <g>, pull bbox from its first <rect> child
+    # in ABSOLUTE coordinates (compose any existing translate).
     group_re = re.compile(r'<g\b[^>]*?>.*?</g>', re.S)
-    groups: list[tuple[int, int, str, tuple[float, float, float, float]]] = []
+    translate_re = re.compile(
+        r'translate\s*\(\s*([\-0-9.]+)[,\s]+([\-0-9.]+)\s*\)'
+    )
+    # Each entry: (start, end, body, (x, y, w, h), (orig_dx, orig_dy))
+    # where x/y/w/h are ABSOLUTE (local + transform), and orig_dx/dy
+    # are the group's CURRENT transform offsets so subsequent
+    # _apply_translate calls add to them rather than overwrite.
+    groups: list[tuple[int, int, str,
+                       tuple[float, float, float, float],
+                       tuple[float, float]]] = []
     for m in group_re.finditer(svg):
         body = m.group(0)
+        head = body.split('>', 1)[0] + '>'
+        tr = translate_re.search(head)
+        if tr:
+            try:
+                orig_dx = float(tr.group(1))
+                orig_dy = float(tr.group(2))
+            except ValueError:
+                orig_dx = orig_dy = 0.0
+        else:
+            orig_dx = orig_dy = 0.0
         rect_m = re.search(r'<rect\b[^>]*?/?>', body, re.S)
         if not rect_m:
             continue
         a = _attrs(rect_m.group(0))
         try:
-            x = float(a.get("x", "0")); y = float(a.get("y", "0"))
+            lx = float(a.get("x", "0")); ly = float(a.get("y", "0"))
             w = float(a.get("width", "")); h = float(a.get("height", ""))
         except ValueError:
             continue
-        groups.append((m.start(), m.end(), body, (x, y, w, h)))
+        # Absolute bbox after applying the group transform.
+        x = lx + orig_dx; y = ly + orig_dy
+        groups.append((m.start(), m.end(), body, (x, y, w, h),
+                       (orig_dx, orig_dy)))
 
-    if len(groups) < 2:
+    # Build TOP-LEVEL text bboxes as obstacles too — a group placed
+    # at (180, 0) with no inherent y offset will otherwise sit on
+    # top of a title at y=30 because no other GROUP is in its way.
+    # Scan top-level <text> (skipping those inside <g>) for absolute
+    # bboxes; treat them as immovable when shifting groups.
+    g_open_ranges: list[tuple[int, int]] = []
+    depth = 0; gstart = -1
+    for m in re.finditer(r'<g\b[^>]*>|</g>', svg, re.S):
+        if m.group(0).startswith("</"):
+            depth -= 1
+            if depth == 0 and gstart >= 0:
+                g_open_ranges.append((gstart, m.end()))
+                gstart = -1
+        else:
+            if depth == 0:
+                gstart = m.start()
+            depth += 1
+
+    def _outside_g(pos: int) -> bool:
+        for s, e in g_open_ranges:
+            if s <= pos < e:
+                return False
+        return True
+
+    text_obstacles: list[tuple[float, float, float, float]] = []
+    for m in re.finditer(r'<text\b[^>]*?>([^<]+)</text>', svg, re.S):
+        if not _outside_g(m.start()):
+            continue
+        head = m.group(0).split('>', 1)[0] + '>'
+        a = _attrs(head)
+        try:
+            tx = float(a.get("x", ""))
+            ty = float(a.get("y", ""))
+        except ValueError:
+            continue
+        content = m.group(1).strip()
+        if not content:
+            continue
+        try:
+            fs = float(a.get("font-size", "16").rstrip("pxptem"))
+        except ValueError:
+            fs = 16.0
+        est_w = max(len(content), 1) * fs * 0.6
+        text_obstacles.append(
+            (tx, ty - fs * 0.9, est_w, fs * 1.2),
+        )
+
+    if not groups and not text_obstacles:
         return svg
 
-    # Greedy: walk in document order, shift each group right past any
-    # earlier group it overlaps with.
+    # Greedy: walk in document order, shift each group past every
+    # earlier group AND every top-level text it overlaps.  dx/dy
+    # are SHIFTS to add on top of the group's existing transform.
     edits: list[tuple[int, int, str]] = []
-    placed: list[tuple[float, float, float, float]] = []
-    for start, end, body, box in groups:
+    placed: list[tuple[float, float, float, float]] = list(text_obstacles)
+    for start, end, body, box, orig in groups:
         x, y, w, h = box
+        orig_dx, orig_dy = orig
         dx = 0.0
+        dy = 0.0
         max_iters = 20
         while max_iters > 0:
             max_iters -= 1
             overlap = None
             for px, py, pw, ph in placed:
-                # Bbox intersection with PAD margin.
                 if (x + dx < px + pw + PAD and x + dx + w + PAD > px
-                        and y < py + ph + PAD and y + h + PAD > py):
+                        and y + dy < py + ph + PAD and y + dy + h + PAD > py):
                     overlap = (px, py, pw, ph)
                     break
             if not overlap:
                 break
-            # Shift right past the offender.
             shift = (overlap[0] + overlap[2] + PAD) - (x + dx)
             dx += shift
-            # If we'd exit the viewBox, fall through to a VERTICAL
-            # shift instead — slide the group DOWN past the offender's
-            # bottom edge.  The whole-figure can then exceed the
-            # viewBox height (caught by overflow:auto on the canvas
-            # viewer's <main> so the user can scroll), which is much
-            # better than leaving boxes superimposed.
             if x + dx + w > vb_w - 5:
+                # No more horizontal room — slide down past the
+                # offender's bottom edge instead.
                 dx = 0.0
-                # Compute dy to clear the offender vertically.
-                dy_needed = (overlap[1] + overlap[3] + PAD) - y
+                dy_needed = (overlap[1] + overlap[3] + PAD) - (y + dy)
                 if dy_needed > 0:
-                    # Record the shift as a vertical translate; the
-                    # final transform combines both axes.
-                    box = (x, y + dy_needed, w, h)
-                    placed.append(box)
-                    edits.append((start, end, _apply_translate(body, 0, dy_needed)))
-                break
-        placed.append((x + dx, y, w, h))
-        if abs(dx) < 0.5:
+                    dy += dy_needed
+                else:
+                    break
+        placed.append((x + dx, y + dy, w, h))
+        if abs(dx) < 0.5 and abs(dy) < 0.5:
             continue
-        edits.append((start, end, _apply_translate(body, dx, 0.0)))
+        # Compose the NEW transform with the group's ORIGINAL one.
+        new_dx = orig_dx + dx
+        new_dy = orig_dy + dy
+        edits.append((start, end, _apply_translate(body, new_dx, new_dy)))
 
     if not edits:
         return svg
