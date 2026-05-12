@@ -371,6 +371,52 @@ class SevimStack(Stack):
                     ),
                 )
 
+        # ── 7b'. www subdomain — same hosted zone as the apex domain ──
+        # Adds www.<apex> as a 301-redirect alias to the apex.  Distinct
+        # from 7b above because the www record lives inside the SAME
+        # hosted zone as the apex (which we already looked up), so we
+        # don't need a fresh HostedZone.from_lookup call.  A new ACM
+        # cert is issued just for www (DNS-validated against the apex
+        # zone), attached as an additional certificate on the existing
+        # HTTPS listener, and a Host-header listener rule 301-redirects
+        # to the apex.  Non-destructive: leaves the apex cert and
+        # routing untouched.
+        if domain and zone:
+            www_name = f"www.{domain}"
+            www_cert = acm.Certificate(
+                self, "WwwCert",
+                domain_name=www_name,
+                validation=acm.CertificateValidation.from_dns(zone),
+            )
+            service.listener.add_certificates(
+                "WwwListenerCert", certificates=[www_cert],
+            )
+            route53.ARecord(
+                self, "WwwAlias",
+                zone=zone,
+                record_name="www",  # relative to the zone => www.<apex>
+                target=route53.RecordTarget.from_alias(
+                    r53_targets.LoadBalancerTarget(service.load_balancer),
+                ),
+            )
+            service.listener.add_action(
+                "WwwRedirectAction",
+                # Priority must be UNIQUE across all listener rules; the
+                # 7b loop uses 10..10+len(redirect_domains)-1, so we
+                # pick a higher value to avoid colliding even if more
+                # typo redirects get added later.
+                priority=50,
+                conditions=[
+                    elbv2.ListenerCondition.host_headers([www_name]),
+                ],
+                action=elbv2.ListenerAction.redirect(
+                    host=domain,
+                    port="443",
+                    protocol="HTTPS",
+                    permanent=True,  # 301
+                ),
+            )
+
         # ── 7c. (Optional) Qwen vLLM GPU instance ────────────────────
         # Spins up a g6.xlarge (NVIDIA L4, 24 GB) running vLLM with
         # --enable-lora, preloaded with qwen_lora_v4 from the LoRA S3
