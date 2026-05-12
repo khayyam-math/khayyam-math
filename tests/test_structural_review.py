@@ -275,3 +275,36 @@ def test_unicode_math_passes():
         ' = 0</text></svg>'
     )
     assert _structural_review(svg, []) == []
+
+
+# ---------------------------------------------------------------------
+# Bottom overflow with unused right column — the figure spills past
+# the bottom band while the right half is empty.
+# ---------------------------------------------------------------------
+
+def test_bottom_overflow_with_unused_right_flagged():
+    # Everything in left column, last item at y=625 in a 650-tall vb,
+    # right half (x > 495) has no text at all.
+    svg = (
+        "<svg viewBox='0 0 900 650'>"
+        "<text x='50' y='100'>step 1</text>"
+        "<text x='50' y='200'>step 2</text>"
+        "<text x='50' y='400'>step 3</text>"
+        "<text x='50' y='625'>step 4 falls off the bottom</text>"
+        "</svg>"
+    )
+    issues = _structural_review(svg, [])
+    assert any("bottom_overflow_with_unused_right" in i for i in issues), issues
+
+
+def test_two_column_layout_does_not_overflow():
+    # Same content split across two columns, no element below y=620.
+    svg = (
+        "<svg viewBox='0 0 900 650'>"
+        "<text x='50' y='100'>step 1</text>"
+        "<text x='50' y='200'>step 2</text>"
+        "<text x='500' y='100'>step 3</text>"
+        "<text x='500' y='200'>step 4</text>"
+        "</svg>"
+    )
+    assert _structural_review(svg, []) == []

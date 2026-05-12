@@ -74,6 +74,18 @@
     background: white;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
+  /* Fallback scroll: when the generated figure is taller than its
+     viewBox can show comfortably AND the two-column layout rules
+     in the system prompt still left content overflowing, the user
+     should be able to SCROLL the canvas pane to see the rest.  The
+     SVG aspect-fit rules above keep the figure pinned at "fit
+     whichever axis binds first" so the natural case never scrolls;
+     this kicks in only when overflow actually occurs.  Touch users
+     get momentum scrolling. */
+  main {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   /* SVG must fit in BOTH dimensions of the stage container.  The
      previous rule (max-width:100%, height:auto) scaled by width only,
      so on a short iframe (mobile, 240px tall) a portrait figure

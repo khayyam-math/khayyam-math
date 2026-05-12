@@ -300,6 +300,14 @@ _EXPRESS_SYSTEM = (
     "'Bayes' theorem').\n"
     "\n"
     "LAYOUT — match canonical textbook form:\n"
+    "  • A matrix MUST be drawn as ONE coherent N×N grid — a single "
+    "<g> wrapping an outer rect (or pair of bracket strokes) plus N² "
+    "cell-text elements positioned on a regular row × column lattice.  "
+    "Do NOT emit a matrix as N separate 1×N strips or N standalone "
+    "single-column groups; that renders as 'N different mini-matrices "
+    "in a row,' not as one matrix.  An m×n matrix has m*n cells; an "
+    "m×n matrix figure must contain exactly m*n cell-text elements "
+    "inside a single matrix group, none missing, none repeated.\n"
     "  • Matrix multiplication: 2-D grids for A (m×n), B (n×p), C (m×p) "
     "with '·' and '=' between them; row-i of A and column-j of B both "
     "highlighted; the worked sum-of-products written as a separate "
@@ -331,6 +339,15 @@ _EXPRESS_SYSTEM = (
     "    instead of one 130-char det(A) = a_11(…) - a_12(…) + a_13(…), "
     "    emit THREE <text> blocks: line 1 'det(A) = '; line 2 "
     "    '  + a₁₁(a₂₂a₃₃ - a₂₃a₃₂)' on the next y; line 3 the rest.\n"
+    "  • TWO-COLUMN LAYOUT — when you have many formulas / steps to "
+    "    show, use the WIDTH before going tall.  The 900-wide canvas "
+    "    naturally splits into two 440-wide columns (left x=20-460, "
+    "    right x=480-880).  Put the diagram + first half of formulas "
+    "    in the left column, the rest of the formulas in the right "
+    "    column starting at x=480.  Never let the y of any element "
+    "    exceed viewBox_height - 30 = ~620; if it would, START A NEW "
+    "    COLUMN at x=480 instead of stacking more lines vertically.  "
+    "    Reset y back to ~80 when you switch columns.\n"
     "  • Every visually distinct element has a unique SVG id "
     "(matrix_a_label, cell_a_1_2, sum_step_1, formula_general).\n"
     "  • viewBox sized to fit comfortably (typical: 0 0 900 650).\n"
@@ -1599,6 +1616,41 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             vb_h = float(h_raw.rstrip("pxptem%")) if h_raw else 0.0
         except (ValueError, AttributeError):
             vb_x = vb_y = vb_w = vb_h = 0.0
+
+    # 4a. Bottom overflow with unused right column.  Catches the "stack
+    # vertical formulas until they fall off the bottom" failure mode
+    # the user surfaced as 'text is now out of the page from the
+    # bottom.'  When ANY visible element sits below y=viewBox_h-30
+    # AND the right half (x > viewBox_w * 0.55) has no visible text,
+    # the figure is wasting horizontal space; the model should have
+    # spilled into a second column instead.
+    if vb_w > 0 and vb_h > 0:
+        bottom_band = vb_h - 30
+        right_half_x = vb_x + vb_w * 0.55
+        below_count = 0
+        right_count = 0
+        for m in re.finditer(r'<text\b[^>]*>([^<]+)</text>', svg, re.S):
+            head = m.group(0).split('>', 1)[0] + '>'
+            a = _attrs(head)
+            try:
+                tx = float(a.get("x", "")); ty = float(a.get("y", ""))
+            except ValueError:
+                continue
+            if ty > bottom_band:
+                below_count += 1
+            if tx > right_half_x:
+                right_count += 1
+        if below_count >= 1 and right_count == 0:
+            issues.append(
+                "bottom_overflow_with_unused_right: " + str(below_count) +
+                " text element(s) sit below y=" + str(int(bottom_band)) +
+                " while the entire right half (x>" + str(int(right_half_x)) +
+                f") of the {int(vb_w)}x{int(vb_h)} viewBox is empty.  "
+                "Re-flow: keep the diagram in the left column and put "
+                "the overflowing formulas in a second column starting "
+                f"at x={int(vb_w * 0.55)}, y reset to ~80.  A canvas "
+                "always uses its WIDTH before going tall."
+            )
 
     # 4b. LaTeX-source contamination: SVG <text> is NOT MathJax — when
     # a text element contains LaTeX-style subscripts (a_{11}) or
