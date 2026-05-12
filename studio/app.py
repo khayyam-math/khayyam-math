@@ -206,6 +206,13 @@ def get_active_model() -> str:
     """Return the model id that should serve the next chat request.
 
     Resolution order:
+      0. ``SEVIM_FORCE_ACTIVE_MODEL`` env var (deployment-time override).
+         Beats everything else.  Used by the fine-tune workflow to
+         atomically promote a freshly-trained model id on cdk deploy
+         without needing an admin click — set the env var, deploy,
+         and every Fargate task immediately picks up the new model.
+         Unset the env var (next cdk deploy) to release the override
+         and let the normal resolution chain take over again.
       1. The admin's ``active_model`` setting from telemetry, if it
          points to an available backend.
       2. The catalog entry marked ``default=True``, if it is available.
@@ -219,6 +226,14 @@ def get_active_model() -> str:
     """
     catalog_list = model_catalog()
     catalog = {m["id"]: m for m in catalog_list}
+    force = os.environ.get("SEVIM_FORCE_ACTIVE_MODEL", "").strip()
+    if force:
+        # A force-override might point at a fine-tuned id not yet in
+        # the catalog (the catalog is hand-curated, the fine-tune id
+        # is auto-generated).  Return it verbatim — the chat path
+        # ships whatever string we hand it directly to OpenAI's
+        # /chat/completions, and OpenAI knows the fine-tune id.
+        return force
     try:
         from sevim.telemetry import get_telemetry
         tel = get_telemetry()
@@ -246,6 +261,19 @@ def resolve_backend() -> tuple[str, str, str | None, str]:
     into the choice.
     """
     chosen = get_active_model()
+    # Fine-tuned model ids are of the form
+    # `ft:<base>:<org>:<suffix>:<id>` and are dispatched to OpenAI's
+    # standard chat-completions endpoint with the fine-tune id as
+    # the model name.  This branch is hit when SEVIM_FORCE_ACTIVE_MODEL
+    # carries a fine-tune id, or when an admin adds the id to
+    # MODEL_CATALOG and selects it via /studio/admin.
+    if chosen.startswith("ft:"):
+        return (
+            "https://api.openai.com/v1",
+            chosen,
+            os.environ.get("OPENAI_API_KEY"),
+            chosen,
+        )
     if chosen == "gpt-4o":
         # The base URL still comes from SEVIM_VLLM_URL so dev can
         # point this at a local OpenAI-compatible server; the model
