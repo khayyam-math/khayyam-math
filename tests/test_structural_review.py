@@ -222,3 +222,56 @@ def test_caption_overlapping_diagram_box_flagged():
     )
     issues = _structural_review(svg, [])
     assert any("caption_overlaps_diagram" in i for i in issues), issues
+
+
+# ---------------------------------------------------------------------
+# Single-quoted SVG attributes — gpt-4o-mini emits single quotes in
+# practice, the regex had a long-standing bug where every check
+# silently no-op'd against such SVGs.
+# ---------------------------------------------------------------------
+
+def test_single_quoted_out_of_bounds_caught():
+    """gpt-4o-mini emits SVG with single quotes; the structural critic
+    must still catch out-of-bounds in that form."""
+    svg = (
+        "<svg viewBox='0 0 900 650'>"
+        "<text x='100' y='450' id='formula'>"
+        "det(A) = a_{11}(a_{22}a_{33} - a_{23}a_{32}) - "
+        "a_{12}(a_{21}a_{33} - a_{23}a_{31}) + "
+        "a_{13}(a_{21}a_{32} - a_{22}a_{31})</text></svg>"
+    )
+    issues = _structural_review(svg, [])
+    assert any("out_of_bounds" in i for i in issues), issues
+
+
+# ---------------------------------------------------------------------
+# LaTeX source masquerading as math — <text>a_{ij}</text> renders as
+# literal "a_{ij}" not as a subscripted symbol.
+# ---------------------------------------------------------------------
+
+def test_latex_subscript_in_text_flagged():
+    svg = '<svg viewBox="0 0 900 650"><text x="40" y="40">a_{11} + a_{22}</text></svg>'
+    issues = _structural_review(svg, [])
+    assert any("latex_source_in_text" in i for i in issues), issues
+
+
+def test_latex_command_in_text_flagged():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="40" y="40">\\sum_{i=1}^{n} a_i \\theta</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("latex_source_in_text" in i for i in issues), issues
+
+
+def test_unicode_math_passes():
+    """Σθ as actual Unicode glyphs should pass; subscripts via tspan
+    should pass."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="40" y="40">Σ θ = 1, a'
+        '<tspan baseline-shift="sub" font-size="80%">ij</tspan>'
+        ' = 0</text></svg>'
+    )
+    assert _structural_review(svg, []) == []

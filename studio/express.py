@@ -315,9 +315,22 @@ _EXPRESS_SYSTEM = (
     "as labelled nodes if showing a group action.\n"
     "\n"
     "STYLE:\n"
-    "  • Notation conventional: a_{ij} via <tspan baseline-shift='sub'>, "
-    "Greek letters as Unicode (α β θ φ), operators as Unicode "
-    "(∑ ∏ ∈ ∀ ∨ ∧ ¬ · ≤ ≥ ≠).  Never ASCII substitutes.\n"
+    "  • Notation conventional: SVG is NOT MathJax.  NEVER put raw "
+    "    LaTeX inside a <text> element — `a_{11}` renders as the "
+    "    literal 5 characters `a`, `_`, `{`, `1`, `1`, `}`, not as "
+    "    an a with subscript 11.  Use SVG markup instead:\n"
+    "      - subscript:   <tspan baseline-shift='sub'   font-size='80%'>ij</tspan>\n"
+    "      - superscript: <tspan baseline-shift='super' font-size='80%'>n</tspan>\n"
+    "    Greek letters as Unicode (α β θ φ), operators as Unicode "
+    "    (∑ ∏ ∈ ∀ ∨ ∧ ¬ · ≤ ≥ ≠).  Never ASCII substitutes, never "
+    "    `\\\\sum`, `\\\\theta`, `\\\\frac`.  If you find yourself "
+    "    typing a backslash inside a <text>, stop and rewrite.\n"
+    "  • Formulas longer than ~60 characters CANNOT fit on one line "
+    "    in a 900-wide viewBox.  Break them across multiple stacked "
+    "    <text> elements (same x, y stepped by 22-28 px).  Example: "
+    "    instead of one 130-char det(A) = a_11(…) - a_12(…) + a_13(…), "
+    "    emit THREE <text> blocks: line 1 'det(A) = '; line 2 "
+    "    '  + a₁₁(a₂₂a₃₃ - a₂₃a₃₂)' on the next y; line 3 the rest.\n"
     "  • Every visually distinct element has a unique SVG id "
     "(matrix_a_label, cell_a_1_2, sum_step_1, formula_general).\n"
     "  • viewBox sized to fit comfortably (typical: 0 0 900 650).\n"
@@ -1474,10 +1487,21 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
     # generators and a positional regex was missing common shapes.
     tag_re = re.compile(r'<(?:circle|ellipse)\b[^>]*?/?>', re.S)
     text_tag_re = re.compile(r'<text\b[^>]*?>([^<]{1,12})</text>', re.S)
-    attr_re = re.compile(r'\b([A-Za-z_-]+)\s*=\s*"([^"]*)"')
+    # IMPORTANT: gpt-4o-mini emits SVG with SINGLE quotes (<text x='100'…>)
+    # while the JSON-schema example shows double quotes.  Match BOTH so
+    # the structural critic actually sees attribute values on the SVG
+    # the live system produces.  A previous version with only the
+    # double-quote variant silently returned empty {} for every tag
+    # and made out_of_bounds / caption_overlaps_diagram into no-ops.
+    attr_re = re.compile(r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')')
 
     def _attrs(tag: str) -> dict[str, str]:
-        return {m.group(1): m.group(2) for m in attr_re.finditer(tag)}
+        # attr_re has TWO value groups (double-quoted, single-quoted);
+        # pick whichever fired.
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
 
     circles_with_geom: list[tuple[float, float, float, str]] = []
     for m in tag_re.finditer(svg):
@@ -1543,13 +1567,24 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
     # captions at coordinates past the right edge / below the bottom,
     # which on the rendered canvas means the text is invisible
     # (clipped) or extends off-page in PDF exports.
-    viewbox_re = re.compile(
-        r'<svg\b[^>]*?viewBox\s*=\s*"([^"]+)"', re.S,
-    )
-    vb_match = viewbox_re.search(svg)
-    if vb_match:
+    # Helper that pulls a single attribute value from the opening <svg
+    # tag, tolerant of both single- and double-quoted strings.  Same
+    # quoting fix as attr_re above — gpt-4o-mini emits single-quoted
+    # SVG which the double-quote-only regex was missing.
+    def _svg_attr(name: str) -> str | None:
+        pattern = (
+            r'<svg\b[^>]*?\b' + re.escape(name)
+            + r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+        )
+        m = re.search(pattern, svg, re.S)
+        if not m:
+            return None
+        return m.group(1) if m.group(1) is not None else m.group(2)
+
+    vb_raw = _svg_attr("viewBox")
+    if vb_raw:
         try:
-            parts = vb_match.group(1).replace(",", " ").split()
+            parts = vb_raw.replace(",", " ").split()
             vb = [float(p) for p in parts[:4]]
             vb_x, vb_y, vb_w, vb_h = vb[0], vb[1], vb[2], vb[3]
         except (ValueError, IndexError):
@@ -1557,13 +1592,42 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
     else:
         # Fall back to width/height when no viewBox is set.
         try:
-            w_attr = re.search(r'<svg\b[^>]*?width\s*=\s*"([^"]+)"', svg)
-            h_attr = re.search(r'<svg\b[^>]*?height\s*=\s*"([^"]+)"', svg)
+            w_raw = _svg_attr("width")
+            h_raw = _svg_attr("height")
             vb_x = vb_y = 0.0
-            vb_w = float(w_attr.group(1).rstrip("pxptem%")) if w_attr else 0.0
-            vb_h = float(h_attr.group(1).rstrip("pxptem%")) if h_attr else 0.0
+            vb_w = float(w_raw.rstrip("pxptem%")) if w_raw else 0.0
+            vb_h = float(h_raw.rstrip("pxptem%")) if h_raw else 0.0
         except (ValueError, AttributeError):
             vb_x = vb_y = vb_w = vb_h = 0.0
+
+    # 4b. LaTeX-source contamination: SVG <text> is NOT MathJax — when
+    # a text element contains LaTeX-style subscripts (a_{11}) or
+    # commands (\sum, \frac, \theta), it renders as literal source on
+    # the canvas instead of as a math glyph.  The model is supposed to
+    # use <tspan baseline-shift='sub'> for subscripts and Unicode for
+    # operators (Σ ∏ θ).  Flag any <text> whose content contains the
+    # tell-tale `_{` / `^{` / `\command` patterns.
+    latex_pattern = re.compile(r'(_\{[^}]*\}|\^\{[^}]*\}|\\[A-Za-z]{2,})')
+    bad_latex: list[str] = []
+    for m in re.finditer(r'<text\b[^>]*>([^<]+)</text>', svg, re.S):
+        content = m.group(1).strip()
+        if latex_pattern.search(content):
+            snippet = content[:50] + ("…" if len(content) > 50 else "")
+            bad_latex.append(snippet)
+    if bad_latex:
+        sample = " | ".join(repr(s) for s in bad_latex[:3])
+        more = (f" (and {len(bad_latex) - 3} more)"
+                if len(bad_latex) > 3 else "")
+        issues.append(
+            "latex_source_in_text: " + str(len(bad_latex)) +
+            " <text> element(s) contain LaTeX source that will render "
+            "as literal characters, not as math: " + sample + more +
+            ". Replace each LaTeX subscript like a_{ij} with "
+            "<tspan baseline-shift='sub' font-size='80%'>ij</tspan>, "
+            "and replace LaTeX commands (\\\\sum, \\\\theta, \\\\frac) "
+            "with the corresponding Unicode glyph (Σ, θ) or with the "
+            "appropriate SVG markup.  SVG does not interpret LaTeX."
+        )
 
     if vb_w > 0 and vb_h > 0:
         out_of_bounds: list[str] = []
