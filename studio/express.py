@@ -63,6 +63,7 @@ class _StreamingSvgExtractor:
         self._svg: list[str] = []         # decoded SVG chars
         self._escape = False              # last char was '\\' while in value
         self._unicode_left = 0            # remaining hex digits of a \\uXXXX
+        self._unicode_hex: list[str] = [] # collected hex digits
 
     @property
     def partial_svg(self) -> str:
@@ -133,11 +134,25 @@ class _StreamingSvgExtractor:
             if self._state != self._IN:
                 return
             if self._unicode_left > 0:
-                # Mid-\uXXXX escape; just skip the hex chars.  We
-                # already emitted '?' as a placeholder when the \u
-                # was first seen.  Final JSON parse at the end of
-                # streaming recovers the real character.
+                # Mid-\uXXXX escape: collect the hex digit, and when
+                # all 4 are in, decode to the actual character.  The
+                # earlier "emit '?' as placeholder" version leaked
+                # hex digits like "?D7" when downstream code used the
+                # intermediate buffer (the canvas viewer was painting
+                # streamed chunks directly into the iframe before the
+                # final JSON parse could fix things).
+                self._unicode_hex.append(ch)
                 self._unicode_left -= 1
+                if self._unicode_left == 0:
+                    hex_str = "".join(self._unicode_hex)
+                    self._unicode_hex = []
+                    try:
+                        self._svg.append(chr(int(hex_str, 16)))
+                    except ValueError:
+                        # Malformed escape — pass through as literal
+                        # `\uXXXX` so downstream JSON parse can flag
+                        # it.  Better than silently dropping bytes.
+                        self._svg.append("\\u" + hex_str)
                 continue
             if self._escape:
                 if ch == '"':
@@ -157,10 +172,14 @@ class _StreamingSvgExtractor:
                 elif ch == "f":
                     self._svg.append("\f")
                 elif ch == "u":
-                    # 4-hex-digit unicode escape.  Emit a placeholder
-                    # and skip the 4 hex chars.
-                    self._svg.append("?")
+                    # Start of \uXXXX escape — collect the next four
+                    # hex chars in self._unicode_hex; the unicode_left
+                    # branch above emits the decoded char once they
+                    # all arrive.  No placeholder character is emitted
+                    # at this stage so downstream consumers never see
+                    # half-decoded escapes leak through.
                     self._unicode_left = 4
+                    self._unicode_hex = []
                 else:
                     # Unknown escape — pass through.
                     self._svg.append(ch)
@@ -1178,6 +1197,25 @@ async def express_figure(
                 result["svg"] = reflowed
         except Exception as exc:  # noqa: BLE001
             _log(f"reflow_overlapping_text FAILED: {type(exc).__name__}: {exc}")
+
+        # Inspection on streamed SVG: while the LLM was streaming, the
+        # canvas iframe was painting the RAW model output into #stage
+        # via svg_chunk events — including any malformed XML, mis-
+        # placed cells, or undersized container rects.  Now that the
+        # cleaned SVG is ready, emit ONE more svg_chunk with the
+        # post-autofit/reflow version so the iframe ends up showing
+        # the corrected figure even if the reviewer FAILs the attempt
+        # and we then go silent for the retry.  Without this, the
+        # user sat looking at the broken raw stream for the entire
+        # retry window.
+        if on_svg_chunk is not None and stream_this_attempt:
+            try:
+                await on_svg_chunk(result["svg"])
+            except Exception as cb_exc:  # noqa: BLE001
+                _log(
+                    f"final-clean on_svg_chunk raised "
+                    f"{type(cb_exc).__name__}: {cb_exc}"
+                )
 
         # 2a. Cheap deterministic structural review BEFORE the vision
         # call.  Catches failures the vision LLM can't reliably detect

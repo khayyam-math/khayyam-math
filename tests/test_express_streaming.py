@@ -90,14 +90,38 @@ def test_extractor_no_svg_field_means_no_output():
     assert ex.done is False
 
 
-def test_extractor_unicode_escape_emits_placeholder():
-    """\\u escapes are pass-through-friendly: we emit '?' so render
-    doesn't break, the final JSON parse recovers the real character."""
+def test_extractor_unicode_escape_decoded_to_real_char():
+    """\\uXXXX escapes are decoded to the actual character — previously
+    we emitted '?' as a placeholder, but downstream consumers (the
+    canvas viewer painting svg_chunk content into an iframe) leaked
+    the hex digits as e.g. '?D7' for \\u00D7 (×).  Now the streaming
+    extractor produces the same characters as a full JSON parse."""
     ex = _StreamingSvgExtractor()
     ex.feed('{"svg":"a\\u00e9b","x":1}')
-    # The 'a', placeholder for é, then 'b'.
-    assert ex.partial_svg == "a?b"
+    assert ex.partial_svg == "aéb"
     assert ex.done is True
+
+
+def test_extractor_unicode_escape_split_across_chunks():
+    """The four hex digits of \\uXXXX may arrive across multiple
+    feed() calls; the extractor must accumulate them, not emit
+    half-decoded bytes."""
+    ex = _StreamingSvgExtractor()
+    ex.feed('{"svg":"a\\u00')
+    assert ex.partial_svg == "a"   # nothing emitted yet
+    ex.feed("d7b\",x:1}")
+    assert ex.partial_svg == "a×b"
+    assert ex.done is True
+
+
+def test_extractor_malformed_unicode_escape_passes_through():
+    """An invalid \\uXXXX (non-hex) is kept as literal source rather
+    than silently dropped — the downstream JSON parse will flag it."""
+    ex = _StreamingSvgExtractor()
+    ex.feed('{"svg":"a\\uZZZZb","x":1}')
+    assert "a" in ex.partial_svg
+    # The literal "\uZZZZ" or its tail survives somewhere in the buf.
+    assert "uZZZZ" in ex.partial_svg or "\\uZZZZ" in ex.partial_svg
 
 
 def test_extractor_after_close_drops_input():
