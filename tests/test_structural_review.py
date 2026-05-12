@@ -382,3 +382,92 @@ def test_autofit_no_rect_in_group_passes_through():
         '<g><text x="100" y="100">just a label</text></g></svg>'
     )
     assert autofit_group_rects(svg) == svg
+
+
+# ---------------------------------------------------------------------
+# reflow_overlapping_text — greedy 2-D layout pass that nudges
+# top-level <text> elements apart when their bounding boxes collide.
+# ---------------------------------------------------------------------
+
+from studio.express import reflow_overlapping_text
+
+
+def test_reflow_shifts_overlapping_formulas_down():
+    """A long formula at x=20,y=290 overlapping three short formulas
+    on the same y must get the three short ones shifted DOWN until
+    they clear."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="290" font-size="24">'
+        'det(A) = a11.det(M11) - a12.det(M12) + a13.det(M13)</text>'
+        '<text x="300" y="290" font-size="24">det(M11)=a22.a33-a23.a31</text>'
+        '<text x="450" y="290" font-size="24">det(M12)=a21.a33-a23.a32</text>'
+        '<text x="600" y="290" font-size="24">det(M13)=a21.a32-a22.a33</text>'
+        '</svg>'
+    )
+    out = reflow_overlapping_text(svg)
+    import re
+    ys = [int(y) for y in re.findall(r'y="(\d+)"', out)]
+    # First element stays at 290; the next three must each be strictly
+    # below the previous one to avoid mutual overlap.
+    assert ys[0] == 290
+    for prev, cur in zip(ys, ys[1:]):
+        assert cur > prev, f"{ys} not strictly increasing"
+
+
+def test_reflow_leaves_non_overlapping_alone():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="50" y="100" font-size="20">label A</text>'
+        '<text x="50" y="200" font-size="20">label B</text>'
+        '<text x="50" y="300" font-size="20">label C</text>'
+        '</svg>'
+    )
+    assert reflow_overlapping_text(svg) == svg
+
+
+def test_reflow_skips_text_inside_groups():
+    """Matrix cells inside a <g> aren't candidates for reflow — the
+    autofit_group_rects pass + the bordered grid keep them coherent."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="matrix"><rect x="100" y="100" width="200" height="200"/>'
+        '<text x="150" y="150" font-size="24">a</text>'
+        '<text x="150" y="180" font-size="24">b</text>'
+        '</g></svg>'
+    )
+    # Text inside <g> should pass through untouched.
+    out = reflow_overlapping_text(svg)
+    assert 'y="150"' in out and 'y="180"' in out
+
+
+def test_reflow_jumps_to_new_column_when_narrow_text_fits():
+    """Repeated overlaps where the text is NARROW enough to fit a
+    second column should bump elements into x≈500."""
+    items = "".join(
+        f'<text x="20" y="600" font-size="20">label {i}</text>'
+        for i in range(6)
+    )
+    svg = f'<svg viewBox="0 0 900 650">{items}</svg>'
+    out = reflow_overlapping_text(svg)
+    import re
+    xs = [int(x) for x in re.findall(r'x="(\d+)"', out)]
+    assert any(x >= 400 for x in xs), f"no column jump for narrow items: {xs}"
+
+
+def test_reflow_stacks_past_bottom_when_too_wide_for_column2():
+    """When text is too wide to fit in the second column, the reflow
+    accepts a tall figure (canvas viewer has overflow:scroll) rather
+    than leaving the items overlapping each other.  This is the
+    "8 wide formulas at y=600" failure mode."""
+    items = "".join(
+        f'<text x="20" y="600" font-size="24">'
+        f'long formula number {i} that takes a lot of horizontal space</text>'
+        for i in range(5)
+    )
+    svg = f'<svg viewBox="0 0 900 650">{items}</svg>'
+    out = reflow_overlapping_text(svg)
+    import re
+    ys = [int(y) for y in re.findall(r'y="(\d+)"', out)]
+    for prev, cur in zip(ys, ys[1:]):
+        assert cur > prev, f"items still overlap: {ys}"

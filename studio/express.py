@@ -1068,6 +1068,22 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"autofit_group_rects FAILED: {type(exc).__name__}: {exc}")
+        # Second layout pass — reflow top-level <text> elements whose
+        # bounding boxes overlap.  Walks every text in document order,
+        # shifts later ones down (then over to a new column if
+        # needed) until they don't collide with earlier ones.  Handles
+        # the "long formula at x=20,y=290 covers three short formulas
+        # at x=300/450/600,y=290" failure mode the model keeps emitting.
+        try:
+            reflowed = reflow_overlapping_text(result["svg"])
+            if reflowed != result["svg"]:
+                _log(
+                    f"reflow_overlapping_text: rewrote {len(result['svg'])} -> "
+                    f"{len(reflowed)} chars"
+                )
+                result["svg"] = reflowed
+        except Exception as exc:  # noqa: BLE001
+            _log(f"reflow_overlapping_text FAILED: {type(exc).__name__}: {exc}")
 
         # 2a. Cheap deterministic structural review BEFORE the vision
         # call.  Catches failures the vision LLM can't reliably detect
@@ -1575,6 +1591,200 @@ def autofit_group_rects(svg: str) -> str:
 
     group_pattern = re.compile(r'<g\b[^>]*>.*?</g>', re.S)
     return group_pattern.sub(_resize_group, svg)
+
+
+def reflow_overlapping_text(svg: str) -> str:
+    """Greedy 2-D layout pass that nudges top-level <text> elements
+    apart when their bounding boxes overlap.
+
+    The LLM frequently places multiple text elements at the SAME y
+    in a row, not realising the leftmost one is long enough to run
+    UNDER the others (e.g. a 60-character formula at x=20,y=290
+    overlapping three short formulas at x=300/450/600,y=290).  This
+    pass:
+
+      1. Parses every top-level <text> (those NOT inside a <g>) with
+         estimated bbox (anchor-aware, font-size-aware, 0.6em width).
+      2. Walks them in document order.  For each, if its bbox
+         intersects ANY previously-placed text's bbox, shifts it
+         down (y += dy) by just enough to clear, in 4-px increments.
+      3. If the shift would push the text past viewBox_height-20,
+         instead REWRITES x to start a new column (x += 480) and
+         resets y back to the topmost unused row in that column.
+
+    Idempotent — already-clean layouts pass through unchanged.
+    Tolerates single- AND double-quoted SVG attributes.  Errors are
+    swallowed by the caller so a layout bug never blocks a figure.
+    """
+    import re
+
+    # Reuse the dual-quote parser.
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    # Pull viewBox so we know the canvas bounds.
+    vb_match = re.search(
+        r'<svg\b[^>]*?\bviewBox\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+        svg, re.S,
+    )
+    if not vb_match:
+        return svg
+    vb_raw = vb_match.group(1) if vb_match.group(1) is not None else vb_match.group(2)
+    try:
+        parts = vb_raw.replace(",", " ").split()
+        vb_x, vb_y, vb_w, vb_h = (float(parts[0]), float(parts[1]),
+                                   float(parts[2]), float(parts[3]))
+    except (ValueError, IndexError):
+        return svg
+
+    # Identify which character ranges in svg are inside <g>…</g> so we
+    # skip those — autofit_group_rects already handles them and they
+    # carry their own logical layout (e.g. matrix cells inside a
+    # bordered grid).  We only reflow TOP-LEVEL text.
+    g_ranges: list[tuple[int, int]] = []
+    depth = 0
+    for m in re.finditer(r'<g\b[^>]*>|</g>', svg, re.S):
+        if m.group(0).startswith("</"):
+            depth -= 1
+            if depth == 0:
+                # close range started at start
+                start = g_ranges[-1][0] if g_ranges and g_ranges[-1][1] == -1 else None
+                if start is not None:
+                    g_ranges[-1] = (start, m.end())
+        else:
+            if depth == 0:
+                g_ranges.append((m.start(), -1))
+            depth += 1
+    g_ranges = [r for r in g_ranges if r[1] != -1]
+
+    def _in_group(pos: int) -> bool:
+        for s, e in g_ranges:
+            if s <= pos < e:
+                return True
+        return False
+
+    PAD = 4.0       # min separation between text bboxes
+    STEP = 4.0      # shift increment
+    COL_DX = 480.0  # second-column x offset
+    TOP_MARGIN = 30.0
+    BOT_MARGIN = 20.0
+
+    # Walk every <text> tag.  Skip those inside <g> groups.
+    text_pattern = re.compile(
+        r'<text\b[^>]*>([^<]*)</text>', re.S,
+    )
+    matches = list(text_pattern.finditer(svg))
+    placed: list[tuple[float, float, float, float]] = []  # (x, y, w, h) in bbox form
+    edits: list[tuple[int, int, str]] = []  # (start, end, new_tag)
+
+    for m in matches:
+        if _in_group(m.start()):
+            continue
+        head = m.group(0).split('>', 1)[0] + '>'
+        a = _attrs(head)
+        try:
+            tx = float(a.get("x", ""))
+            ty = float(a.get("y", ""))
+        except ValueError:
+            continue
+        content = m.group(1).strip()
+        if not content:
+            continue
+        try:
+            fs = float(a.get("font-size", "16").rstrip("pxptem"))
+        except ValueError:
+            fs = 16.0
+        anchor = (a.get("text-anchor") or "start").lower()
+        est_w = max(len(content), 1) * fs * 0.6
+        # Anchor-aware bbox.
+        if anchor == "middle":
+            x0 = tx - est_w / 2
+        elif anchor == "end":
+            x0 = tx - est_w
+        else:
+            x0 = tx
+        h = fs * 1.2
+        y0 = ty - fs * 0.9
+
+        # Greedy shift to avoid overlap.
+        cur_x, cur_y = tx, ty
+        new_x0, new_y0 = x0, y0
+        max_iters = 400
+        for _ in range(max_iters):
+            overlap = False
+            for px, py, pw, ph in placed:
+                # Reject if bboxes overlap with PAD margin.
+                if (new_x0 < px + pw + PAD and new_x0 + est_w + PAD > px
+                        and new_y0 < py + ph + PAD and new_y0 + h + PAD > py):
+                    overlap = True
+                    # Compute minimum y-shift to clear THIS placed box.
+                    dy = (py + ph + PAD) - new_y0
+                    new_y0 += dy
+                    cur_y += dy
+                    break
+            if not overlap:
+                break
+            # If shifting down ran past the viewBox bottom, prefer to
+            # jump into a second column when the text can FIT there.
+            # When the text is too wide for the second column, KEEP
+            # stacking past the bottom — the canvas viewer has
+            # overflow:scroll so a tall figure is preferable to
+            # overlapping text.
+            if new_y0 + h > vb_y + vb_h - BOT_MARGIN:
+                if cur_x < vb_x + vb_w * 0.4:
+                    # We're still in the left column; try column 2.
+                    trial_x = cur_x + COL_DX
+                    if anchor == "middle":
+                        trial_x0 = trial_x - est_w / 2
+                    elif anchor == "end":
+                        trial_x0 = trial_x - est_w
+                    else:
+                        trial_x0 = trial_x
+                    if trial_x0 + est_w <= vb_x + vb_w + 5:
+                        cur_x = trial_x
+                        cur_y = vb_y + TOP_MARGIN + fs * 0.9
+                        new_x0 = trial_x0
+                        new_y0 = cur_y - fs * 0.9
+                        # Loop back; the new position will be re-checked.
+                        continue
+                # Either we're already in column 2, OR column 2 can't
+                # hold this width.  Accept the current y (which may be
+                # past the viewBox bottom) — overflow:scroll on the
+                # canvas viewer's <main> will let the user scroll.
+
+        placed.append((new_x0, new_y0, est_w, h))
+        if abs(cur_x - tx) < 0.5 and abs(cur_y - ty) < 0.5:
+            continue
+        # Rewrite the x/y attributes of THIS tag.
+        new_head = head
+        def _set(attr: str, val: float, tag: str) -> str:
+            new = f'{attr}="{val:.0f}"'
+            pat_dq = re.compile(rf'\b{attr}\s*=\s*"[^"]*"')
+            pat_sq = re.compile(rf"\b{attr}\s*=\s*'[^']*'")
+            if pat_dq.search(tag):
+                return pat_dq.sub(new, tag, count=1)
+            if pat_sq.search(tag):
+                return pat_sq.sub(new, tag, count=1)
+            return re.sub(r'>$', f' {new}>', tag, count=1)
+        new_head = _set("x", cur_x, new_head)
+        new_head = _set("y", cur_y, new_head)
+        edits.append((m.start(), m.start() + len(head), new_head))
+
+    if not edits:
+        return svg
+    # Apply edits from RIGHT to LEFT so prior offsets stay valid.
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for start, end, repl in edits:
+        out = out[:start] + repl + out[end:]
+    return out
 
 
 def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
