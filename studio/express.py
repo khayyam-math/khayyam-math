@@ -796,7 +796,9 @@ async def generate_theory_primer(
     def _log(msg: str) -> None:
         print(f"[primer] {msg}", flush=True, file=_sys.stderr)
 
+    _log(f"start prompt={user_prompt[:60]!r} model={model} url={base_url}")
     full: list[str] = []
+    chunks_emitted = 0
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             async with client.stream(
@@ -831,6 +833,7 @@ async def generate_theory_primer(
                     if on_text_chunk is not None:
                         try:
                             await on_text_chunk(delta)
+                            chunks_emitted += 1
                         except Exception as cb_exc:  # noqa: BLE001
                             _log(
                                 f"on_text_chunk raised "
@@ -840,7 +843,9 @@ async def generate_theory_primer(
         _log(f"primer call failed: {type(exc).__name__}: {exc}")
         return ""
 
-    return "".join(full)
+    out = "".join(full)
+    _log(f"done total_len={len(out)} chunks_emitted={chunks_emitted}")
+    return out
 
 
 # ── Pipeline entry point ──────────────────────────────────────────────────
@@ -1076,9 +1081,28 @@ async def express_figure(
 
     # Loop exited with a still-failing figure — return last attempt anyway.
     # No repair pair recorded: nothing was actually corrected.
+    #
+    # Salvage step: if the retry over-corrected the narration (e.g.,
+    # collapsed it from 6 phrases to 1 in an attempt to fix factual
+    # errors flagged by the reviewer), prefer the earlier attempt's
+    # narration so the spoken explanation stays substantial.  The SVG
+    # itself is always the latest attempt — only the narration is
+    # swapped.  This is what fixes the "I heard just the end of the
+    # narrative" failure mode: the retry's 1-phrase narration plays
+    # for 5 seconds and is gone before the learner registered audio.
+    last_narration = result.get("narration") or []
+    if prev_fail is not None and len(last_narration) < 3:
+        _, prev_narration, _ = prev_fail
+        if len(prev_narration) >= 3 and len(prev_narration) > len(last_narration):
+            _log(
+                f"narration salvage: last attempt had "
+                f"{len(last_narration)} phrase(s); falling back to the "
+                f"previous attempt's {len(prev_narration)}-phrase narration"
+            )
+            last_narration = prev_narration
     return {
         "svg": result.get("svg", ""),
-        "narration": result.get("narration") or [],
+        "narration": last_narration,
         "title": result.get("title") or "",
         "review_history": review_history,
         "retries_used": max_retries,

@@ -250,6 +250,19 @@
        Power users can still see it on desktop / on the standalone
        /canvas/<id>/view page. */
     .chat-header #canvas-badge { display: none; }
+    /* One-shot pulse when a new figure arrives: outline the canvas
+       pane in the accent colour for ~700ms so the learner notices
+       the figure even if they're reading the primer below.  The
+       class is added by sendMessage's tool_result handler and
+       auto-removed on animationend. */
+    .canvas-pane.figure-arrived {
+      animation: figureArrive 700ms ease-out;
+    }
+    @keyframes figureArrive {
+      0%   { box-shadow: inset 0 0 0 3px var(--accent); }
+      70%  { box-shadow: inset 0 0 0 3px var(--accent); }
+      100% { box-shadow: inset 0 0 0 0px var(--accent); }
+    }
     .chat-log { padding: 0.5em 0.6em; }
     .msg { font-size: 1em; max-width: 92%; }
     .msg.tool { font-size: 0.78em; }
@@ -796,6 +809,27 @@
                 // split.  Setting it once is enough — the class
                 // persists for the lifetime of the session.
                 document.body.classList.add('has-canvas');
+                // Mobile-only nudge: when the figure arrives the user
+                // is typically still reading the streamed primer below,
+                // so the canvas at the top of the viewport is out of
+                // sight.  Scroll the canvas-pane into view and pulse
+                // it briefly so the new figure isn't missed.  The
+                // 'figure-arrived' class drives a one-shot keyframe
+                // animation defined in CSS; it's auto-removed on
+                // animationend so a subsequent new canvas re-fires it.
+                if (window.matchMedia('(max-width: 900px)').matches) {
+                  const pane = document.querySelector('.canvas-pane');
+                  if (pane) {
+                    pane.scrollIntoView({behavior: 'smooth', block: 'start'});
+                    pane.classList.remove('figure-arrived');
+                    void pane.offsetWidth;  // force reflow so re-add restarts the animation
+                    pane.classList.add('figure-arrived');
+                    pane.addEventListener('animationend', function _h() {
+                      pane.classList.remove('figure-arrived');
+                      pane.removeEventListener('animationend', _h);
+                    });
+                  }
+                }
                 if (canvasBadge) canvasBadge.textContent = canvasId;
                 // Stash the canvasId on the assistant element so the pin
                 // button (added on 'done') knows which canvas to pin.
