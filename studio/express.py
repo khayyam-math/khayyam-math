@@ -1266,6 +1266,20 @@ async def express_figure(
         # needed) until they don't collide with earlier ones.  Handles
         # the "long formula at x=20,y=290 covers three short formulas
         # at x=300/450/600,y=290" failure mode the model keeps emitting.
+        # Auto-wrap over-wide text into multiple stacked lines.  Runs
+        # AFTER autofit/matrix-grid (so group sizing is settled) but
+        # BEFORE reflow_overlapping_text (so the wrapped lines are
+        # treated as separate elements by reflow).
+        try:
+            fixed_svg = wrap_overlong_text(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"wrap_overlong_text: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"wrap_overlong_text FAILED: {type(exc).__name__}: {exc}")
         try:
             reflowed = reflow_overlapping_text(result["svg"])
             if reflowed != result["svg"]:
@@ -1896,6 +1910,162 @@ def clamp_group_transforms(svg: str) -> str:
     return out
 
 
+def wrap_overlong_text(svg: str) -> str:
+    """Split any `<text>` whose estimated rendered width exceeds the
+    available horizontal space into multiple stacked `<text>`
+    elements (word-broken).
+
+    Estimated width per char = 0.6 × font-size (em).  Available width
+    = viewBox width − x (anchor position) − safe margin (20 px).  If
+    width exceeds available, find the WORD boundary closest to but
+    not over the available width, emit a new <text> with the prefix,
+    move the remaining suffix to a new <text> at the same x, y + 1.2
+    × font-size.  Repeats until the suffix fits.
+
+    Only operates on TOP-LEVEL text elements (skips inside <g>) so
+    matrix cells and labelled diagram elements aren't mangled.
+    Preserves id, font-size, font-family attributes on every produced
+    text fragment (id is replaced with `<id>_wrap_<n>` for fragments
+    2+ to keep ids unique).
+    """
+    import re
+
+    vb_match = re.search(
+        r'<svg\b[^>]*?\bviewBox\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+        svg, re.S,
+    )
+    if not vb_match:
+        return svg
+    vb_raw = vb_match.group(1) if vb_match.group(1) is not None else vb_match.group(2)
+    try:
+        parts = vb_raw.replace(",", " ").split()
+        vb_x, vb_y = float(parts[0]), float(parts[1])
+        vb_w, vb_h = float(parts[2]), float(parts[3])
+    except (ValueError, IndexError):
+        return svg
+
+    RIGHT_MARGIN = 20.0
+    MAX_LINES = 4
+    WIDTH_FACTOR = 0.6
+
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    # Track <g> ranges so we skip group-internal text.
+    g_ranges: list[tuple[int, int]] = []
+    depth = 0
+    start = -1
+    for m in re.finditer(r'<g\b[^>]*>|</g>', svg, re.S):
+        if m.group(0).startswith("</"):
+            depth -= 1
+            if depth == 0 and start >= 0:
+                g_ranges.append((start, m.end()))
+                start = -1
+        else:
+            if depth == 0:
+                start = m.start()
+            depth += 1
+
+    def _in_group(pos: int) -> bool:
+        for s, e in g_ranges:
+            if s <= pos < e:
+                return True
+        return False
+
+    edits: list[tuple[int, int, str]] = []
+    text_re = re.compile(r'<text\b[^>]*?>([^<]+)</text>', re.S)
+    for m in text_re.finditer(svg):
+        if _in_group(m.start()):
+            continue
+        full_tag = m.group(0)
+        head = full_tag.split('>', 1)[0] + '>'
+        a = _attrs(head)
+        try:
+            x = float(a.get("x", ""))
+            y = float(a.get("y", ""))
+        except ValueError:
+            continue
+        try:
+            fs = float(a.get("font-size", "16").rstrip("pxptem"))
+        except ValueError:
+            fs = 16.0
+        content = m.group(1).strip()
+        if not content:
+            continue
+        anchor = (a.get("text-anchor") or "start").lower()
+        est_w = len(content) * fs * WIDTH_FACTOR
+        # Available width depends on anchor: for start, the text
+        # extends right from x; for middle, both ways; for end, left.
+        # Wrap is only meaningful when text starts at the left, so
+        # we limit this pass to text-anchor=start (the default).
+        if anchor != "start":
+            continue
+        avail = vb_x + vb_w - RIGHT_MARGIN - x
+        if est_w <= avail or avail < 80:
+            continue
+        # Need to wrap.  Find word-boundary breakpoints.
+        words = content.split()
+        if len(words) <= 1:
+            continue  # one-word too-wide text can't be wrapped sanely
+        line_w_chars = max(1, int(avail / (fs * WIDTH_FACTOR)))
+        lines: list[str] = []
+        cur: list[str] = []
+        cur_len = 0
+        for w in words:
+            wlen = len(w) + (1 if cur else 0)
+            if cur_len + wlen > line_w_chars and cur:
+                lines.append(" ".join(cur))
+                cur = [w]
+                cur_len = len(w)
+            else:
+                cur.append(w)
+                cur_len += wlen
+        if cur:
+            lines.append(" ".join(cur))
+        # Cap at MAX_LINES; if more would be needed, ellipsise the
+        # last fragment.
+        if len(lines) > MAX_LINES:
+            lines = lines[:MAX_LINES - 1] + [lines[MAX_LINES - 1] + " …"]
+        if len(lines) <= 1:
+            continue  # nothing to do
+        # Emit one <text> per line, stepping y by 1.25*fs.
+        line_dy = fs * 1.25
+        attrs_serialized = head[len("<text"):-1]  # everything inside <text...>
+        # Strip the existing x, y, and id (we'll re-insert per line).
+        attrs_no_xyid = re.sub(
+            r'\b(?:x|y|id)\s*=\s*(?:"[^"]*"|\'[^\']*\')\s*',
+            '',
+            attrs_serialized,
+        ).strip()
+        # The text-anchor and font-size etc remain.
+        base_id = a.get("id", "")
+        new_lines = []
+        for i, line in enumerate(lines):
+            ly = y + i * line_dy
+            line_id = base_id if i == 0 else f"{base_id}_wrap_{i}"
+            id_attr = f' id="{line_id}"' if base_id else ""
+            new_lines.append(
+                f'<text x="{x:.0f}" y="{ly:.0f}"{id_attr} {attrs_no_xyid}>{line}</text>'
+            )
+        # Replace the entire original <text>...</text> match.
+        edits.append((m.start(), m.end(), "\n".join(new_lines)))
+
+    if not edits:
+        return svg
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for s, e, repl in edits:
+        out = out[:s] + repl + out[e:]
+    return out
+
+
 def clamp_text_to_viewbox(svg: str) -> str:
     """Pull every <text> back inside the SVG's viewBox.  The model
     occasionally places section headers at y = -36 or y = -10 hoping
@@ -2144,14 +2314,19 @@ def autofit_group_rects(svg: str) -> str:
             x1 = max(x1, bx + bw); y1 = max(y1, by + bh)
         if x0 == float("inf"):
             return inner
-        # Required rect bounds.
-        need_x = min(rx, x0 - PAD)
-        need_y = min(ry, y0 - PAD)
-        need_w = max(rx + rw, x1 + PAD) - need_x
-        need_h = max(ry + rh, y1 + PAD) - need_y
-        # Only touch the rect if children actually overflow it.
-        if (need_x >= rx and need_y >= ry
-                and need_w <= rw + 0.5 and need_h <= rh + 0.5):
+        # Required rect bounds: WRAP the children with PAD-px margin
+        # on each side.  Both shrinks (rect too big) AND expands (rect
+        # too small) — previously we only expanded, which left huge
+        # empty boxes around small matrices.
+        need_x = x0 - PAD
+        need_y = y0 - PAD
+        need_w = (x1 + PAD) - need_x
+        need_h = (y1 + PAD) - need_y
+        # Only touch the rect if the difference is meaningful (≥2 px
+        # on either axis or ≥10 px on either dimension).  Sub-pixel
+        # noise from glyph-width estimates doesn't merit a rewrite.
+        if (abs(need_x - rx) < 2 and abs(need_y - ry) < 2
+                and abs(need_w - rw) < 10 and abs(need_h - rh) < 10):
             return inner
         # Rewrite the rect's x/y/width/height while preserving every
         # other attribute exactly (stroke, fill, id, etc).

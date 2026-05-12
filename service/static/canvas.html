@@ -770,8 +770,15 @@
     highlightWord(words[wi]);
   }
 
+  // tickWord (the karaoke-style per-word highlighter) was a bad fit:
+  // it linearly interpolated word indexes across the phrase duration
+  // and substring-matched them anywhere in the figure, producing
+  // visually "random" highlights (a₁₁ flashing while the narrator
+  // says "is", "the", etc.).  Disabled; phrase-level highlight via
+  // tickHighlight already targets the explicit highlight ids the
+  // model returned, which is the right granularity.
   audio.addEventListener('timeupdate', () => {
-    tickHighlight(); tickReveal(); tickWord();
+    tickHighlight(); tickReveal();
   });
   audio.addEventListener('ended', () => {
     activePhraseIndex = -1;

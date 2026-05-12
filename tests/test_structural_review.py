@@ -346,18 +346,43 @@ def test_autofit_grows_undersized_matrix_rect():
     assert ry + rh >= 340
 
 
-def test_autofit_leaves_correctly_sized_rect_alone():
-    """A group whose rect already contains its children is untouched."""
+def test_autofit_shrinks_oversized_rect_around_small_content():
+    """When the rect is much larger than its children's bbox, shrink
+    it down — the previous "leave it alone" behaviour left huge empty
+    boxes around small matrices and was the source of a user
+    complaint ("the boxes around the matrices are huge")."""
     svg = (
         '<svg viewBox="0 0 900 650">'
-        '<g id="ok">'
-        '<rect x="50" y="50" width="500" height="500"/>'
-        '<text x="100" y="100">small label</text>'
+        '<g id="m">'
+        '<rect x="50" y="50" width="500" height="400" stroke="black"/>'
+        '<text x="100" y="100">a</text>'
+        '<text x="150" y="100">b</text>'
         '</g></svg>'
     )
     fixed = autofit_group_rects(svg)
-    # Idempotent — same SVG out.
-    assert fixed == svg
+    import re
+    m = re.search(r'<rect[^>]*width="(\d+)"[^>]*height="(\d+)"', fixed)
+    assert m, fixed
+    w, h = int(m.group(1)), int(m.group(2))
+    # Should be much smaller than 500x400 — the content only spans
+    # ~50 px wide and ~16 px tall.
+    assert w < 200, f"rect width {w} still too big"
+    assert h < 100, f"rect height {h} still too big"
+
+
+def test_autofit_idempotent_on_tightly_wrapped_rect():
+    """A rect already padded around its children stays unchanged."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="m">'
+        '<rect x="80" y="68" width="100" height="55"/>'
+        '<text x="100" y="100">a</text>'
+        '<text x="150" y="100">b</text>'
+        '</g></svg>'
+    )
+    fixed = autofit_group_rects(svg)
+    # Should be stable: re-running yields the same SVG.
+    assert autofit_group_rects(fixed) == fixed
 
 
 def test_autofit_handles_single_quoted_attrs():
