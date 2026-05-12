@@ -161,6 +161,18 @@
      "(x + y + z)" or the "b² - 4ac" discriminant inside a longer
      equation.  Without this rule a tspan with .sevim-highlight would
      inherit the parent text colour and the user's eye gets no cue. */
+  /* Karaoke-style word-level highlight — driven by tickWord() in the
+     script below.  Brighter than the phrase highlight so the eye
+     tracks the currently-spoken word even while a larger phrase
+     highlight is active.  No animation: the word changes every
+     ~0.3s on average, an infinite pulse would be visual noise. */
+  #stage svg tspan.sevim-word {
+    fill: #d97706 !important;        /* darker amber */
+    font-weight: 800 !important;
+    text-decoration: underline;
+    text-decoration-thickness: 1.5px;
+    text-decoration-color: #d97706;
+  }
   #stage svg tspan.sevim-highlight,
   #stage svg .sevim-highlight tspan {
     fill: var(--highlight) !important;
@@ -648,9 +660,123 @@
     applyHighlight(idx >= 0 ? narration.phrases[idx].highlight : null);
   }
 
-  audio.addEventListener('timeupdate', () => { tickHighlight(); tickReveal(); });
+  // ── Word-level highlighting ────────────────────────────────────
+  // OpenAI tts-1 doesn't expose per-word timestamps, so we estimate
+  // them client-side: split each phrase's spoken text into words,
+  // distribute the phrase duration evenly across them, then on each
+  // audio timeupdate find the active word and underline its first
+  // matching occurrence anywhere in the figure (including the
+  // explanatory paragraph below the diagram).  This gives the
+  // learner a karaoke-style read-along without requiring a TTS
+  // upgrade.
+  //
+  // Tunable: WORD_MIN_LEN — words shorter than this aren't worth
+  // highlighting (articles, "to", "is", etc.).  Keeps the focus on
+  // content words.
+  const WORD_MIN_LEN = 3;
+  let _wordPhraseIdx = -1;
+  let _wordIdx = -1;
+  let _wordWrap = null;     // current <tspan class="sevim-word"> reference
+
+  function _stripPunct(s) {
+    return s.replace(/^[\s\W_]+|[\s\W_]+$/g, '');
+  }
+
+  function _phraseWords(phrase) {
+    // Cache parsed word list on the phrase object so we don't
+    // re-split every timeupdate.
+    if (phrase._words) return phrase._words;
+    const raw = (phrase.text || phrase.speak || '').split(/\s+/);
+    const cleaned = raw.map(_stripPunct).filter(w => w.length >= WORD_MIN_LEN);
+    phrase._words = cleaned;
+    return cleaned;
+  }
+
+  function clearWordHighlight() {
+    if (_wordWrap && _wordWrap.parentNode) {
+      const parent = _wordWrap.parentNode;
+      parent.replaceChild(
+        document.createTextNode(_wordWrap.textContent), _wordWrap,
+      );
+      parent.normalize();
+    }
+    _wordWrap = null;
+  }
+
+  function highlightWord(word) {
+    clearWordHighlight();
+    if (!word) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    // Scan every <text> for the first occurrence of the word.  Skip
+    // text nodes that already live inside our own .sevim-word tspan
+    // (paranoia after a torn-down highlight).
+    const texts = stage.querySelectorAll('text');
+    const lc = word.toLowerCase();
+    for (const t of texts) {
+      // Prefer direct-text-node match so we don't mangle existing
+      // <tspan> structure (subscripts, baseline-shifts).
+      for (const ch of t.childNodes) {
+        if (ch.nodeType !== 3 /* TEXT_NODE */) continue;
+        const txt = ch.textContent;
+        // Find a whole-word match (preceded and followed by non-word
+        // characters or string boundary).
+        const re = new RegExp('(^|[^\\w])(' + word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + ')(?![\\w])', 'i');
+        const m = re.exec(txt);
+        if (!m) continue;
+        const start = m.index + m[1].length;
+        const end = start + m[2].length;
+        const before = txt.slice(0, start);
+        const matched = txt.slice(start, end);
+        const after = txt.slice(end);
+        const tsp = document.createElementNS(NS, 'tspan');
+        tsp.setAttribute('class', 'sevim-word');
+        tsp.textContent = matched;
+        const parent = ch.parentNode;
+        if (before) parent.insertBefore(document.createTextNode(before), ch);
+        parent.insertBefore(tsp, ch);
+        if (after) parent.insertBefore(document.createTextNode(after), ch);
+        parent.removeChild(ch);
+        _wordWrap = tsp;
+        return;
+      }
+    }
+  }
+
+  function tickWord() {
+    if (!narration || !narration.phrases) return;
+    const t = audio.currentTime;
+    let pi = -1;
+    for (let i = 0; i < narration.phrases.length; i++) {
+      const p = narration.phrases[i];
+      if (t >= p.start_s && t < p.end_s) { pi = i; break; }
+    }
+    if (pi < 0) {
+      if (_wordWrap) clearWordHighlight();
+      _wordPhraseIdx = -1; _wordIdx = -1;
+      return;
+    }
+    const phrase = narration.phrases[pi];
+    const words = _phraseWords(phrase);
+    if (!words.length) {
+      if (_wordWrap) clearWordHighlight();
+      return;
+    }
+    const dur = Math.max(0.001, phrase.end_s - phrase.start_s);
+    const frac = Math.min(1, Math.max(0, (t - phrase.start_s) / dur));
+    const wi = Math.min(words.length - 1, Math.floor(frac * words.length));
+    if (pi === _wordPhraseIdx && wi === _wordIdx) return;
+    _wordPhraseIdx = pi;
+    _wordIdx = wi;
+    highlightWord(words[wi]);
+  }
+
+  audio.addEventListener('timeupdate', () => {
+    tickHighlight(); tickReveal(); tickWord();
+  });
   audio.addEventListener('ended', () => {
     activePhraseIndex = -1;
+    _wordPhraseIdx = -1; _wordIdx = -1;
+    clearWordHighlight();
     clearHighlight();
   });
 
