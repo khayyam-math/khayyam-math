@@ -2004,7 +2004,13 @@ def wrap_overlong_text(svg: str) -> str:
     edits: list[tuple[int, int, str]] = []
     text_re = re.compile(r'<text\b[^>]*?>([^<]+)</text>', re.S)
     for m in text_re.finditer(svg):
-        if _in_group(m.start()):
+        # Skip text inside <g> ONLY when the content is short
+        # (likely a matrix cell or labelled token — shouldn't wrap).
+        # Long prose inside semantic groups (a conclusion paragraph
+        # under <g id="discussion">, a step inside a <g id="step_3">)
+        # MUST still be wrapped when too wide.
+        is_inside_group = _in_group(m.start())
+        if is_inside_group and len(m.group(1).strip()) < 30:
             continue
         full_tag = m.group(0)
         head = full_tag.split('>', 1)[0] + '>'
