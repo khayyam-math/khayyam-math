@@ -489,6 +489,120 @@
     stage.querySelectorAll('.sevim-highlight').forEach(el => {
       el.classList.remove('sevim-highlight');
     });
+    // Substring highlighter creates ad-hoc <tspan class="sevim-substr"
+    // sevim-highlight"> wrappers; tear them down by joining their
+    // text content back into the parent <text> so the next phrase's
+    // wrap operation starts from clean text.
+    stage.querySelectorAll('tspan.sevim-substr').forEach(sp => {
+      const parent = sp.parentNode;
+      if (!parent) return;
+      // Replace this tspan with a plain text node carrying the same
+      // content; merge with adjacent text nodes afterwards.
+      parent.replaceChild(
+        document.createTextNode(sp.textContent), sp,
+      );
+      parent.normalize();
+    });
+  }
+
+  // Map LaTeX-style subscript tokens (a_11, M_{1,2}) to the Unicode
+  // form the model often emits in SVG text (a₁₁, M₁,₂).  Used by the
+  // substring fallback so a narration highlight "a_11" can find
+  // "a₁₁" in a rendered formula.
+  const SUB_DIGITS = ['₀','₁','₂','₃','₄','₅','₆','₇','₈','₉'];
+  const SUP_DIGITS = ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹'];
+  function toUnicodeSub(s) {
+    return s.replace(/_\{([0-9,]+)\}|_([0-9]+)/g, (_, br, plain) =>
+      [...(br || plain)].map(c =>
+        c >= '0' && c <= '9' ? SUB_DIGITS[+c] : c,
+      ).join('')
+    );
+  }
+  function toUnicodeSup(s) {
+    return s.replace(/\^\{([0-9]+)\}|\^([0-9])/g, (_, br, plain) =>
+      [...(br || plain)].map(c =>
+        c >= '0' && c <= '9' ? SUP_DIGITS[+c] : c,
+      ).join('')
+    );
+  }
+
+  // Wrap the FIRST occurrence of ``needle`` inside ``textEl`` in a
+  // <tspan class="sevim-substr sevim-highlight">.  Walks every text
+  // node child (skipping existing <tspan> that already have ids to
+  // avoid breaking semantic structure) and finds the contiguous
+  // match.  Returns true if a wrap happened.
+  function wrapSubstringInText(textEl, needle) {
+    if (!needle) return false;
+    const NS = 'http://www.w3.org/2000/svg';
+    // Only consider direct text-node children; mixed-content with
+    // existing <tspan> structure isn't wrapped to avoid mangling
+    // the model's intended subscript formatting.
+    let textNode = null;
+    for (const ch of textEl.childNodes) {
+      if (ch.nodeType === 3 /* TEXT_NODE */) {
+        if (ch.textContent.includes(needle)) {
+          textNode = ch;
+          break;
+        }
+      }
+    }
+    if (!textNode) {
+      // Fallback: textEl has only one composite textContent; replace
+      // its content with three children (before, tspan, after).
+      const full = textEl.textContent;
+      const i = full.indexOf(needle);
+      if (i < 0 || textEl.children.length > 0) return false;
+      textEl.textContent = '';
+      if (i > 0) textEl.appendChild(document.createTextNode(full.slice(0, i)));
+      const tsp = document.createElementNS(NS, 'tspan');
+      tsp.setAttribute('class', 'sevim-substr sevim-highlight');
+      tsp.textContent = needle;
+      textEl.appendChild(tsp);
+      if (i + needle.length < full.length) {
+        textEl.appendChild(document.createTextNode(full.slice(i + needle.length)));
+      }
+      return true;
+    }
+    const text = textNode.textContent;
+    const i = text.indexOf(needle);
+    const before = text.slice(0, i);
+    const after = text.slice(i + needle.length);
+    const tsp = document.createElementNS(NS, 'tspan');
+    tsp.setAttribute('class', 'sevim-substr sevim-highlight');
+    tsp.textContent = needle;
+    const parent = textNode.parentNode;
+    if (before) parent.insertBefore(document.createTextNode(before), textNode);
+    parent.insertBefore(tsp, textNode);
+    if (after) parent.insertBefore(document.createTextNode(after), textNode);
+    parent.removeChild(textNode);
+    return true;
+  }
+
+  // Substring fallback: try the id verbatim and three normalised
+  // variants (Unicode subscript, Unicode superscript, both).  Walk
+  // every <text> in the stage and wrap the FIRST match in each.
+  function highlightAllSubstringMatches(needle) {
+    if (!needle) return false;
+    const candidates = new Set([
+      needle,
+      toUnicodeSub(needle),
+      toUnicodeSup(needle),
+      toUnicodeSup(toUnicodeSub(needle)),
+    ]);
+    let any = false;
+    const texts = stage.querySelectorAll('text');
+    for (const t of texts) {
+      // Skip if this text already lit up via id match — avoids
+      // double-highlighting the same element.
+      if (t.classList.contains('sevim-highlight')) continue;
+      for (const c of candidates) {
+        if (c && wrapSubstringInText(t, c)) {
+          any = true;
+          break;
+        }
+      }
+    }
+    return any;
   }
 
   function applyHighlight(target) {
@@ -504,6 +618,15 @@
       const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"], [id="${cssEscape(id)}"]`;
       const elems = stage.querySelectorAll(sel);
       elems.forEach(el => el.classList.add('sevim-highlight'));
+      // Character-level fallback: even when an id matched, ALSO
+      // scan every <text> for substring occurrences of the id (or
+      // its Unicode-normalised form).  The model frequently
+      // highlights "a_11" but the text "a₁₁" appears in multiple
+      // places (matrix cell + formula + caption); wrapping each
+      // occurrence in a tspan lights them all up together so the
+      // learner's eye lands on the same symbol no matter where it
+      // lives in the figure.
+      highlightAllSubstringMatches(id);
     }
   }
 

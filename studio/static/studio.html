@@ -369,6 +369,29 @@
   // clean conversation and a clean canvas slot, so the user never gets
   // an old figure replayed silently.
   let canvasId = null;
+
+  // ── Canvas-restore on visibility change ─────────────────────────
+  // iOS Safari (and any tab the OS decides to swap out) frequently
+  // discards the <iframe>'s loaded document while keeping the rest
+  // of the page alive — when the user comes back the iframe is
+  // visible but empty.  We close that gap by re-loading the canvas
+  // whenever the document becomes visible AND we still remember
+  // its canvas_id but the iframe doesn't have it loaded.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!canvasId) return;
+    const expected = '/canvas/' + canvasId + '/view';
+    try {
+      const cur = (frame && frame.src) || '';
+      if (cur.indexOf(expected) < 0 || cur.endsWith('about:blank')) {
+        frame.src = expected;
+      }
+      frame.style.display = 'block';
+      const ph = document.getElementById('placeholder');
+      if (ph) ph.style.display = 'none';
+      document.body.classList.add('has-canvas');
+    } catch (_) { /* iframe not ready yet */ }
+  });
   let history = [];           // [{role, content}, ...]
   // Canvas IDs the user has pinned with the 📌 button on prior asst
   // messages.  Sent to Studio with each new prompt so gpt-4o sees the
