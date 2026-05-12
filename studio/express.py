@@ -986,7 +986,14 @@ async def express_figure(
         # figure mid-correction.  The non-streaming branch matches
         # the original behaviour for any caller that didn't supply a
         # chunk callback.
-        stream_this_attempt = on_svg_chunk is not None and attempt == 0
+        # Stream every attempt — including retries — so the learner
+        # always sees the figure being redrawn instead of staring at
+        # the (failed) first attempt for 30+ seconds while the retry
+        # runs invisibly.  The earlier first-attempt-only gate was a
+        # defensive choice from when streaming was new; the canvas
+        # iframe already swaps content cleanly on each chunk, so a
+        # retry stream is functionally identical to a fresh stream.
+        stream_this_attempt = on_svg_chunk is not None
         async with httpx.AsyncClient(timeout=180) as client:
             if stream_this_attempt:
                 content = await _stream_chat_completion(

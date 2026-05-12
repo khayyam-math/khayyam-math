@@ -491,44 +491,70 @@ async def _execute_tool(
     retries_used = result.get("retries_used", 0)
     cost_estimate = estimate_express_cost(retries_used=retries_used)
     review_history = result.get("review_history", [])
-    # Telemetry: record the turn (best-effort; never raises).
+    # Telemetry: fire-and-forget so the RDS write latency (1-2s per
+    # row; record_turn + record_canvas + N repair pairs) does NOT
+    # delay tool_result reaching the browser.  The express turn was
+    # already 25-30s by the time we got here; adding telemetry on the
+    # critical path was pushing total wall-clock past the user's
+    # patience threshold.  Errors get printed but never raise.
     tel = get_telemetry()
     if tel is not None and session_id:
-        turn_id = tel.record_turn(
+        def _record_async(
+            tel=tel,
             session_id=session_id,
-            user_prompt=prompt,
+            prompt=prompt,
             canvas_id=c.canvas_id,
-            prior_canvas_ids=[pc["id"] for pc in context_canvases],
+            context_ids=[pc["id"] for pc in context_canvases],
             n_phrases=len(narration),
             retries_used=retries_used,
             review_history=review_history,
             duration_s=duration_s,
-            cost_usd_estimate=cost_estimate,
-            intent="express",
-            model_id=resolved_model_id,
-        )
-        tel.record_canvas(
-            canvas_id=c.canvas_id,
-            session_id=session_id,
-            turn_id=turn_id,
+            cost_estimate=cost_estimate,
+            resolved_model_id=resolved_model_id,
             title=result.get("title", ""),
             svg=result.get("svg", ""),
-            narration=narration,
-            model_id=resolved_model_id,
-        )
-        for pair in result.get("repairs") or []:
-            tel.record_repair_pair(
-                session_id=session_id,
-                turn_id=turn_id,
-                attempt_index=pair.get("attempt_index", 0),
-                user_prompt=prompt,
-                bad_svg=pair.get("bad_svg"),
-                bad_narration=pair.get("bad_narration"),
-                critique=pair.get("critique"),
-                good_svg=pair.get("good_svg"),
-                good_narration=pair.get("good_narration"),
-                model_id=resolved_model_id,
-            )
+            narration_phrases=narration,
+            repairs=list(result.get("repairs") or []),
+        ) -> None:
+            try:
+                turn_id = tel.record_turn(
+                    session_id=session_id, user_prompt=prompt,
+                    canvas_id=canvas_id, prior_canvas_ids=context_ids,
+                    n_phrases=n_phrases, retries_used=retries_used,
+                    review_history=review_history, duration_s=duration_s,
+                    cost_usd_estimate=cost_estimate, intent="express",
+                    model_id=resolved_model_id,
+                )
+                tel.record_canvas(
+                    canvas_id=canvas_id, session_id=session_id,
+                    turn_id=turn_id, title=title, svg=svg,
+                    narration=narration_phrases,
+                    model_id=resolved_model_id,
+                )
+                for pair in repairs:
+                    tel.record_repair_pair(
+                        session_id=session_id, turn_id=turn_id,
+                        attempt_index=pair.get("attempt_index", 0),
+                        user_prompt=prompt,
+                        bad_svg=pair.get("bad_svg"),
+                        bad_narration=pair.get("bad_narration"),
+                        critique=pair.get("critique"),
+                        good_svg=pair.get("good_svg"),
+                        good_narration=pair.get("good_narration"),
+                        model_id=resolved_model_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"[telemetry] background record FAILED: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True, file=__import__("sys").stderr,
+                )
+
+        # Run in default loop's thread executor — Telemetry uses the
+        # synchronous psycopg client so we MUST go off-thread to avoid
+        # blocking the asyncio event loop.
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _record_async)
     return {
         "canvas_id": c.canvas_id,
         "view_url": f"/canvas/{c.canvas_id}/view",
