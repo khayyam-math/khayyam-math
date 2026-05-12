@@ -221,6 +221,13 @@ class SevimStack(Stack):
             # SEVIM_REVIEW_MODEL=gpt-4o.
             "SEVIM_REVIEW_MODE": "text",
             "SEVIM_REVIEW_MODEL": "gpt-4o-mini",
+            # TTS: tts-1 is ~3x faster than tts-1-hd at virtually
+            # identical audibility for short narration phrases.  At
+            # 15-30 phrases per figure, hd was adding 20-40s of
+            # wall-clock to the turn — long enough that learners gave
+            # up on the canvas before it loaded.  Quality knob:
+            # bump back to "tts-1-hd" if/when speed isn't the bind.
+            "SEVIM_TTS_MODEL": "tts-1",
             # Admin dashboard (/studio/admin) is gated by an email
             # whitelist; only signed-in users whose magic-link cookie
             # carries one of these e-mails can see it.  Everyone else

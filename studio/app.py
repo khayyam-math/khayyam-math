@@ -477,7 +477,17 @@ async def _execute_tool(
             f"unmatched_ids={unmatched} svg_ids={len(svg_ids)}",
             flush=True, file=__import__("sys").stderr,
         )
-    narrate_out = c.narrate(narration) if narration else {}
+    if narration:
+        _narrate_t0 = _time.monotonic()
+        narrate_out = c.narrate(narration)
+        _narrate_dt = _time.monotonic() - _narrate_t0
+        print(
+            f"[express] narrate done: phrases={len(narration)} "
+            f"dt={_narrate_dt:.2f}s wav_phrases={narrate_out.get('phrase_count')}",
+            flush=True, file=__import__("sys").stderr,
+        )
+    else:
+        narrate_out = {}
     retries_used = result.get("retries_used", 0)
     cost_estimate = estimate_express_cost(retries_used=retries_used)
     review_history = result.get("review_history", [])
