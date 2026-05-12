@@ -162,10 +162,25 @@ async def main(argv: list[str] | None = None) -> int:
                                            "https://api.openai.com/v1"))
     ap.add_argument("--out", type=Path, required=True,
                     help="Output JSONL path (append-only; resumable)")
+    ap.add_argument("--pool-module", default="scripts.teacher_prompts",
+                    help="Python module to import PROMPTS from "
+                         "(default: scripts.teacher_prompts; "
+                         "use scripts.expanded_prompts:PROMPTS_V4 for v4 pool)")
     ap.add_argument("--limit", type=int, default=None,
                     help="Max prompts to process this run")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="Parallel express_figure calls")
+    ap.add_argument("--reject-failed-review", action="store_true",
+                    help="Drop the clean row when the FINAL attempt's "
+                         "review verdict was FAIL.  Keeps the training "
+                         "data inspector-clean: every assistant target "
+                         "the model sees has been approved by every "
+                         "critic we run (structural + vision + auto-fix "
+                         "passes).  Recommended for OpenAI fine-tune "
+                         "corpora; the express loop accepts a still-"
+                         "failing figure to break the retry chain in "
+                         "production, but training on those teaches the "
+                         "wrong patterns.")
     args = ap.parse_args(argv)
 
     # Bootstrap secrets so OPENAI_API_KEY is populated.
@@ -176,7 +191,16 @@ async def main(argv: list[str] | None = None) -> int:
         print("ERROR: OPENAI_API_KEY not set", file=sys.stderr)
         return 1
 
-    from scripts.teacher_prompts import PROMPTS
+    # Resolve --pool-module to a PROMPTS list.  Accepts forms like:
+    #   scripts.teacher_prompts            (uses PROMPTS attribute)
+    #   scripts.expanded_prompts:PROMPTS_V4 (uses named attribute)
+    import importlib
+    if ":" in args.pool_module:
+        mod_name, attr = args.pool_module.split(":", 1)
+    else:
+        mod_name, attr = args.pool_module, "PROMPTS"
+    PROMPTS = getattr(importlib.import_module(mod_name), attr)
+
     seen = _existing_prompts(args.out)
     pending = [p for p in PROMPTS if p not in seen]
     if args.limit:
@@ -198,6 +222,7 @@ async def main(argv: list[str] | None = None) -> int:
     sem = asyncio.Semaphore(args.concurrency)
     fh = args.out.open("a")
     stats = {"ok_clean": 0, "ok_corrected": 0, "fail": 0,
+             "rejected_by_review": 0,
              "total_phrases": 0, "total_retries": 0}
     t0 = time.monotonic()
 
@@ -208,6 +233,26 @@ async def main(argv: list[str] | None = None) -> int:
         if result is None or not result.get("svg"):
             stats["fail"] += 1
             return
+        # Inspector filter: review_history is the list of FAILed
+        # verdicts the express loop accumulated.  Each retry appends
+        # one entry.  If the FINAL attempt PASSed, the verdict for
+        # that attempt is NOT appended (the loop returns early).  So
+        # `len(review_history) > max_retries` means every attempt
+        # failed, and the SVG returned was the last-ditch
+        # accept-anyway version — we exclude it from the training
+        # corpus when --reject-failed-review is set.
+        if args.reject_failed_review:
+            history_len = len(result.get("review_history") or [])
+            # express_figure's default max_retries=1 → 2 attempts.
+            # We don't know the model's max_retries from here, but
+            # the rule is the same: if the count is >= the number of
+            # attempts the loop made, the final verdict was FAIL.
+            if (result.get("retries_used", 0) > 0
+                    and history_len > result.get("retries_used", 0)):
+                stats["rejected_by_review"] += 1
+                print(f"  [reject] {prompt[:60]!r}: final review FAIL "
+                      f"(history_len={history_len})", flush=True)
+                return
         # Always emit the clean row.
         row = _build_clean_row(prompt, result)
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
