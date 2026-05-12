@@ -143,7 +143,14 @@
      highlight targets.  Outline them in the highlight colour so the
      glyphs stay readable instead of being filled-over. */
   #stage svg text.sevim-highlight,
-  #stage svg .sevim-highlight text {
+  #stage svg .sevim-highlight text,
+  /* <tspan id="..."> lets the model highlight INDIVIDUAL variables or
+     sub-formulas inside a single <text> element — e.g. the "x" inside
+     "(x + y + z)" or the "b² - 4ac" discriminant inside a longer
+     equation.  Without this rule a tspan with .sevim-highlight would
+     inherit the parent text colour and the user's eye gets no cue. */
+  #stage svg tspan.sevim-highlight,
+  #stage svg .sevim-highlight tspan {
     fill: var(--highlight) !important;
     font-weight: 800 !important;
   }

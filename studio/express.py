@@ -321,6 +321,17 @@ _EXPRESS_SYSTEM = (
     "  • Every visually distinct element has a unique SVG id "
     "(matrix_a_label, cell_a_1_2, sum_step_1, formula_general).\n"
     "  • viewBox sized to fit comfortably (typical: 0 0 900 650).\n"
+    "  • EVERY drawn element MUST sit inside the viewBox.  No text "
+    "    starting beyond x=viewBox_width-10 or y=viewBox_height-10; "
+    "    no text starting before x=10 or y=20.  If a long formula "
+    "    can't fit on one line, BREAK it across multiple <text> "
+    "    elements on stacked y values — never let it run off the "
+    "    canvas edge.\n"
+    "  • CAPTIONS AND FORMULAS go in the canvas MARGINS with their "
+    "    own dedicated band — top band (y < 60) or bottom band "
+    "    (y > viewBox_height - 80) or a right-side column (x > "
+    "    viewBox_width * 0.7).  Diagrams occupy the central area.  "
+    "    Caption bands MUST NOT intrude on the diagram region.\n"
     "  • No overlapping text.  Margins for captions.  Use colour "
     "purposefully (highlight the active row/column in a contrasting hue).\n"
     "  • Narration is spoken by piper TTS — write spoken words, not "
@@ -328,6 +339,28 @@ _EXPRESS_SYSTEM = (
     "not '∑').  Each phrase highlights ONE element.  Walk through the "
     "computation step by step (typically 15-30 phrases for a non-trivial "
     "concept).\n"
+    "\n"
+    "GRANULAR HIGHLIGHTS — when a narration phrase NAMES a specific "
+    "variable, symbol, row, column, cell, or sub-formula, that named "
+    "thing MUST be its own SVG element with a unique id, and its id "
+    "MUST appear in the phrase's highlight array.  Concretely:\n"
+    "  • If narration says 'the variable x', the SVG must contain "
+    "    <text id='var_x'>x</text> AND the phrase highlights "
+    "    ['var_x'].\n"
+    "  • If narration says 'row 2 of matrix A', the SVG must contain "
+    "    <g id='matrix_a_row_2'>...</g> grouping the row's cells, "
+    "    AND the phrase highlights ['matrix_a_row_2'].\n"
+    "  • If narration says 'the discriminant b² - 4ac', the formula "
+    "    'b² - 4ac' lives inside its own <text id='discriminant'> OR "
+    "    is the entire content of one <tspan id='discriminant'> "
+    "    inside a larger formula, AND the phrase highlights "
+    "    ['discriminant'].\n"
+    "  • If narration says 'the second clause', the second clause is "
+    "    <text id='clause_2'>C2: (x ∨ y ∨ z)</text> AND the phrase "
+    "    highlights ['clause_2'].\n"
+    "It is NOT enough to highlight the whole formula group when the "
+    "narration is pointing at one term inside it — the learner needs "
+    "the eye-tracking cue to land on the specific thing being said.\n"
     "\n"
     "FIRST NARRATION PHRASE — must be specific to THE QUESTION the "
     "user asked.  Not a generic transition.  Examples:\n"
@@ -587,6 +620,17 @@ def _review_user_prompt(
         "FAIL on: main content missing entirely; wrong topology; orphan "
         "leader lines; dimensions don't match the request; text "
         "completely overlapping text.\n"
+        "\n"
+        "(A.0) Granular highlight — every narration phrase that NAMES "
+        "a specific variable, symbol, row, column, cell, or sub-formula "
+        "must highlight an id for THAT specific thing, not the whole "
+        "containing group.  FAIL when a phrase says 'the variable x' "
+        "or 'row 2' or 'the discriminant' or 'the second clause' but "
+        "the highlight array points at the whole figure / matrix / "
+        "formula instead of an id that wraps just that one piece.  "
+        "The fix is to give the named piece its own <text id='...'> "
+        "(or <tspan id='...'> inside a longer formula) and to update "
+        "the phrase's highlight array to reference that id.\n"
         "\n"
         "(A.1) Label placement — every text label must sit at or "
         "ADJACENT to the element it names, not floating in empty space "
@@ -1483,6 +1527,167 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             "each label so its (x, y) lies at most ~one radius outside "
             "its own circle's centre."
         )
+
+    # 4. Out-of-bounds: every text/rect/circle/line must lie inside
+    # the SVG's viewBox.  The model occasionally puts formulas or
+    # captions at coordinates past the right edge / below the bottom,
+    # which on the rendered canvas means the text is invisible
+    # (clipped) or extends off-page in PDF exports.
+    viewbox_re = re.compile(
+        r'<svg\b[^>]*?viewBox\s*=\s*"([^"]+)"', re.S,
+    )
+    vb_match = viewbox_re.search(svg)
+    if vb_match:
+        try:
+            parts = vb_match.group(1).replace(",", " ").split()
+            vb = [float(p) for p in parts[:4]]
+            vb_x, vb_y, vb_w, vb_h = vb[0], vb[1], vb[2], vb[3]
+        except (ValueError, IndexError):
+            vb_x = vb_y = 0.0; vb_w = vb_h = 0.0
+    else:
+        # Fall back to width/height when no viewBox is set.
+        try:
+            w_attr = re.search(r'<svg\b[^>]*?width\s*=\s*"([^"]+)"', svg)
+            h_attr = re.search(r'<svg\b[^>]*?height\s*=\s*"([^"]+)"', svg)
+            vb_x = vb_y = 0.0
+            vb_w = float(w_attr.group(1).rstrip("pxptem%")) if w_attr else 0.0
+            vb_h = float(h_attr.group(1).rstrip("pxptem%")) if h_attr else 0.0
+        except (ValueError, AttributeError):
+            vb_x = vb_y = vb_w = vb_h = 0.0
+
+    if vb_w > 0 and vb_h > 0:
+        out_of_bounds: list[str] = []
+        # Generous tolerance: text gets clipped only when its anchor
+        # point is well past the edge.  We flag x > right-edge OR
+        # x < left-edge - 5 (text-anchor=end can legitimately sit at
+        # the edge); same logic for y.
+        tol = 4.0
+        # Text elements — check (x, y) and rough text width.
+        for m in re.finditer(r'<text\b([^>]*)>([^<]*)', svg):
+            attrs = _attrs(m.group(1) + ">")
+            try:
+                tx = float(attrs.get("x", "")); ty = float(attrs.get("y", ""))
+            except ValueError:
+                continue
+            content = m.group(2).strip()
+            # Approximate text width: 0.55em per char @ default font-size
+            # (16px) is a reasonable estimate for sans-serif.
+            try:
+                fs = float(attrs.get("font-size", "16").rstrip("pxptem"))
+            except ValueError:
+                fs = 16.0
+            anchor = (attrs.get("text-anchor") or "start").lower()
+            est_w = len(content) * fs * 0.55
+            x_left = (tx - est_w / 2 if anchor == "middle"
+                      else tx - est_w if anchor == "end"
+                      else tx)
+            x_right = x_left + est_w
+            if (x_right > vb_x + vb_w + tol
+                    or x_left < vb_x - tol
+                    or ty > vb_y + vb_h + tol
+                    or ty < vb_y - tol):
+                snippet = content[:20] + ("…" if len(content) > 20 else "")
+                out_of_bounds.append(
+                    f"<text> {snippet!r} at ({tx:.0f},{ty:.0f})"
+                )
+        if out_of_bounds:
+            sample = "; ".join(out_of_bounds[:5])
+            more = (f" (and {len(out_of_bounds) - 5} more)"
+                    if len(out_of_bounds) > 5 else "")
+            issues.append(
+                "out_of_bounds: " + str(len(out_of_bounds)) +
+                " text element(s) extend beyond the viewBox "
+                f"({vb_w:.0f}x{vb_h:.0f}): " + sample + more +
+                ". Move each off-canvas element back inside the "
+                "viewBox.  Long formulas should be BROKEN across "
+                "multiple <text> elements on stacked y values "
+                "instead of running past the right edge."
+            )
+
+    # 5. Caption-overlaps-diagram: text whose bounding box intersects
+    # the bounding box of a diagram element (rect/circle/path with
+    # stroke or fill).  Only flag MAJOR overlaps (>= 50% of the text's
+    # area covered by the diagram's box) — incidental touch on a
+    # 1-px stroke shouldn't trigger.
+    if vb_w > 0 and vb_h > 0:
+        # Diagram boxes: rectangles with fill/stroke that aren't
+        # background frames (we approximate "background" as a rect
+        # covering more than 80% of the viewBox).
+        rect_re = re.compile(r'<rect\b[^>]*?/?>', re.S)
+        diagram_boxes: list[tuple[float, float, float, float, str]] = []
+        for m in rect_re.finditer(svg):
+            a = _attrs(m.group(0))
+            try:
+                rx = float(a.get("x", "0")); ry = float(a.get("y", "0"))
+                rw = float(a.get("width", "")); rh = float(a.get("height", ""))
+            except ValueError:
+                continue
+            # Skip background-sized rectangles (frame, viewport bg).
+            if rw * rh >= 0.7 * vb_w * vb_h:
+                continue
+            diagram_boxes.append((rx, ry, rw, rh, (a.get("id") or "").strip()))
+        # Add circles as bounding boxes too.
+        for cx, cy, r, cid in circles_with_geom:
+            diagram_boxes.append((cx - r, cy - r, 2*r, 2*r, cid))
+
+        # Recompute text boxes (similar to out-of-bounds above).
+        text_boxes: list[tuple[float, float, float, float, str]] = []
+        for m in re.finditer(r'<text\b([^>]*)>([^<]*)', svg):
+            attrs = _attrs(m.group(1) + ">")
+            try:
+                tx = float(attrs.get("x", "")); ty = float(attrs.get("y", ""))
+            except ValueError:
+                continue
+            content = m.group(2).strip()
+            if not content or len(content) < 4:
+                # Single-char labels (vertex names) live INSIDE
+                # diagram elements legitimately; skip them.
+                continue
+            try:
+                fs = float(attrs.get("font-size", "16").rstrip("pxptem"))
+            except ValueError:
+                fs = 16.0
+            anchor = (attrs.get("text-anchor") or "start").lower()
+            est_w = len(content) * fs * 0.55
+            x_left = (tx - est_w / 2 if anchor == "middle"
+                      else tx - est_w if anchor == "end"
+                      else tx)
+            text_boxes.append((x_left, ty - fs, est_w, fs * 1.2, content))
+
+        def _overlap_area(
+            a: tuple[float, float, float, float],
+            b: tuple[float, float, float, float],
+        ) -> float:
+            ax, ay, aw, ah = a
+            bx, by, bw, bh = b
+            ix0 = max(ax, bx); ix1 = min(ax + aw, bx + bw)
+            iy0 = max(ay, by); iy1 = min(ay + ah, by + bh)
+            if ix1 <= ix0 or iy1 <= iy0:
+                return 0.0
+            return (ix1 - ix0) * (iy1 - iy0)
+
+        overlaps: list[str] = []
+        for tx, ty, tw, th, content in text_boxes:
+            text_area = max(1.0, tw * th)
+            for dx, dy, dw, dh, did in diagram_boxes:
+                ov = _overlap_area((tx, ty, tw, th), (dx, dy, dw, dh))
+                if ov / text_area >= 0.5:
+                    snippet = content[:24] + ("…" if len(content) > 24 else "")
+                    target = f"box id='{did}'" if did else "an unlabelled box"
+                    overlaps.append(f"caption {snippet!r} overlaps {target}")
+                    break
+        if overlaps:
+            sample = "; ".join(overlaps[:5])
+            more = (f" (and {len(overlaps) - 5} more)"
+                    if len(overlaps) > 5 else "")
+            issues.append(
+                "caption_overlaps_diagram: " + str(len(overlaps)) +
+                " caption(s) overlap a diagram element: " + sample + more +
+                ".  Move each offending caption to the figure's margin "
+                "(top band y<60, bottom band y>" + str(int(vb_h - 80)) +
+                ", or right column x>" + str(int(vb_w * 0.7)) + ") so "
+                "the diagram region stays readable."
+            )
 
     return issues
 

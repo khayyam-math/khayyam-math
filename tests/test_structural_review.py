@@ -159,3 +159,66 @@ def test_long_caption_inside_vertex_not_flagged():
         '</svg>'
     )
     assert _structural_review(svg, []) == []
+
+
+# ---------------------------------------------------------------------
+# Out-of-bounds: text starting past the viewBox edges.
+# ---------------------------------------------------------------------
+
+def test_in_bounds_text_passes():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="450" y="320" text-anchor="middle">centered caption</text>'
+        '</svg>'
+    )
+    assert _structural_review(svg, []) == []
+
+
+def test_text_past_right_edge_flagged():
+    # 900-wide viewBox; text starts at x=920 (off-canvas).
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="920" y="100">offscreen formula</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("out_of_bounds" in i for i in issues), issues
+
+
+def test_text_below_bottom_flagged():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="100" y="800">below the canvas</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("out_of_bounds" in i for i in issues), issues
+
+
+# ---------------------------------------------------------------------
+# Caption-overlaps-diagram: caption text inside a diagram rect/circle.
+# ---------------------------------------------------------------------
+
+def test_caption_in_margin_passes():
+    # Caption is at the top margin; diagram rect lives well below.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="30">SAT to 3SAT reduction</text>'
+        '<rect id="diagram" x="100" y="200" width="700" height="300"'
+        ' fill="none" stroke="black"/>'
+        '</svg>'
+    )
+    assert _structural_review(svg, []) == []
+
+
+def test_caption_overlapping_diagram_box_flagged():
+    # The caption text sits dead-centre inside a labelled diagram rect.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<rect id="step_3_box" x="100" y="200" width="500" height="200"'
+        ' fill="lightblue" stroke="black"/>'
+        '<text x="160" y="300">Each clause is now exactly three literals</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("caption_overlaps_diagram" in i for i in issues), issues
