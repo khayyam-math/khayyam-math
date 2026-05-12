@@ -1052,6 +1052,22 @@ async def express_figure(
         _log(f"got content length={len(content)}")
         result = json.loads(content)
         _log(f"parsed: svg_len={len(result.get('svg',''))} phrases={len(result.get('narration',[]))}")
+        # Deterministic layout pass — auto-fit every <g>'s outer
+        # rectangle to its child elements so a 3×3 matrix drawn with
+        # a 200×200 rect but cells extending to (350, 340) gets the
+        # rect expanded to wrap everything.  Idempotent: a correctly-
+        # sized group passes through unchanged.  Errors are swallowed
+        # because layout polish must never block a working figure.
+        try:
+            fixed_svg = autofit_group_rects(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"autofit_group_rects: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"autofit_group_rects FAILED: {type(exc).__name__}: {exc}")
 
         # 2a. Cheap deterministic structural review BEFORE the vision
         # call.  Catches failures the vision LLM can't reliably detect
@@ -1390,6 +1406,177 @@ def _svg_to_png(svg: str, width: int = 1200) -> bytes:
 #     "not all vertices were indicated on the graph" failure.
 # ---------------------------------------------------------------------------
 
+def autofit_group_rects(svg: str) -> str:
+    """Auto-fit the outer <rect> of each <g> group to the bounding
+    box of its child elements.
+
+    The LLM often emits a group containing a small outer rect plus
+    cell labels that extend WAY past the rect — e.g. a 3×3 matrix
+    drawn as <rect width=200 height=200> with cells positioned at
+    x=350, y=340 (i.e. needs a 300×300 rect).  The result is a
+    little square in the corner with most of the matrix spilling
+    out.  This pass walks each <g>, finds the first <rect> child,
+    estimates the bbox of every other child (text, line, sub-rect),
+    and resizes the rect to cover that bbox with 20-px padding.
+
+    Deterministic, idempotent, no LLM call.  Safe to run on any SVG
+    that uses the standard 'outer rect + child labels' pattern; a
+    group without a recognisable outer rect is left alone.
+    """
+    import re
+
+    # Reuse the dual-quote attribute parser from _structural_review.
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    def _text_bbox(tag: str) -> tuple[float, float, float, float] | None:
+        a = _attrs(tag)
+        try:
+            tx = float(a.get("x", "")); ty = float(a.get("y", ""))
+        except ValueError:
+            return None
+        # Pull text content for width estimate.
+        content_m = re.search(
+            r'<text\b[^>]*>([^<]*)</text>', tag, re.S,
+        )
+        content = (content_m.group(1).strip() if content_m else "")
+        try:
+            fs = float(a.get("font-size", "16").rstrip("pxptem"))
+        except ValueError:
+            fs = 16.0
+        # Conservative width estimate — 0.6 catches Unicode subscripts
+        # and parentheses better than the previous 0.55.
+        anchor = (a.get("text-anchor") or "start").lower()
+        est_w = max(len(content), 1) * fs * 0.6
+        if anchor == "middle":
+            x0 = tx - est_w / 2
+        elif anchor == "end":
+            x0 = tx - est_w
+        else:
+            x0 = tx
+        # SVG text baseline sits at y; glyphs extend roughly fs above.
+        return (x0, ty - fs * 0.9, est_w, fs * 1.1)
+
+    def _rect_bbox(tag: str) -> tuple[float, float, float, float] | None:
+        a = _attrs(tag)
+        try:
+            rx = float(a.get("x", "0")); ry = float(a.get("y", "0"))
+            rw = float(a.get("width", "")); rh = float(a.get("height", ""))
+        except ValueError:
+            return None
+        return (rx, ry, rw, rh)
+
+    def _circle_bbox(tag: str) -> tuple[float, float, float, float] | None:
+        a = _attrs(tag)
+        try:
+            cx = float(a.get("cx", "")); cy = float(a.get("cy", ""))
+            r = float(a.get("r", ""))
+        except ValueError:
+            return None
+        return (cx - r, cy - r, 2 * r, 2 * r)
+
+    def _line_bbox(tag: str) -> tuple[float, float, float, float] | None:
+        a = _attrs(tag)
+        try:
+            x1 = float(a.get("x1", "")); y1 = float(a.get("y1", ""))
+            x2 = float(a.get("x2", "")); y2 = float(a.get("y2", ""))
+        except ValueError:
+            return None
+        return (min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+
+    def _bbox(tag: str) -> tuple[float, float, float, float] | None:
+        s = tag.lstrip("<").split()[0] if tag.startswith("<") else ""
+        if s.startswith("text"):
+            return _text_bbox(tag)
+        if s.startswith("rect"):
+            return _rect_bbox(tag)
+        if s.startswith("circle") or s.startswith("ellipse"):
+            return _circle_bbox(tag)
+        if s.startswith("line"):
+            return _line_bbox(tag)
+        return None
+
+    # Walk each <g ...> ... </g> block, find its first <rect>, compute
+    # the bbox of all NON-rect (well, non-first-rect) children, and
+    # resize the rect if it's smaller than that bbox.
+    PAD = 20.0
+
+    def _resize_group(group_match: re.Match) -> str:
+        inner = group_match.group(0)
+        # Find every direct child tag (self-closing or text).
+        child_pattern = re.compile(
+            r'<(?:rect|text|circle|ellipse|line)\b[^>]*?(?:/>|>(?:[^<]*</'
+            r'(?:rect|text|circle|ellipse|line)>)?)',
+            re.S,
+        )
+        children = list(child_pattern.finditer(inner))
+        if not children:
+            return inner
+        # Pick the FIRST <rect> as the container.
+        rect_idx = next(
+            (i for i, m in enumerate(children) if m.group(0).startswith("<rect")),
+            None,
+        )
+        if rect_idx is None:
+            return inner
+        rect_match = children[rect_idx]
+        rect_box = _rect_bbox(rect_match.group(0))
+        if not rect_box:
+            return inner
+        rx, ry, rw, rh = rect_box
+        # Compute the union bbox of all OTHER children.
+        x0 = float("inf"); y0 = float("inf")
+        x1 = float("-inf"); y1 = float("-inf")
+        for i, m in enumerate(children):
+            if i == rect_idx:
+                continue
+            b = _bbox(m.group(0))
+            if not b:
+                continue
+            bx, by, bw, bh = b
+            x0 = min(x0, bx); y0 = min(y0, by)
+            x1 = max(x1, bx + bw); y1 = max(y1, by + bh)
+        if x0 == float("inf"):
+            return inner
+        # Required rect bounds.
+        need_x = min(rx, x0 - PAD)
+        need_y = min(ry, y0 - PAD)
+        need_w = max(rx + rw, x1 + PAD) - need_x
+        need_h = max(ry + rh, y1 + PAD) - need_y
+        # Only touch the rect if children actually overflow it.
+        if (need_x >= rx and need_y >= ry
+                and need_w <= rw + 0.5 and need_h <= rh + 0.5):
+            return inner
+        # Rewrite the rect's x/y/width/height while preserving every
+        # other attribute exactly (stroke, fill, id, etc).
+        def _set(attr: str, val: float, tag: str) -> str:
+            new = f'{attr}="{val:.0f}"'
+            pat_dq = re.compile(rf'\b{attr}\s*=\s*"[^"]*"')
+            pat_sq = re.compile(rf"\b{attr}\s*=\s*'[^']*'")
+            if pat_dq.search(tag):
+                return pat_dq.sub(new, tag, count=1)
+            if pat_sq.search(tag):
+                return pat_sq.sub(new, tag, count=1)
+            # Attribute not present; inject before the closing > or />.
+            return re.sub(r'(/?>)$', f' {new}\\1', tag, count=1)
+        new_rect = rect_match.group(0)
+        new_rect = _set("x", need_x, new_rect)
+        new_rect = _set("y", need_y, new_rect)
+        new_rect = _set("width", need_w, new_rect)
+        new_rect = _set("height", need_h, new_rect)
+        return inner.replace(rect_match.group(0), new_rect, 1)
+
+    group_pattern = re.compile(r'<g\b[^>]*>.*?</g>', re.S)
+    return group_pattern.sub(_resize_group, svg)
+
+
 def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
     """Return a list of structural issues with the (svg, narration) pair.
 
@@ -1625,7 +1812,11 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
     # the figure is wasting horizontal space; the model should have
     # spilled into a second column instead.
     if vb_w > 0 and vb_h > 0:
-        bottom_band = vb_h - 30
+        # Tighter bottom-band: was vb_h-30, now vb_h-80.  In practice a
+        # text element at y=580 in a 650-tall viewBox already crowds
+        # the bottom edge of the mobile canvas pane; only the right
+        # column is guaranteed visible past that point.
+        bottom_band = vb_h - 80
         right_half_x = vb_x + vb_w * 0.55
         below_count = 0
         right_count = 0
@@ -1703,7 +1894,11 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             except ValueError:
                 fs = 16.0
             anchor = (attrs.get("text-anchor") or "start").lower()
-            est_w = len(content) * fs * 0.55
+            # 0.6 (was 0.55) is a more conservative average glyph width
+            # for variable-width fonts with Unicode subscripts and
+            # parentheses; 0.55 was letting 50-character formulas pass
+            # that actually overflow once rendered.
+            est_w = len(content) * fs * 0.6
             x_left = (tx - est_w / 2 if anchor == "middle"
                       else tx - est_w if anchor == "end"
                       else tx)
@@ -1774,7 +1969,11 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             except ValueError:
                 fs = 16.0
             anchor = (attrs.get("text-anchor") or "start").lower()
-            est_w = len(content) * fs * 0.55
+            # 0.6 (was 0.55) is a more conservative average glyph width
+            # for variable-width fonts with Unicode subscripts and
+            # parentheses; 0.55 was letting 50-character formulas pass
+            # that actually overflow once rendered.
+            est_w = len(content) * fs * 0.6
             x_left = (tx - est_w / 2 if anchor == "middle"
                       else tx - est_w if anchor == "end"
                       else tx)

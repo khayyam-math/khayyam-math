@@ -308,3 +308,77 @@ def test_two_column_layout_does_not_overflow():
         "</svg>"
     )
     assert _structural_review(svg, []) == []
+
+
+# ---------------------------------------------------------------------
+# autofit_group_rects — the deterministic layout pass that resizes the
+# outer <rect> of each <g> to wrap its children.
+# ---------------------------------------------------------------------
+
+from studio.express import autofit_group_rects
+
+
+def test_autofit_grows_undersized_matrix_rect():
+    """A 3×3 matrix drawn with a 200×200 rect but cells out at (350, 340)
+    should get its rect expanded so it actually contains every cell."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="matrix_a">'
+        '<rect x="100" y="100" width="200" height="200" stroke="black"/>'
+        '<text x="150" y="140">a11</text>'
+        '<text x="250" y="140">a12</text>'
+        '<text x="350" y="140">a13</text>'
+        '<text x="150" y="240">a21</text>'
+        '<text x="150" y="340">a31</text>'
+        '<text x="350" y="340">a33</text>'
+        '</g></svg>'
+    )
+    fixed = autofit_group_rects(svg)
+    # The rect must now extend at least to the rightmost text + width.
+    import re
+    m = re.search(r'<rect[^>]*x="(\d+)"[^>]*y="(\d+)"[^>]*width="(\d+)"[^>]*height="(\d+)"', fixed)
+    assert m, fixed
+    rx, ry, rw, rh = map(int, m.groups())
+    # Rightmost label is "a33" at x=350; rightmost char is around x=370+.
+    assert rx + rw >= 370, f"rect right edge {rx+rw} should cover x=350+"
+    # Bottommost label is at y=340 (baseline); rect bottom should reach
+    # at least y=340 (and ideally a bit past for descenders).
+    assert ry + rh >= 340
+
+
+def test_autofit_leaves_correctly_sized_rect_alone():
+    """A group whose rect already contains its children is untouched."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="ok">'
+        '<rect x="50" y="50" width="500" height="500"/>'
+        '<text x="100" y="100">small label</text>'
+        '</g></svg>'
+    )
+    fixed = autofit_group_rects(svg)
+    # Idempotent — same SVG out.
+    assert fixed == svg
+
+
+def test_autofit_handles_single_quoted_attrs():
+    """gpt-4o-mini emits single-quoted attributes; the layout pass must
+    still detect overflow."""
+    svg = (
+        "<svg viewBox='0 0 900 650'>"
+        "<g id='matrix_a'>"
+        "<rect x='100' y='100' width='200' height='200'/>"
+        "<text x='350' y='340'>a33</text>"
+        "</g></svg>"
+    )
+    fixed = autofit_group_rects(svg)
+    assert 'width="200"' not in fixed, "rect should have been resized"
+
+
+def test_autofit_no_rect_in_group_passes_through():
+    """A <g> with no outer rect (only labels) is left alone — there's
+    nothing to resize."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g><text x="100" y="100">just a label</text></g></svg>'
+    )
+    assert autofit_group_rects(svg) == svg
