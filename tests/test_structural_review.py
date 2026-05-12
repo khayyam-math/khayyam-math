@@ -471,3 +471,63 @@ def test_reflow_stacks_past_bottom_when_too_wide_for_column2():
     ys = [int(y) for y in re.findall(r'y="(\d+)"', out)]
     for prev, cur in zip(ys, ys[1:]):
         assert cur > prev, f"items still overlap: {ys}"
+
+
+# ---------------------------------------------------------------------
+# fix_html_subsup — replace HTML <sup>/<sub> with SVG <tspan>.
+# ---------------------------------------------------------------------
+
+from studio.express import fix_html_subsup, reflow_overlapping_groups
+
+
+def test_fix_html_sup_converts_to_tspan():
+    svg = '<svg><text>A<sup>-1</sup> = ...</text></svg>'
+    out = fix_html_subsup(svg)
+    assert "<sup>" not in out and "</sup>" not in out
+    assert 'baseline-shift="super"' in out
+    assert ">-1</tspan>" in out
+
+
+def test_fix_html_sub_converts_to_tspan():
+    svg = '<svg><text>x<sub>i</sub> = 0</text></svg>'
+    out = fix_html_subsup(svg)
+    assert "<sub>" not in out
+    assert 'baseline-shift="sub"' in out
+
+
+def test_fix_html_subsup_idempotent_on_tspan():
+    svg = ('<svg><text>x<tspan baseline-shift="sub" font-size="80%">i</tspan>'
+           '</text></svg>')
+    assert fix_html_subsup(svg) == svg
+
+
+# ---------------------------------------------------------------------
+# reflow_overlapping_groups — slide overlapping <g> bboxes apart.
+# ---------------------------------------------------------------------
+
+def test_groups_overlapping_horizontally_get_shifted():
+    """matrix_a at x=20-310 overlaps matrix_a_inverse at x=200-396 —
+    the second group must be translated right past the first."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="a"><rect x="20" y="100" width="290" height="151"/></g>'
+        '<g id="b"><rect x="200" y="100" width="196" height="128"/></g>'
+        '</svg>'
+    )
+    out = reflow_overlapping_groups(svg)
+    import re
+    m = re.search(r'<g\s+id="b"[^>]*transform="translate\((\d+)\s+0\)"', out)
+    assert m, f"expected translate transform on group b: {out}"
+    dx = int(m.group(1))
+    # Original x=200 + dx must be >= 310 (end of group a) + some pad.
+    assert 200 + dx >= 310, f"shift {dx} insufficient"
+
+
+def test_non_overlapping_groups_unchanged():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g><rect x="20" y="100" width="200" height="100"/></g>'
+        '<g><rect x="500" y="100" width="200" height="100"/></g>'
+        '</svg>'
+    )
+    assert reflow_overlapping_groups(svg) == svg

@@ -1177,6 +1177,20 @@ async def express_figure(
         # rect expanded to wrap everything.  Idempotent: a correctly-
         # sized group passes through unchanged.  Errors are swallowed
         # because layout polish must never block a working figure.
+        # First polish pass: convert HTML <sup>/<sub> tags to the
+        # proper SVG <tspan baseline-shift='...'> form.  SVG ignores
+        # HTML inline tags, so `A<sup>-1</sup>` rendered as the
+        # literal "A-1".  Idempotent for SVGs that already use tspan.
+        try:
+            fixed_svg = fix_html_subsup(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"fix_html_subsup: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"fix_html_subsup FAILED: {type(exc).__name__}: {exc}")
         try:
             fixed_svg = autofit_group_rects(result["svg"])
             if fixed_svg != result["svg"]:
@@ -1187,6 +1201,20 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"autofit_group_rects FAILED: {type(exc).__name__}: {exc}")
+        # Slide overlapping <g> groups apart — handles the case where
+        # the model places matrix_a and matrix_a_inverse at the same y
+        # but with overlapping x ranges.  Runs BEFORE reflow_overlap-
+        # ping_text so the text reflow sees the corrected group bboxes.
+        try:
+            fixed_svg = reflow_overlapping_groups(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"reflow_overlapping_groups: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"reflow_overlapping_groups FAILED: {type(exc).__name__}: {exc}")
         # Second layout pass — reflow top-level <text> elements whose
         # bounding boxes overlap.  Walks every text in document order,
         # shifts later ones down (then over to a new column if
@@ -1560,6 +1588,28 @@ def _svg_to_png(svg: str, width: int = 1200) -> bytes:
 #     "not all vertices were indicated on the graph" failure.
 # ---------------------------------------------------------------------------
 
+def fix_html_subsup(svg: str) -> str:
+    """SVG renderers don't honour HTML `<sup>` / `<sub>` — they show
+    the inner text inline with no baseline shift, so `A<sup>-1</sup>`
+    appears as the literal "A-1".  Convert to the proper SVG form
+    using <tspan baseline-shift='super|sub' font-size='80%'>.
+
+    Idempotent — text that's already using <tspan> passes through.
+    """
+    import re
+    out = re.sub(
+        r'<sup\b[^>]*>([^<]*)</sup>',
+        r'<tspan baseline-shift="super" font-size="80%">\1</tspan>',
+        svg,
+    )
+    out = re.sub(
+        r'<sub\b[^>]*>([^<]*)</sub>',
+        r'<tspan baseline-shift="sub" font-size="80%">\1</tspan>',
+        out,
+    )
+    return out
+
+
 def autofit_group_rects(svg: str) -> str:
     """Auto-fit the outer <rect> of each <g> group to the bounding
     box of its child elements.
@@ -1729,6 +1779,125 @@ def autofit_group_rects(svg: str) -> str:
 
     group_pattern = re.compile(r'<g\b[^>]*>.*?</g>', re.S)
     return group_pattern.sub(_resize_group, svg)
+
+
+def reflow_overlapping_groups(svg: str) -> str:
+    """When two top-level <g> groups have outer rects that overlap
+    horizontally, slide the LATER group to the right until clear.
+    Handles the "matrix A at x=20-310 and matrix A_inverse at
+    x=200-396 sit on top of each other" failure mode.
+
+    Each group's reference rect is its first <rect> child (same
+    convention used by autofit_group_rects).  Shift is implemented
+    via a `transform="translate(dx 0)"` attribute on the <g> — non-
+    destructive (preserves all other attributes) and idempotent
+    when no overlap is present.
+
+    Errors are swallowed by the caller.
+    """
+    import re
+
+    attr_re = re.compile(
+        r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+    )
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    vb_match = re.search(
+        r'<svg\b[^>]*?\bviewBox\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+        svg, re.S,
+    )
+    if not vb_match:
+        return svg
+    vb_raw = vb_match.group(1) if vb_match.group(1) is not None else vb_match.group(2)
+    try:
+        parts = vb_raw.replace(",", " ").split()
+        vb_w = float(parts[2])
+    except (ValueError, IndexError):
+        return svg
+
+    PAD = 20.0
+
+    # For each top-level <g>, pull bbox from its first <rect> child.
+    group_re = re.compile(r'<g\b[^>]*?>.*?</g>', re.S)
+    groups: list[tuple[int, int, str, tuple[float, float, float, float]]] = []
+    for m in group_re.finditer(svg):
+        body = m.group(0)
+        rect_m = re.search(r'<rect\b[^>]*?/?>', body, re.S)
+        if not rect_m:
+            continue
+        a = _attrs(rect_m.group(0))
+        try:
+            x = float(a.get("x", "0")); y = float(a.get("y", "0"))
+            w = float(a.get("width", "")); h = float(a.get("height", ""))
+        except ValueError:
+            continue
+        groups.append((m.start(), m.end(), body, (x, y, w, h)))
+
+    if len(groups) < 2:
+        return svg
+
+    # Greedy: walk in document order, shift each group right past any
+    # earlier group it overlaps with.
+    edits: list[tuple[int, int, str]] = []
+    placed: list[tuple[float, float, float, float]] = []
+    for start, end, body, box in groups:
+        x, y, w, h = box
+        dx = 0.0
+        max_iters = 20
+        while max_iters > 0:
+            max_iters -= 1
+            overlap = None
+            for px, py, pw, ph in placed:
+                # Bbox intersection with PAD margin.
+                if (x + dx < px + pw + PAD and x + dx + w + PAD > px
+                        and y < py + ph + PAD and y + h + PAD > py):
+                    overlap = (px, py, pw, ph)
+                    break
+            if not overlap:
+                break
+            # Shift right past the offender.
+            shift = (overlap[0] + overlap[2] + PAD) - (x + dx)
+            dx += shift
+            # If we'd exit the viewBox, give up — accept overlap rather
+            # than push the group off-canvas entirely.
+            if x + dx + w > vb_w - 5:
+                dx = 0.0
+                break
+        placed.append((x + dx, y, w, h))
+        if abs(dx) < 0.5:
+            continue
+        # Find existing transform on the <g> opening tag and update it.
+        open_m = re.match(r'<g\b[^>]*?>', body, re.S)
+        if not open_m:
+            continue
+        open_tag = open_m.group(0)
+        new_open = re.sub(
+            r'\btransform\s*=\s*(?:"[^"]*"|\'[^\']*\')',
+            '',
+            open_tag,
+        )
+        # Insert transform just before the closing > of the <g> tag.
+        new_open = re.sub(
+            r'>$',
+            f' transform="translate({dx:.0f} 0)">',
+            new_open,
+            count=1,
+        )
+        new_body = new_open + body[open_m.end():]
+        edits.append((start, end, new_body))
+
+    if not edits:
+        return svg
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for s, e, repl in edits:
+        out = out[:s] + repl + out[e:]
+    return out
 
 
 def reflow_overlapping_text(svg: str) -> str:
