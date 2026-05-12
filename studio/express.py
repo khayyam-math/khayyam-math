@@ -1997,6 +1997,26 @@ def reflow_overlapping_groups(svg: str) -> str:
 
     PAD = 20.0
 
+    def _apply_translate(body: str, dx: float, dy: float) -> str:
+        """Write `transform="translate(dx dy)"` onto a <g>'s opening
+        tag, replacing any existing transform."""
+        open_m = re.match(r'<g\b[^>]*?>', body, re.S)
+        if not open_m:
+            return body
+        open_tag = open_m.group(0)
+        new_open = re.sub(
+            r'\btransform\s*=\s*(?:"[^"]*"|\'[^\']*\')',
+            '',
+            open_tag,
+        )
+        new_open = re.sub(
+            r'>$',
+            f' transform="translate({dx:.0f} {dy:.0f})">',
+            new_open,
+            count=1,
+        )
+        return new_open + body[open_m.end():]
+
     # For each top-level <g>, pull bbox from its first <rect> child.
     group_re = re.compile(r'<g\b[^>]*?>.*?</g>', re.S)
     groups: list[tuple[int, int, str, tuple[float, float, float, float]]] = []
@@ -2038,33 +2058,27 @@ def reflow_overlapping_groups(svg: str) -> str:
             # Shift right past the offender.
             shift = (overlap[0] + overlap[2] + PAD) - (x + dx)
             dx += shift
-            # If we'd exit the viewBox, give up — accept overlap rather
-            # than push the group off-canvas entirely.
+            # If we'd exit the viewBox, fall through to a VERTICAL
+            # shift instead — slide the group DOWN past the offender's
+            # bottom edge.  The whole-figure can then exceed the
+            # viewBox height (caught by overflow:auto on the canvas
+            # viewer's <main> so the user can scroll), which is much
+            # better than leaving boxes superimposed.
             if x + dx + w > vb_w - 5:
                 dx = 0.0
+                # Compute dy to clear the offender vertically.
+                dy_needed = (overlap[1] + overlap[3] + PAD) - y
+                if dy_needed > 0:
+                    # Record the shift as a vertical translate; the
+                    # final transform combines both axes.
+                    box = (x, y + dy_needed, w, h)
+                    placed.append(box)
+                    edits.append((start, end, _apply_translate(body, 0, dy_needed)))
                 break
         placed.append((x + dx, y, w, h))
         if abs(dx) < 0.5:
             continue
-        # Find existing transform on the <g> opening tag and update it.
-        open_m = re.match(r'<g\b[^>]*?>', body, re.S)
-        if not open_m:
-            continue
-        open_tag = open_m.group(0)
-        new_open = re.sub(
-            r'\btransform\s*=\s*(?:"[^"]*"|\'[^\']*\')',
-            '',
-            open_tag,
-        )
-        # Insert transform just before the closing > of the <g> tag.
-        new_open = re.sub(
-            r'>$',
-            f' transform="translate({dx:.0f} 0)">',
-            new_open,
-            count=1,
-        )
-        new_body = new_open + body[open_m.end():]
-        edits.append((start, end, new_body))
+        edits.append((start, end, _apply_translate(body, dx, 0.0)))
 
     if not edits:
         return svg
@@ -2152,6 +2166,30 @@ def reflow_overlapping_text(svg: str) -> str:
                 return True
         return False
 
+    def _enclosing_group_translate(svg_text: str, pos: int) -> tuple[float, float]:
+        """If ``pos`` is inside a <g transform="translate(dx dy)">, return
+        (dx, dy); otherwise (0, 0).  Used when adding a group-internal
+        text element to the obstacle list so its REAL screen position
+        accounts for any earlier reflow_overlapping_groups shift."""
+        for s, e in g_ranges:
+            if not (s <= pos < e):
+                continue
+            head_end = svg_text.find('>', s)
+            if head_end < 0:
+                continue
+            head = svg_text[s:head_end + 1]
+            m = re.search(
+                r'transform\s*=\s*(?:"|\')\s*translate\(\s*([\-0-9.]+)[\s,]+([\-0-9.]+)\s*\)',
+                head,
+            )
+            if m:
+                try:
+                    return float(m.group(1)), float(m.group(2))
+                except ValueError:
+                    return 0.0, 0.0
+            return 0.0, 0.0
+        return 0.0, 0.0
+
     PAD = 4.0       # min separation between text bboxes
     STEP = 4.0      # shift increment
     COL_DX = 480.0  # second-column x offset
@@ -2165,6 +2203,45 @@ def reflow_overlapping_text(svg: str) -> str:
     matches = list(text_pattern.finditer(svg))
     placed: list[tuple[float, float, float, float]] = []  # (x, y, w, h) in bbox form
     edits: list[tuple[int, int, str]] = []  # (start, end, new_tag)
+
+    # Pre-populate `placed` with the bboxes of EVERY <text> that lives
+    # inside a <g> group.  We DON'T move those (matrix cells, group-
+    # internal labels — autofit_group_rects + reflow_overlapping_groups
+    # handle their containers).  But they DO act as obstacles that the
+    # top-level text must avoid; without this step a top-level
+    # paragraph could end up sitting right on top of a group's
+    # formula, which was the user's most recent visible bug.
+    for m in matches:
+        if not _in_group(m.start()):
+            continue
+        head = m.group(0).split('>', 1)[0] + '>'
+        a = _attrs(head)
+        try:
+            tx = float(a.get("x", "")); ty = float(a.get("y", ""))
+        except ValueError:
+            continue
+        content = m.group(1).strip()
+        if not content:
+            continue
+        try:
+            fs = float(a.get("font-size", "16").rstrip("pxptem"))
+        except ValueError:
+            fs = 16.0
+        anchor = (a.get("text-anchor") or "start").lower()
+        est_w = max(len(content), 1) * fs * 0.6
+        if anchor == "middle":
+            x0 = tx - est_w / 2
+        elif anchor == "end":
+            x0 = tx - est_w
+        else:
+            x0 = tx
+        # Account for any parent <g transform="translate(dx dy)"> by
+        # looking at the immediately enclosing group's opening tag.
+        # The group itself may have been shifted by an earlier pass
+        # (reflow_overlapping_groups), so the obstacle's REAL screen
+        # position is the cell coords PLUS the group's translate.
+        gdx, gdy = _enclosing_group_translate(svg, m.start())
+        placed.append((x0 + gdx, ty - fs * 0.9 + gdy, est_w, fs * 1.2))
 
     for m in matches:
         if _in_group(m.start()):

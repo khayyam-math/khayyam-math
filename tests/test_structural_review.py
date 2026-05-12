@@ -611,3 +611,34 @@ def test_incomplete_matrix_left_alone():
     )
     # Should pass through unchanged.
     assert normalize_matrix_layout(svg) == svg
+
+
+def test_toplevel_text_avoids_group_internal_text():
+    """The bug surfaced as: <text> inside a <g> sat at y=610,
+    a TOP-LEVEL <text> at y=620 overlapped it.  The group-internal
+    text must stay put (matrix cells shouldn't move) but the
+    top-level text must shift to clear it."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="det">'
+        '<text x="20" y="610" font-size="20">det(A) = 1(4*0 - 2*6) - 2(3*0 - 2*7) + 3(3*6 - 4*7)</text>'
+        '</g>'
+        '<text x="20" y="620" font-size="16">The inverse of matrix A is given by ...</text>'
+        '</svg>'
+    )
+    out = reflow_overlapping_text(svg)
+    import re
+    # Group-internal text unchanged.
+    assert '<text x="20" y="610"' in out
+    # Top-level "The inverse" text either shifted DOWN past the
+    # group (y >= 625) OR sideways into a second column (x >= 400).
+    # Either resolution is acceptable — just don't overlap.
+    m = re.search(
+        r'<text x="(\d+)" y="(\d+)"[^>]*>The inverse',
+        out,
+    )
+    assert m, f"top-level inverse text not found in {out}"
+    x, y = int(m.group(1)), int(m.group(2))
+    assert y >= 625 or x >= 400, (
+        f"top-level text at ({x},{y}) still overlaps group text at (20,610)"
+    )
