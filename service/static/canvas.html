@@ -598,16 +598,18 @@
   }
 
   function applyRevealMask() {
-    // Hide every element that is gated by narration but hasn't been
-    // revealed yet.  Reset on every SVG re-render (innerHTML replace).
-    for (const id of Object.keys(revealAt)) {
-      if (revealed[id]) continue;
-      const sel = `[data-nid="${cssEscape(id)}"], [data-eid="${cssEscape(id)}"], [id="${cssEscape(id)}"]`;
-      stage.querySelectorAll(sel).forEach(el => {
-        el.style.opacity = '0';
-        el.style.transition = 'opacity 0.35s ease-out';
-      });
-    }
+    // DISABLED — user feedback: figures should be fully visible from
+    // the moment they render, not gated on audio playback.  Before
+    // this change, every narration-highlighted element started at
+    // opacity:0 and only faded in when its phrase began.  Users who
+    // didn't press Play (or whose audio failed) saw a blank canvas
+    // with "random missing matrices"; the screenshot-frozen snapshots
+    // in chat ALSO came out blank because they captured opacity-0 SVG.
+    // Narration emphasis still works via the highlight rect (the
+    // colored .sevim-highlight stroke / fill), which doesn't depend
+    // on opacity transitions.  Keep the function as a no-op so
+    // callers don't break; tickReveal handles a separate code path
+    // (it sets opacity 1, which is the default).
   }
 
   function tickReveal() {
