@@ -205,12 +205,34 @@ def list_canvases():
     return {"canvases": REGISTRY.list()}
 
 
+_CANVAS_404_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport"
+content="width=device-width,initial-scale=1"><title>Canvas not found</title>
+<style>
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif; background: #fff; color: #444;
+    display: flex; align-items: center; justify-content: center;
+    height: 100dvh; padding: 1em; text-align: center; }
+  .card { max-width: 360px; }
+  h1 { font-size: 1.05em; color: #222; margin: 0 0 0.4em 0; }
+  p  { font-size: 0.9em; line-height: 1.4; }
+</style></head><body><div class="card">
+  <h1>This figure is no longer available.</h1>
+  <p>The server was restarted since this canvas was created.
+  Ask a new question in chat and a fresh figure will appear here.</p>
+</div></body></html>"""
+
+
 @app.get("/canvas/{cid}/view", response_class=HTMLResponse)
 def canvas_view(cid: str):
     try:
         REGISTRY.get(cid)
     except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+        # Friendly HTML 404 — without this the iframe would render
+        # the raw FastAPI JSON ({"detail": "canvas ... not found"})
+        # which the user reported as a broken UX after a deploy
+        # invalidated their stored canvas id.
+        return HTMLResponse(_CANVAS_404_HTML, status_code=404)
     html_path = _STATIC_DIR / "canvas.html"
     if not html_path.exists():
         raise HTTPException(500, "canvas.html template missing")

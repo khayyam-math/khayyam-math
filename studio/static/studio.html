@@ -503,16 +503,39 @@
   // Also tries /canvases to recover canvases created WHILE the tab
   // was backgrounded (express finished server-side, tool_result
   // event was missed because the SSE connection died).
+  async function _canvasExists(id) {
+    // Validate against the server's REGISTRY before adopting a
+    // stored canvas id.  The in-memory REGISTRY is wiped whenever
+    // ECS replaces the task (deploys, scaling, crashes), so
+    // localStorage can outlive the server's knowledge of the canvas.
+    // A 404 here means we should NOT restore.
+    try {
+      const r = await fetch('/canvas/' + id + '/state',
+                            {method: 'GET', cache: 'no-store'});
+      return r.ok;
+    } catch (_) { return false; }
+  }
+
   async function restoreCanvas() {
     try {
       if (!canvasId) {
-        // No id in memory.  Check localStorage first; then fall back
-        // to /canvases (most recent) when a chat turn is in flight.
         canvasId = _readPersistedCanvas();
       }
+      // VALIDATE persisted id: a 404 from the server means the
+      // canvas registry was reset (ECS task replacement) and we
+      // would show the user a raw JSON error blob inside the iframe.
+      if (canvasId) {
+        const ok = await _canvasExists(canvasId);
+        if (!ok) {
+          canvasId = null;
+          _writePersistedCanvas(null);
+        }
+      }
       if (!canvasId) {
-        // Look for an in-flight asst placeholder — signals that the
-        // user submitted a prompt but never got the tool_result.
+        // No valid id.  If the chat shows an in-flight asst
+        // placeholder, the user just submitted — try /canvases for
+        // the latest server-side canvas (express completed while
+        // the SSE stream was dead).
         const inflight = document.querySelector('.msg.asst:last-of-type');
         const looksPending = inflight && (inflight.textContent || '').trim() === '…';
         if (looksPending) {
@@ -522,8 +545,12 @@
               const data = await r.json();
               const list = (data && data.canvases) || [];
               if (list.length) {
-                canvasId = list[list.length - 1].canvas_id || list[list.length - 1].id;
-                _writePersistedCanvas(canvasId);
+                const candidate = list[list.length - 1].canvas_id
+                                || list[list.length - 1].id;
+                if (candidate && await _canvasExists(candidate)) {
+                  canvasId = candidate;
+                  _writePersistedCanvas(canvasId);
+                }
               }
             }
           } catch (_) {}
