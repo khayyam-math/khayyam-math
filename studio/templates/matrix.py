@@ -509,36 +509,37 @@ def matrix_inverse(
     canvas_w: int = 900,
     canvas_h: int | None = None,
 ) -> Tuple[str, List[dict]]:
-    """A and A^(-1) side-by-side; singular case shows error message."""
+    """A and A^(-1) side-by-side, with intermediate STEP annotations
+    that the narration walkthrough highlights one-by-one."""
     n = len(a)
     if n == 0 or n != len(a[0]):
         raise ValueError("inverse requires a square matrix")
     inv = _inverse(a)
+    det_val = _det(a)
     cell = _pick_cell(n)
     PAD = 4
     FONT = max(14, int(cell * 0.45))
     OP_GAP = 30
-    OP_W = 80  # wider for "A^-1 ="
+    OP_W = 80
     w_a = n * cell + 2 * PAD
     w_inv = n * cell + 2 * PAD
     total_w = w_a + OP_GAP + OP_W + OP_GAP + w_inv
     h_a = n * cell + 2 * PAD
     h_inv = n * cell + 2 * PAD
-    # Auto-tight canvas height: title (~80) + matrix + bottom (~50).
-    # Avoids the "huge empty stage rectangle" the user reported when
-    # a 178-px matrix was centred in a 650-px viewBox — most of the
-    # frame was empty whitespace and the iframe clipped the bottom
-    # row on mobile.
+    # Step annotations below the matrices: det(A), the divide-by-det
+    # formula, and the verification.  Each gets its own y-row of
+    # ~28 px so narration can highlight them as the audio walks.
+    STEP_DY = 32
+    n_steps = 3 if inv is not None else 2
     if canvas_h is None:
-        canvas_h = max(360, 130 + h_a + 60)
+        canvas_h = max(420, 130 + h_a + 30 + n_steps * STEP_DY + 40)
     x_a = (canvas_w - total_w) // 2
     x_op = x_a + w_a + OP_GAP
     x_inv = x_op + OP_W + OP_GAP
-    # Anchor near the top — leaves room for the title above and a
-    # comfortable margin below.
     y_a = 110
     y_inv = 110
     y_center = y_a + h_a // 2
+    y_steps_top = y_a + h_a + 30      # first step caption sits below the matrices
 
     parts: List[str] = []
     parts.append(_svg_open(canvas_w, canvas_h, "Matrix inverse: A and A&#x207b;&#xb9;"))
@@ -550,19 +551,38 @@ def matrix_inverse(
         "A&#x207b;&#xb9; =", size=26,
     ))
     if inv is None:
-        # Singular — render empty placeholder with red error caption.
         empty = [["-" for _ in range(n)] for _ in range(n)]
         parts.append(_matrix_block("matrix_inv", empty, x_inv, y_inv, n, n,
                                    cell, PAD, FONT))
-        parts.append(
-            f'<text id="singular_error" x="{x_inv + w_inv // 2:.0f}" '
-            f'y="{y_inv + h_inv + 30:.0f}" font-size="16" '
-            f'text-anchor="middle" font-family="serif" fill="#a00">'
-            f'singular (det = 0)</text>'
-        )
     else:
         parts.append(_matrix_block("matrix_inv", inv, x_inv, y_inv, n, n,
                                    cell, PAD, FONT))
+
+    # Step annotations.  Each one's id is referenced by the narration
+    # so the canvas highlights the line currently being explained.
+    def _step(sid: str, txt: str, row: int, color: str = "#111") -> str:
+        return (
+            f'<text id="{sid}" x="{canvas_w // 2}" '
+            f'y="{y_steps_top + row * STEP_DY}" font-size="20" '
+            f'text-anchor="middle" font-family="serif" fill="{color}">'
+            f'{txt}</text>'
+        )
+    if inv is None:
+        parts.append(_step("step_det",
+                           f"Step 1.   det(A) = 0", 0, color="#a00"))
+        parts.append(_step("singular_error",
+                           "A is singular — no inverse exists",
+                           1, color="#a00"))
+    else:
+        parts.append(_step("step_det",
+                           f"Step 1.   det(A) = {_fmt(det_val)}    (non-zero, "
+                           f"so A is invertible)", 0))
+        parts.append(_step("step_adj",
+                           f"Step 2.   adj(A) = transpose of the cofactor "
+                           f"matrix of A", 1))
+        parts.append(_step("step_formula",
+                           f"Step 3.   A&#x207b;&#xb9; = adj(A) / det(A)    "
+                           f"=  adj(A) / {_fmt(det_val)}", 2))
     parts.append("</svg>")
     svg = "".join(parts)
     narration = [
@@ -573,10 +593,10 @@ def matrix_inverse(
     ]
     if inv is None:
         narration.extend([
-            {"speak": (f"First we compute the determinant of A.  "
-                       f"In this case the determinant is zero."),
-             "highlight": ["matrix_a"]},
-            {"speak": ("A zero determinant means A is singular — its columns "
+            {"speak": (f"Step one: compute the determinant of A.  "
+                       f"In this case the determinant is zero — shown below."),
+             "highlight": ["step_det"]},
+            {"speak": ("A zero determinant means A is singular: its columns "
                        "are linearly dependent."),
              "highlight": ["singular_error"]},
             {"speak": ("Because of that, A does not have a multiplicative "
@@ -585,26 +605,29 @@ def matrix_inverse(
              "highlight": ["singular_error"]},
         ])
     else:
-        det_val = _det(a)
         narration.extend([
             {"speak": (f"Step one: compute the determinant of A.  "
-                       f"For this matrix, the determinant is {_fmt(det_val)}."),
-             "highlight": ["matrix_a"]},
-            {"speak": ("Since the determinant is non-zero, A is invertible "
+                       f"For this matrix it equals {_fmt(det_val)} — shown "
+                       f"in the line below."),
+             "highlight": ["step_det"]},
+            {"speak": ("Because the determinant is non-zero, A is invertible "
                        "and a unique inverse exists."),
-             "highlight": ["matrix_a"]},
+             "highlight": ["step_det"]},
             {"speak": ("Step two: compute the adjugate of A.  The adjugate "
-                       "is the transpose of the cofactor matrix — each entry "
-                       "of the cofactor matrix is plus or minus the determinant "
-                       "of the matrix you get by deleting that row and column."),
-             "highlight": ["matrix_a"]},
+                       "is the transpose of the cofactor matrix — each "
+                       "cofactor is plus or minus the determinant of the "
+                       "submatrix you get by deleting one row and column "
+                       "of A."),
+             "highlight": ["step_adj"]},
             {"speak": (f"Step three: divide the adjugate by the determinant "
-                       f"{_fmt(det_val)}.  The result is A inverse, shown on "
-                       f"the right."),
+                       f"{_fmt(det_val)}.  This is the formula A inverse "
+                       f"equals adjugate over determinant."),
+             "highlight": ["step_formula"]},
+            {"speak": ("The result is the matrix A inverse, shown on the right."),
              "highlight": ["matrix_inv"]},
             {"speak": ("As a verification, multiplying A by A inverse — in "
-                       f"either order — gives the {n} by {n} identity matrix, "
-                       "with ones on the diagonal and zeros everywhere else."),
+                       f"either order — produces the {n} by {n} identity "
+                       "matrix, with ones on the diagonal and zeros elsewhere."),
              "highlight": ["matrix_a", "matrix_inv"]},
         ])
     return svg, narration
