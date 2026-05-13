@@ -218,6 +218,116 @@ def extract_text_items(svg: str) -> List[TextItem]:
     return items
 
 
+# ── Group extraction (extends Stage 1 to <g> blocks) ──────────────
+
+
+@dataclass
+class GroupItem:
+    """A top-level <g> with a translate transform — placeable as a
+    rigid block in the same CP-SAT model as text labels."""
+
+    tag_start: int
+    tag_end: int               # end of the OPENING <g ...> tag
+    full_end: int              # end of the matching </g>
+    elem_id: str
+    anchor_x: float            # original translate x
+    anchor_y: float            # original translate y
+    width: float               # bbox width of the group's content
+    height: float              # bbox height of the group's content
+    bbox_x: float              # bbox top-left x in viewBox space
+    bbox_y: float              # bbox top-left y in viewBox space
+    open_tag: str              # raw opening <g ...> for re-emission
+
+
+_TRANSLATE_RE = re.compile(
+    r'translate\s*\(\s*([-+0-9.]+)\s*[, ]\s*([-+0-9.]+)?\s*\)'
+)
+
+
+def _parse_translate(transform: str) -> Tuple[float, float]:
+    """Pull (tx, ty) out of a transform="translate(x y)" attribute.
+
+    Returns (0, 0) for missing/unparseable transforms.  Y is optional
+    in the SVG spec (defaults to 0)."""
+    if not transform:
+        return (0.0, 0.0)
+    m = _TRANSLATE_RE.search(transform)
+    if not m:
+        return (0.0, 0.0)
+    try:
+        tx = float(m.group(1))
+        ty = float(m.group(2)) if m.group(2) is not None else 0.0
+        return (tx, ty)
+    except (ValueError, TypeError):
+        return (0.0, 0.0)
+
+
+def extract_group_items(svg: str) -> List[GroupItem]:
+    """Find top-level <g transform="translate(x, y)"> blocks, compute
+    each one's bbox using its first <rect> child as the reference
+    boundary.
+
+    Groups WITHOUT a translate or WITHOUT a first <rect> child are
+    skipped — autofit_group_rects upstream already ensures the
+    standard "outer rect + child labels" pattern, so any group without
+    a rect is either a one-off decoration we shouldn't move, or it
+    has been autofitted into a recognisable shape.
+    """
+    items: List[GroupItem] = []
+    depth = 0
+    open_pos = -1
+    open_tag_str = ""
+    for m in re.finditer(r'<g\b[^>]*>|</g>', svg, re.S):
+        token = m.group(0)
+        if token.startswith("</"):
+            depth -= 1
+            if depth == 0 and open_pos >= 0:
+                body = svg[open_pos:m.end()]
+                open_end_match = re.match(r'<g\b[^>]*?>', body, re.S)
+                if not open_end_match:
+                    open_pos = -1
+                    continue
+                open_tag = open_end_match.group(0)
+                attrs = _attrs(open_tag)
+                tx, ty = _parse_translate(attrs.get("transform", ""))
+                # First <rect> child becomes the group's bbox.
+                rect_m = re.search(
+                    r'<rect\b[^/]*?/>|<rect\b[^>]*></rect>',
+                    body[open_end_match.end():], re.S,
+                )
+                if rect_m:
+                    rect_attrs = _attrs(rect_m.group(0))
+                    try:
+                        rx = float(rect_attrs.get("x", "0"))
+                        ry = float(rect_attrs.get("y", "0"))
+                        rw = float(rect_attrs.get("width", "0"))
+                        rh = float(rect_attrs.get("height", "0"))
+                    except ValueError:
+                        open_pos = -1
+                        continue
+                    if rw > 0 and rh > 0:
+                        items.append(GroupItem(
+                            tag_start=open_pos,
+                            tag_end=open_pos + open_end_match.end(),
+                            full_end=m.end(),
+                            elem_id=attrs.get("id", ""),
+                            anchor_x=tx,
+                            anchor_y=ty,
+                            width=rw,
+                            height=rh,
+                            bbox_x=tx + rx,
+                            bbox_y=ty + ry,
+                            open_tag=open_tag,
+                        ))
+                open_pos = -1
+        else:
+            if depth == 0:
+                open_pos = m.start()
+                open_tag_str = token
+            depth += 1
+    return items
+
+
 # ── Stage 2: candidate-position generation ─────────────────────────
 
 
@@ -452,6 +562,158 @@ def count_overlaps(items: List[TextItem], candidates: List[Candidate],
 # ── Public entry point ─────────────────────────────────────────────
 
 
+def _bbox_for_group(g: GroupItem) -> Tuple[float, float, float, float]:
+    return (g.bbox_x, g.bbox_y, g.bbox_x + g.width, g.bbox_y + g.height)
+
+
+def _gen_group_candidates(groups: List[GroupItem],
+                          viewbox: Tuple[float, float, float, float],
+                          ) -> List[List[Tuple[float, float, Tuple[float, float, float, float], int]]]:
+    """For each group, generate candidate (translate_dx, translate_dy,
+    new_bbox, cost) options.
+
+    Groups are large compared to text, so we use a coarser candidate
+    set than for labels: 4 cardinal directions × 3 offsets + anchor,
+    plus 2 additional "shove" offsets at (120, 160) to escape large
+    pileups (e.g. five 200-px-wide matrices on one row).  Candidates
+    whose bbox would clip the viewBox are filtered out so the MIP
+    doesn't waste variables.  An anchor fallback is added at the end
+    so every group has at least one candidate.
+    """
+    vbx, vby, vbw, vbh = viewbox
+    margin = 4.0
+    out: List[List[Tuple[float, float, Tuple[float, float, float, float], int]]] = []
+    offsets = (0.0, 24.0, 60.0, 120.0, 160.0)
+    dirs = [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, -1.0), (0.0, 1.0)]
+    for g in groups:
+        cands: List[Tuple[float, float, Tuple[float, float, float, float], int]] = []
+        seen: set = set()
+        for dx_unit, dy_unit in dirs:
+            for off in offsets:
+                if (dx_unit, dy_unit) == (0.0, 0.0) and off != 0.0:
+                    continue
+                dx = dx_unit * off
+                dy = dy_unit * off
+                new_bbox = (g.bbox_x + dx, g.bbox_y + dy,
+                            g.bbox_x + g.width + dx, g.bbox_y + g.height + dy)
+                # Must fit inside viewBox.
+                if (new_bbox[0] < vbx + margin or new_bbox[2] > vbx + vbw - margin
+                        or new_bbox[1] < vby + margin or new_bbox[3] > vby + vbh - margin):
+                    continue
+                key = (int(dx), int(dy))
+                if key in seen:
+                    continue
+                seen.add(key)
+                cost = int(((dx ** 2 + dy ** 2) ** 0.5) / 4.0)
+                cands.append((dx, dy, new_bbox, cost))
+        if not cands:
+            # All candidates clip viewBox — give the solver a clamped
+            # anchor so the group at least has ONE option.  We clamp
+            # the group's translate so its bbox fits inside the
+            # viewBox even if the original anchor didn't.
+            clamped_x = max(vbx + margin, min(g.bbox_x, vbx + vbw - g.width - margin))
+            clamped_y = max(vby + margin, min(g.bbox_y, vby + vbh - g.height - margin))
+            dx = clamped_x - g.bbox_x
+            dy = clamped_y - g.bbox_y
+            new_bbox = (clamped_x, clamped_y,
+                        clamped_x + g.width, clamped_y + g.height)
+            cands.append((dx, dy, new_bbox, int(((dx ** 2 + dy ** 2) ** 0.5) / 4.0)))
+        out.append(cands)
+    return out
+
+
+def plan_groups(svg: str, *, time_limit_s: float = 2.0,
+                protected_ids: Optional[set] = None) -> str:
+    """Optimise <g> group positions.
+
+    Each top-level <g> with a translate transform gets candidate
+    new positions; CP-SAT picks one per group minimising total
+    displacement subject to no-pairwise-bbox-overlap and viewBox
+    containment.  Groups whose id is in protected_ids stay put
+    (narration anchoring).  Fails open on missing ortools / infeasible.
+    """
+    if not _ORTOOLS_AVAILABLE:
+        return svg
+    vb = _viewbox(svg)
+    if vb is None:
+        return svg
+    groups = extract_group_items(svg)
+    if len(groups) < 2:
+        # Single group + viewBox clamp is still useful — handled by
+        # plan_layout's group-clamp fallback.  Skip the MIP otherwise.
+        return svg
+    protected_ids = protected_ids or set()
+    cands_per_group = _gen_group_candidates(groups, vb)
+    # Pinned groups get only the anchor candidate.
+    for i, g in enumerate(groups):
+        if g.elem_id in protected_ids:
+            cands_per_group[i] = [(0.0, 0.0, _bbox_for_group(g), 0)]
+
+    model = cp_model.CpModel()
+    # Flatten candidates into a single list with (group_idx, cand_idx).
+    flat: List[Tuple[int, int, Tuple[float, float, Tuple[float, float, float, float], int]]] = []
+    for gi, cs in enumerate(cands_per_group):
+        for ci, c in enumerate(cs):
+            flat.append((gi, ci, c))
+    x_vars = [model.NewBoolVar(f"g_{gi}_{ci}") for gi, ci, _ in flat]
+    # Exactly one candidate per group.
+    for gi in range(len(groups)):
+        idxs = [k for k, (g_idx, _, _) in enumerate(flat) if g_idx == gi]
+        if idxs:
+            model.Add(sum(x_vars[k] for k in idxs) == 1)
+    # No-overlap pairs.
+    for a in range(len(flat)):
+        ga, _, (_, _, bbox_a, _) = flat[a]
+        for b in range(a + 1, len(flat)):
+            gb, _, (_, _, bbox_b, _) = flat[b]
+            if ga == gb:
+                continue
+            if _bboxes_overlap(bbox_a, bbox_b, pad=8.0):
+                model.Add(x_vars[a] + x_vars[b] <= 1)
+    # Minimise displacement.
+    model.Minimize(sum(c[3] * x_vars[k] for k, (_, _, c) in enumerate(flat)))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit_s
+    solver.parameters.random_seed = 42
+    solver.parameters.num_workers = 1
+    status = solver.Solve(model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return svg
+    picked: List[Tuple[float, float]] = [(0.0, 0.0)] * len(groups)
+    for k, var in enumerate(x_vars):
+        if solver.Value(var) == 1:
+            gi, _, (dx, dy, _, _) = flat[k]
+            picked[gi] = (dx, dy)
+    # Re-emit SVG with new transforms (right-to-left edits).
+    pairs = sorted(
+        ((g, picked[i]) for i, g in enumerate(groups)),
+        key=lambda p: p[0].tag_start,
+        reverse=True,
+    )
+    out = svg
+    for g, (dx, dy) in pairs:
+        if dx == 0 and dy == 0:
+            continue
+        new_x = g.anchor_x + dx
+        new_y = g.anchor_y + dy
+        new_open = re.sub(
+            r'\btransform\s*=\s*(?:"[^"]*"|\'[^\']*\')',
+            f'transform="translate({new_x:.0f} {new_y:.0f})"',
+            g.open_tag,
+            count=1,
+        )
+        if new_open == g.open_tag:
+            # No transform attribute existed — inject one.
+            new_open = re.sub(
+                r'>$',
+                f' transform="translate({new_x:.0f} {new_y:.0f})">',
+                g.open_tag,
+                count=1,
+            )
+        out = out[:g.tag_start] + new_open + out[g.tag_end:]
+    return out
+
+
 def plan_layout(svg: str, *, time_limit_s: float = 2.0,
                 protected_ids: Optional[set] = None) -> str:
     """Optimise top-level <text> positions in the SVG.
@@ -471,9 +733,15 @@ def plan_layout(svg: str, *, time_limit_s: float = 2.0,
     vb = _viewbox(svg)
     if vb is None:
         return svg
+    # Place groups first — their bboxes are large, and once they're
+    # positioned cleanly the top-level text labels (which sit around
+    # them) can be placed relative to a stable anchor.  Fails open
+    # if no groups or solver infeasible.
+    svg = plan_groups(svg, time_limit_s=time_limit_s,
+                      protected_ids=protected_ids)
     items = extract_text_items(svg)
     if len(items) < 2:
-        # Nothing to optimise.
+        # Nothing to optimise at the text layer.
         return svg
     # Protected items keep their original position — generate ONLY
     # the anchor candidate for them.  Other items get the full set.
