@@ -222,13 +222,14 @@ class SevimStack(Stack):
             # line removed) to release the override.
             "SEVIM_FORCE_ACTIVE_MODEL": "gpt-4o",
             # Figure-review backend (math-correctness inspector).
-            # Default: gpt-4o-mini in SVG-as-text mode -- ~15x cheaper
-            # than gpt-4o-vision and works regardless of which model
-            # generated the figure.  Flip to PNG-vision review by
-            # changing SEVIM_REVIEW_MODE=vision and (optionally)
-            # SEVIM_REVIEW_MODEL=gpt-4o.
-            "SEVIM_REVIEW_MODE": "text",
-            "SEVIM_REVIEW_MODEL": "gpt-4o-mini",
+            # Vision-mode on gpt-4o so the reviewer rasterises the
+            # SVG to PNG and inspects the pixels — only way to catch
+            # text overlap and wrong-topic figures.  Text-mode review
+            # missed real overlap bugs because SVG XML doesn't render.
+            # Adds ~10-20 s per turn to the worst-case retry path but
+            # the figures that actually pass are dramatically better.
+            "SEVIM_REVIEW_MODE": "vision",
+            "SEVIM_REVIEW_MODEL": "gpt-4o",
             # TTS: tts-1 is ~3x faster than tts-1-hd at virtually
             # identical audibility for short narration phrases.  At
             # 15-30 phrases per figure, hd was adding 20-40s of
