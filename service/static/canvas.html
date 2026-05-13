@@ -99,13 +99,27 @@
     main::-webkit-scrollbar-track {
       background: rgba(0, 0, 0, 0.06);
     }
-    /* SVG stays at native viewBox dimensions so text is readable.
-       The earlier width:100% forced-fit made everything tiny AND
-       removed the scroll affordance — reverted in favour of the
-       slidable canvas. */
+    /* SVG sizing on mobile: fit the iframe width when feasible, but
+       NEVER below a readable minimum.
+         - width:100% → fit the container horizontally
+         - min-width:640px → if container is narrower (e.g. 375-px
+           iPhone), the SVG stays 640 px wide so text in a 900-px
+           viewBox renders at ~71% scale (font-size 16 → 11.4 px,
+           which is right at the legibility floor).
+         - height:auto preserves aspect ratio.
+       On a phone narrower than 640 px, <main>'s overflow:auto
+       activates: user pans horizontally for the ~265 px sliver that
+       doesn't fit.  On a phone ≥640 px wide, the SVG fully fits.
+       This is the "matching but slidable" middle ground the user
+       asked for — figure mostly visible, no microscopic text, no
+       silent edge-clip. */
     #stage svg {
-      width: auto !important;
+      width: 100% !important;
       height: auto !important;
+      min-width: 640px !important;
+      max-width: none !important;
+      max-height: none !important;
+      min-height: 0 !important;
     }
   }
   #stage {
