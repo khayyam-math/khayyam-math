@@ -1365,6 +1365,54 @@ async def express_figure(
 
     _log(f"start prompt={user_prompt[:60]!r} model={model}")
 
+    # ── Template fast-path ────────────────────────────────────────
+    # Try the prompt → template classifier before the full LLM-SVG
+    # loop.  If the prompt is asking for a matrix operation the
+    # template library can render deterministically, skip the 30-90s
+    # express loop entirely.  Disabled via SEVIM_TEMPLATE_ROUTER=off
+    # or when no API key is configured (the classifier needs one).
+    if (api_key
+            and os.environ.get("SEVIM_TEMPLATE_ROUTER", "on").lower() != "off"):
+        try:
+            from studio.templates.router import (
+                classify_prompt, render_template,
+            )
+            classified = await classify_prompt(
+                user_prompt,
+                api_key=api_key or "",
+                base_url=base_url,
+            )
+            if classified:
+                tpl_name, tpl_args = classified
+                rendered = render_template(tpl_name, tpl_args)
+                if rendered:
+                    tpl_svg, tpl_narration = rendered
+                    _log(
+                        f"template fast-path: {tpl_name} args="
+                        f"{sorted(tpl_args.keys())} svg={len(tpl_svg)} chars"
+                    )
+                    if on_svg_chunk is not None:
+                        # Stream the SVG to the iframe so progressive
+                        # paint still happens (instant on a template).
+                        try:
+                            await on_svg_chunk(tpl_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": tpl_svg,
+                        "narration": tpl_narration,
+                        "title": tpl_name.replace("_", " ").title(),
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": tpl_name,
+                    }
+                else:
+                    _log(f"template classifier picked {tpl_name} but "
+                         f"render rejected args; falling back to LLM")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"template router errored: {type(exc).__name__}: {exc}")
+
     for attempt in range(max_retries + 1):
         _log(f"attempt={attempt} sending main request")
         # 1. Ask LLM for {svg, narration, title} in structured form.

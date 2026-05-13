@@ -60,9 +60,13 @@ async def _run_express(
         return next(review_iter)
 
     # Stub PNG conversion so cairosvg isn't required for this unit test.
+    # SEVIM_TEMPLATE_ROUTER=off skips the prompt→template classifier
+    # (an extra LLM call) so we exercise only the SVG-direct loop.
+    import os
     with patch.object(express, "_svg_to_png", return_value=b"\x89PNG"), \
          patch.object(express, "_vision_review", AsyncMock(side_effect=fake_review)), \
-         patch("httpx.AsyncClient.post", new=fake_post):
+         patch("httpx.AsyncClient.post", new=fake_post), \
+         patch.dict(os.environ, {"SEVIM_TEMPLATE_ROUTER": "off"}):
         return await express.express_figure(
             user_prompt="show me X",
             base_url="http://stub",
