@@ -6,16 +6,27 @@
 <title>Khayyam Math — live canvas</title>
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #fafafa;
+    /* Force light color scheme inside the canvas iframe — figures are
+       drawn for a white background and our dark-mode override would
+       paint half the iframe near-black, which the user reported as
+       "the canvas has good size but a part has white background, the
+       rest is black." */
+    color-scheme: light;
+    --bg: #ffffff;
     --fg: #222;
     --muted: #777;
     --accent: #2a6df4;
     --highlight: #fbbf24;
     --border: #e0e0e0;
   }
+  /* Canvas figures are drawn for a WHITE background (black strokes,
+     dark text, light fills) — switching the iframe body to dark mode
+     while the SVG #stage stayed white made the canvas look split
+     "half white, half black."  Force a white iframe background
+     regardless of system color scheme.  --fg / --border still flip
+     so the header chrome remains legible in dark mode. */
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1a1a1a; --fg: #eee; --muted: #888; --border: #333; }
+    :root { --fg: #eee; --muted: #888; --border: #333; }
   }
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
