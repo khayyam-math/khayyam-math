@@ -44,6 +44,18 @@ Supported templates:
   system_of_equations — "solve 2x+3y=8, x-y=1", "Ax = b system"
     args: {"coeffs": [[...]], "rhs": [...]}
 
+  state_diagram — "DFA accepting strings ending in 1", "draw a 3-state
+    automaton that recognizes …", "state machine for …", "FSA for …"
+    args: {
+      "states": [{"id": "q0", "label": "q0", "initial": true|false,
+                  "accept": true|false}, ...],
+      "transitions": [{"source": "q0", "target": "q1", "label": "a"}, ...]
+    }
+    For "show a DFA / state machine for X", infer the states +
+    transitions that recognize the described language.  At LEAST one
+    state should have "initial": true and at least one should have
+    "accept": true unless the prompt explicitly says otherwise.
+
 Rules:
 1. Only return a template if the prompt CLEARLY maps to one of the above.  Vague matrix questions like "explain matrix multiplication" without specific matrices should return null — those need the LLM-SVG path for an illustrative figure.
 2. If the prompt names matrices but doesn't give entries (e.g. "multiply two 2x2 matrices A and B" without saying what A and B contain), invent small simple entries (1-9, no zeros except where natural) so the template renders something meaningful.
@@ -123,6 +135,7 @@ def _build_dispatch() -> None:
     from studio.templates import (
         matrix_multiplication, matrix_transpose,
         matrix_determinant, matrix_inverse, system_of_equations,
+        state_diagram,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -130,6 +143,7 @@ def _build_dispatch() -> None:
         "matrix_determinant": matrix_determinant,
         "matrix_inverse": matrix_inverse,
         "system_of_equations": system_of_equations,
+        "state_diagram": state_diagram,
     }
 
 

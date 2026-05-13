@@ -20,6 +20,7 @@ from studio.templates.matrix import (
     matrix_inverse,
     system_of_equations,
 )
+from studio.templates.graph import state_diagram
 
 __all__ = [
     "matrix_multiplication",
@@ -27,4 +28,5 @@ __all__ = [
     "matrix_determinant",
     "matrix_inverse",
     "system_of_equations",
+    "state_diagram",
 ]
