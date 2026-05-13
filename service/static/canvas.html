@@ -74,33 +74,39 @@
     background: white;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
-  /* Fallback scroll: when the generated figure is taller than its
-     viewBox can show comfortably AND the two-column layout rules
-     in the system prompt still left content overflowing, the user
-     should be able to SCROLL the canvas pane to see the rest.  The
-     SVG aspect-fit rules above keep the figure pinned at "fit
-     whichever axis binds first" so the natural case never scrolls;
-     this kicks in only when overflow actually occurs.  Touch users
-     get momentum scrolling. */
+  /* Scroll behaviour: when the figure exceeds the visible area
+     (either because the model emitted content outside the viewBox
+     or because the iframe is narrower than the figure's natural
+     width), the user must be able to pan the canvas instead of
+     having content silently clipped or shrunk into illegibility.
+     `main` uses a block layout (NOT flex) so its `overflow: auto`
+     can produce real scrollbars — `display: flex; justify-content:
+     center` would pin overflow to the centre and hide both edges.
+     The inline-block #stage centres horizontally via `text-align`
+     on `main` for the "fits comfortably" case. */
   main {
     overflow: auto;
     -webkit-overflow-scrolling: touch;
+    text-align: center;
   }
-  /* SVG must fit in BOTH dimensions of the stage container.  The
-     previous rule (max-width:100%, height:auto) scaled by width only,
-     so on a short iframe (mobile, 240px tall) a portrait figure
-     overflowed the bottom edge and clipped labels like sin(π/4).
-     `max-height:100%` + width:auto + `aspect-ratio:auto` lets the
-     browser pick whichever axis is the binding constraint while
-     preserving the SVG's intrinsic aspect ratio. */
+  #stage {
+    display: inline-block;
+    vertical-align: top;
+  }
+  /* SVG sizing.  `width:auto` makes the SVG render at its viewBox
+     natural size.  A JS-applied min-width / min-height (set to the
+     viewBox dimensions after every injection) keeps the figure at
+     its natural readable scale when the container is NARROWER than
+     the viewBox — at that point `main` scrolls instead of shrinking
+     text to dust.  `overflow: visible` lets out-of-viewBox content
+     render too (combined with the JS viewBox-expand pass below, this
+     catches model-emitted overflow). */
   #stage svg { display: block;
-               max-width: 100%; max-height: 100%;
-               width: auto; height: auto;
-               margin: 0 auto; }
-  /* Centre the stage in its main container even when the SVG
-     ends up narrower than the available width.  Without this the
-     SVG ends up flush-left on phones and leaves uneven margins. */
-  main { display: flex; align-items: center; justify-content: center; }
+               width: auto;
+               height: auto;
+               max-width: none; max-height: none;
+               margin: 0 auto;
+               overflow: visible; }
   .pulse { animation: pulse 400ms ease-out; }
   @keyframes pulse {
     0%   { box-shadow: 0 0 0 0 rgba(42,109,244,0.5); }
@@ -380,9 +386,44 @@
     if (!audio.paused) audio.pause();
   });
 
+  // After an SVG is injected into #stage, (a) expand its viewBox so
+  // any content the model painted outside the original viewBox bounds
+  // is included, and (b) set min-width / min-height on the SVG to the
+  // viewBox dimensions so a narrow container scrolls instead of
+  // shrinking text into illegibility.  Safe to call on any SVG; no-op
+  // when getBBox is unavailable (e.g. hidden tab) or returns empty.
+  function fitSvgToContent(svg) {
+    if (!svg || svg.tagName.toLowerCase() !== 'svg') return;
+    let bbox;
+    try { bbox = svg.getBBox(); } catch (_) { return; }
+    if (!bbox || (bbox.width <= 0 && bbox.height <= 0)) return;
+    const parts = (svg.getAttribute('viewBox') || '0 0 900 650')
+      .split(/[\s,]+/).map(Number);
+    let [vx, vy, vw, vh] = (parts.length >= 4)
+      ? parts : [0, 0, 900, 650];
+    const PAD = 8;
+    const cl = bbox.x - PAD;
+    const ct = bbox.y - PAD;
+    const cr = bbox.x + bbox.width + PAD;
+    const cb = bbox.y + bbox.height + PAD;
+    const nx = Math.min(vx, cl);
+    const ny = Math.min(vy, ct);
+    const nw = Math.max(vx + vw, cr) - nx;
+    const nh = Math.max(vy + vh, cb) - ny;
+    if (nx !== vx || ny !== vy || nw !== vw || nh !== vh) {
+      svg.setAttribute('viewBox', `${nx} ${ny} ${nw} ${nh}`);
+    }
+    // Cap the min dimensions so a runaway model output (viewBox
+    // 4000px wide) doesn't make scrolling feel infinite.  1100 / 800
+    // is a comfortable readable scale on any device.
+    svg.style.minWidth  = `${Math.min(nw, 1100)}px`;
+    svg.style.minHeight = `${Math.min(nh, 800)}px`;
+  }
+
   function applyState(state) {
     if (state.svg) {
       stage.innerHTML = state.svg;
+      fitSvgToContent(stage.querySelector('svg'));
       stage.classList.remove('pulse');
       void stage.offsetWidth;
       stage.classList.add('pulse');
@@ -876,6 +917,7 @@
       clearHighlight();
       activePhraseIndex = -1;
       stage.innerHTML = partial;
+      fitSvgToContent(stage.querySelector('svg'));
       stage.classList.remove('pulse');
     }
   });
