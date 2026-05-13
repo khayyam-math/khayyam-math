@@ -36,7 +36,10 @@ def test_mul_2x2_correct_product():
 def test_mul_nonconformable_shows_error():
     svg, narr = matrix_multiplication([[1, 2], [3, 4]], [[5, 6, 7]])
     assert "dim_error" in svg
-    assert any("undefined" in p["speak"].lower() for p in narr)
+    # Some phrase tells the learner the product is undefined / not defined.
+    assert any(("undefined" in p["speak"].lower())
+               or ("not defined" in p["speak"].lower())
+               for p in narr)
 
 
 def test_mul_5x5_fits_viewbox():

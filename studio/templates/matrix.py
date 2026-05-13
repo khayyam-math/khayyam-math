@@ -222,39 +222,57 @@ def matrix_multiplication(
 
     # Narration — phrase-timed walkthrough with highlight ids pointing
     # at the matrix groups we just emitted.
-    narration: List[dict] = []
-    narration.append({
-        "speak": f"We multiply matrix A, which is {rows_a} by {cols_a}, "
-                 f"with matrix B, which is {rows_b} by {cols_b}.",
-        "highlight": ["title"],
-    })
-    narration.append({
-        "speak": "Matrix A is the left operand.",
-        "highlight": ["matrix_a"],
-    })
-    narration.append({
-        "speak": "Matrix B is the right operand.",
-        "highlight": ["matrix_b"],
-    })
+    narration: List[dict] = [
+        {"speak": (f"We want to multiply matrix A, which is {rows_a} by "
+                   f"{cols_a}, with matrix B, which is {rows_b} by {cols_b}."),
+         "highlight": ["title"]},
+        {"speak": ("First, check the dimension requirement: matrix "
+                   "multiplication is defined only when the number of "
+                   "columns of A equals the number of rows of B."),
+         "highlight": ["matrix_a", "matrix_b"]},
+    ]
     if conformable and result is not None:
-        narration.append({
-            "speak": f"Their product C is a {rows_c} by {cols_c} matrix.",
-            "highlight": ["matrix_c"],
-        })
-        # Walk one example entry: c[0][0] = sum over k of a[0][k] * b[k][0].
-        terms = " plus ".join(
+        narration.extend([
+            {"speak": (f"Here A has {cols_a} columns and B has {rows_b} "
+                       "rows, so they match.  The product C is a "
+                       f"{rows_c} by {cols_c} matrix."),
+             "highlight": ["matrix_c"]},
+            {"speak": (f"To compute the entry at row i and column j of C, "
+                       f"take the dot product of row i of A with column j "
+                       f"of B — multiply matching entries and add."),
+             "highlight": ["matrix_a", "matrix_b"]},
+        ])
+        # Walk the top-left entry.
+        terms_00 = " plus ".join(
             f"{_fmt(a[0][k])} times {_fmt(b[k][0])}"
             for k in range(cols_a)
         )
         narration.append({
-            "speak": (f"For example, the top-left entry of C is "
-                      f"{terms}, which equals {_fmt(result[0][0])}."),
+            "speak": (f"Worked example for the top-left entry C row 1 column 1: "
+                      f"{terms_00}, which equals {_fmt(result[0][0])}."),
             "highlight": ["cell_matrix_c_0_0"],
+        })
+        # Walk a second entry if the matrix is large enough.
+        if rows_c >= 2 and cols_c >= 2:
+            terms_11 = " plus ".join(
+                f"{_fmt(a[1][k])} times {_fmt(b[k][1])}"
+                for k in range(cols_a)
+            )
+            narration.append({
+                "speak": (f"Another example, C row 2 column 2: {terms_11}, "
+                          f"which equals {_fmt(result[1][1])}."),
+                "highlight": ["cell_matrix_c_1_1"],
+            })
+        narration.append({
+            "speak": ("Repeat the same dot-product rule for every entry "
+                      "to fill in the result matrix C on the right."),
+            "highlight": ["matrix_c"],
         })
     else:
         narration.append({
-            "speak": (f"The product is undefined because A has {cols_a} "
-                      f"columns but B has {rows_b} rows."),
+            "speak": (f"Here A has {cols_a} columns but B has {rows_b} rows, "
+                      "which is a mismatch — so the product A times B is "
+                      "not defined."),
             "highlight": ["dim_error"],
         })
     return svg, narration
@@ -358,19 +376,29 @@ def matrix_transpose(
     parts.append("</svg>")
     svg = "".join(parts)
     narration = [
-        {"speak": f"Matrix A has {rows} rows and {cols} columns.",
+        {"speak": (f"We want to compute the transpose of matrix A, which "
+                   f"has {rows} rows and {cols} columns."),
+         "highlight": ["title"]},
+        {"speak": "Here is matrix A.",
          "highlight": ["matrix_a"]},
-        {"speak": f"Its transpose A-transpose has {cols} rows and {rows} columns — "
-                  f"rows of A become columns of A-transpose.",
+        {"speak": ("The transpose, written A with a superscript T, is "
+                   "formed by SWAPPING rows and columns: the i-th row of A "
+                   "becomes the i-th column of A-transpose, and vice versa."),
+         "highlight": ["matrix_a", "matrix_at"]},
+        {"speak": (f"So A-transpose has {cols} rows and {rows} columns — "
+                   "exactly the reverse of A's dimensions."),
          "highlight": ["matrix_at"]},
-        {"speak": f"For example, the entry at row 1 column 1 of A, which is "
-                  f"{_fmt(a[0][0])}, stays at row 1 column 1 of A-transpose.",
+        {"speak": (f"As a check: the entry at row 1 column 1 of A — which "
+                   f"is {_fmt(a[0][0])} — stays at row 1 column 1 of "
+                   "A-transpose, because the main diagonal is fixed by "
+                   "transposition."),
          "highlight": ["cell_matrix_at_0_0"]},
     ]
     if rows >= 2 and cols >= 2:
         narration.append({
-            "speak": f"The entry at row 1 column 2 of A, which is {_fmt(a[0][1])}, "
-                     f"moves to row 2 column 1 of A-transpose.",
+            "speak": (f"And the off-diagonal entry at row 1 column 2 of A, "
+                      f"which is {_fmt(a[0][1])}, moves to row 2 column 1 "
+                      "of A-transpose — that's the row-column swap."),
             "highlight": ["cell_matrix_at_1_0"],
         })
     return svg, narration
@@ -424,19 +452,49 @@ def matrix_determinant(
     parts.append("</svg>")
     svg = "".join(parts)
     narration = [
-        {"speak": f"This is a {n} by {n} square matrix A.",
+        {"speak": f"We want to compute the determinant of this {n} by {n} matrix A.",
+         "highlight": ["title"]},
+        {"speak": f"Here is matrix A.",
          "highlight": ["matrix_a"]},
-        {"speak": (f"Its determinant equals {_fmt(d)}." +
-                   ("  Since the determinant is zero, A is singular and has no inverse."
-                    if abs(d) < 1e-9 else
-                    "  Since the determinant is non-zero, A is invertible.")),
-         "highlight": ["det_formula"]},
     ]
     if n == 2:
-        narration.insert(1, {
-            "speak": (f"For a two-by-two matrix, the determinant is ad minus bc — "
-                      f"that's {_fmt(a[0][0])} times {_fmt(a[1][1])} minus "
-                      f"{_fmt(a[0][1])} times {_fmt(a[1][0])}."),
+        narration.extend([
+            {"speak": ("For a two-by-two matrix, the determinant has a "
+                       "simple closed form: it is ad minus bc, where a and "
+                       "d are the diagonal entries and b and c are the "
+                       "off-diagonal entries."),
+             "highlight": ["matrix_a"]},
+            {"speak": (f"Substituting: a equals {_fmt(a[0][0])}, "
+                       f"b equals {_fmt(a[0][1])}, c equals {_fmt(a[1][0])}, "
+                       f"d equals {_fmt(a[1][1])}."),
+             "highlight": ["matrix_a"]},
+            {"speak": (f"So the determinant equals {_fmt(a[0][0])} times "
+                       f"{_fmt(a[1][1])} minus {_fmt(a[0][1])} times "
+                       f"{_fmt(a[1][0])}, which simplifies to {_fmt(d)}."),
+             "highlight": ["det_formula"]},
+        ])
+    else:
+        narration.extend([
+            {"speak": (f"For an {n} by {n} matrix we expand along the first "
+                       "row.  Each entry is multiplied by the determinant of "
+                       "the smaller submatrix you get by deleting that "
+                       "entry's row and column, with alternating plus and "
+                       "minus signs."),
+             "highlight": ["matrix_a"]},
+            {"speak": (f"Carrying out the full expansion, the determinant "
+                       f"works out to {_fmt(d)}."),
+             "highlight": ["det_formula"]},
+        ])
+    if abs(d) < 1e-9:
+        narration.append({
+            "speak": ("Since the determinant is zero, A is singular: its "
+                      "columns are linearly dependent and A has no inverse."),
+            "highlight": ["det_formula"],
+        })
+    else:
+        narration.append({
+            "speak": ("Since the determinant is non-zero, A is invertible "
+                      "and the linear map it represents is one-to-one."),
             "highlight": ["det_formula"],
         })
     return svg, narration
@@ -508,26 +566,47 @@ def matrix_inverse(
     parts.append("</svg>")
     svg = "".join(parts)
     narration = [
-        {"speak": f"A is a {n} by {n} matrix.",
+        {"speak": f"We want to compute the inverse of this {n} by {n} matrix A.",
+         "highlight": ["title"]},
+        {"speak": f"Here is matrix A.",
          "highlight": ["matrix_a"]},
     ]
     if inv is None:
-        narration.append({
-            "speak": ("The determinant of A is zero, so A is singular and has no "
-                      "multiplicative inverse."),
-            "highlight": ["singular_error"],
-        })
+        narration.extend([
+            {"speak": (f"First we compute the determinant of A.  "
+                       f"In this case the determinant is zero."),
+             "highlight": ["matrix_a"]},
+            {"speak": ("A zero determinant means A is singular — its columns "
+                       "are linearly dependent."),
+             "highlight": ["singular_error"]},
+            {"speak": ("Because of that, A does not have a multiplicative "
+                       "inverse.  No matrix B can satisfy A times B equals "
+                       "the identity."),
+             "highlight": ["singular_error"]},
+        ])
     else:
-        narration.append({
-            "speak": (f"Its inverse A-inverse is computed by dividing the adjugate "
-                      f"matrix by the determinant of A, which is {_fmt(_det(a))}."),
-            "highlight": ["matrix_inv"],
-        })
-        narration.append({
-            "speak": ("Multiplying A by A-inverse, in either order, gives the "
-                      f"{n} by {n} identity matrix."),
-            "highlight": ["matrix_a", "matrix_inv"],
-        })
+        det_val = _det(a)
+        narration.extend([
+            {"speak": (f"Step one: compute the determinant of A.  "
+                       f"For this matrix, the determinant is {_fmt(det_val)}."),
+             "highlight": ["matrix_a"]},
+            {"speak": ("Since the determinant is non-zero, A is invertible "
+                       "and a unique inverse exists."),
+             "highlight": ["matrix_a"]},
+            {"speak": ("Step two: compute the adjugate of A.  The adjugate "
+                       "is the transpose of the cofactor matrix — each entry "
+                       "of the cofactor matrix is plus or minus the determinant "
+                       "of the matrix you get by deleting that row and column."),
+             "highlight": ["matrix_a"]},
+            {"speak": (f"Step three: divide the adjugate by the determinant "
+                       f"{_fmt(det_val)}.  The result is A inverse, shown on "
+                       f"the right."),
+             "highlight": ["matrix_inv"]},
+            {"speak": ("As a verification, multiplying A by A inverse — in "
+                       f"either order — gives the {n} by {n} identity matrix, "
+                       "with ones on the diagonal and zeros everywhere else."),
+             "highlight": ["matrix_a", "matrix_inv"]},
+        ])
     return svg, narration
 
 
@@ -614,24 +693,42 @@ def system_of_equations(
     parts.append("</svg>")
     svg = "".join(parts)
     narration = [
-        {"speak": (f"The system A x equals b has a {n}-by-{n} coefficient matrix A, "
-                   f"an unknown vector x with {n} entries, and a right-hand side b."),
+        {"speak": (f"We have a system of {n} linear equations in {n} unknowns, "
+                   "written in matrix form as A times x equals b."),
+         "highlight": ["title"]},
+        {"speak": (f"A is the {n} by {n} coefficient matrix — each row holds "
+                   "the coefficients of one equation."),
          "highlight": ["matrix_a"]},
-        {"speak": "Vector x holds the unknowns we want to find.",
+        {"speak": (f"x is the column vector of the {n} unknowns we want "
+                   "to find."),
          "highlight": ["vector_x"]},
-        {"speak": "Vector b is the given right-hand side.",
+        {"speak": "b is the column vector of the right-hand-side constants.",
          "highlight": ["vector_b"]},
     ]
     if solution is not None:
-        narration.append({
-            "speak": ("Solving by multiplying both sides by A-inverse gives the "
-                      "unique solution shown below."),
-            "highlight": ["solution"],
-        })
+        det_a = _det(coeffs)
+        narration.extend([
+            {"speak": (f"Step one: check whether the coefficient matrix is "
+                       f"invertible.  Its determinant is {_fmt(det_a)}, which "
+                       "is non-zero — so a unique solution exists."),
+             "highlight": ["matrix_a"]},
+            {"speak": ("Step two: multiply both sides of A x equals b on the "
+                       "left by A-inverse.  Since A-inverse times A is the "
+                       "identity, the left side collapses to just x."),
+             "highlight": ["matrix_a", "vector_x"]},
+            {"speak": ("Step three: x equals A-inverse times b.  Compute "
+                       "the matrix-vector product on the right."),
+             "highlight": ["vector_b"]},
+            {"speak": (f"The result is the solution to the system, "
+                       "shown below the equation."),
+             "highlight": ["solution"]},
+        ])
     else:
         narration.append({
-            "speak": ("The coefficient matrix is singular, so the system has "
-                      "either no solutions or infinitely many."),
+            "speak": ("The coefficient matrix A is singular, meaning its "
+                      "determinant is zero.  Depending on whether b lies in "
+                      "the column space of A, the system has either no "
+                      "solutions or infinitely many — never a unique one."),
             "highlight": ["matrix_a"],
         })
     return svg, narration
