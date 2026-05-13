@@ -11,6 +11,12 @@ dependencies = [
     "cairosvg>=2.7",
     "piper-tts>=1.2",
     "httpx>=0.27",
+    # CP-SAT solver for the deterministic label-placement planner
+    # (studio/layout_planner.py).  Pinned >=9.10 to match local dev;
+    # the planner fails open if the import fails so an older
+    # container won't crash, but production needs it for the
+    # global-optimum guarantee on figure layouts.
+    "ortools>=9.10",
 ]
 
 [project.optional-dependencies]

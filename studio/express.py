@@ -1539,6 +1539,25 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"reflow_overlapping_text FAILED: {type(exc).__name__}: {exc}")
 
+        # Final pass: globally-optimal label placement via CP-SAT.
+        # The greedy reflow above can leave overlaps when an early
+        # shift pushes a label into a region with neighbours; the
+        # planner formulates the problem as Point-Feature Label
+        # Placement and solves to optimality.  Fails open if ortools
+        # is missing or the model is infeasible — the SVG passes
+        # through unchanged, so reflow's output remains the floor.
+        try:
+            from studio.layout_planner import plan_layout
+            planned = plan_layout(result["svg"], time_limit_s=2.0)
+            if planned != result["svg"]:
+                _log(
+                    f"plan_layout: rewrote {len(result['svg'])} -> "
+                    f"{len(planned)} chars (CP-SAT)"
+                )
+                result["svg"] = planned
+        except Exception as exc:  # noqa: BLE001
+            _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
+
         # Inspection on streamed SVG: while the LLM was streaming, the
         # canvas iframe was painting the RAW model output into #stage
         # via svg_chunk events — including any malformed XML, mis-
