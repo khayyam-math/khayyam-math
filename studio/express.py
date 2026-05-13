@@ -1640,7 +1640,16 @@ async def express_figure(
             user_prompt=user_prompt,
         )
         if structural_issues:
-            _log(f"structural review: {len(structural_issues)} issue(s)")
+            # Log the actual issues (truncated) so a slow-retry session
+            # can be diagnosed from CloudWatch without code changes.
+            issue_snip = " | ".join(
+                (i[:80] + "…") if len(i) > 80 else i
+                for i in structural_issues[:5]
+            )
+            _log(
+                f"structural review: {len(structural_issues)} issue(s) — "
+                f"{issue_snip}"
+            )
 
         # 2b. Figure review.  _vision_review consults _review_config()
         # internally for mode/model/url/key, so we always pass the
