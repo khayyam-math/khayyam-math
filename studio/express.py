@@ -717,6 +717,16 @@ _REVIEW_SYSTEM = (
     "PASS for visual polish — partial figures, mid-quality labelling, "
     "and missing-but-non-essential captions are PASS.\n"
     "\n"
+    "NEVER FAIL on narration highlights.  The narration `highlight` "
+    "field references SVG element IDs that the VIEWER colors at "
+    "playback time — they DO NOT appear in the static PNG you are "
+    "reviewing.  Do not flag a figure for 'highlights not matching "
+    "elements', 'elements not visibly emphasized', 'narration not "
+    "synchronized with figure', or any similar variant.  Whether the "
+    "highlight IDs map to real SVG elements is checked separately by "
+    "a deterministic structural critic; you do not need to second-"
+    "guess it.\n"
+    "\n"
     "FAIL on these BROKEN-FIGURE problems:\n"
     "  • orphan leader lines pointing to empty canvas\n"
     "  • notation mismatches the user's request (wrong dimensions, "
@@ -2680,7 +2690,12 @@ def autofit_group_rects(svg: str) -> str:
     # Walk each <g ...> ... </g> block, find its first <rect>, compute
     # the bbox of all NON-rect (well, non-first-rect) children, and
     # resize the rect if it's smaller than that bbox.
-    PAD = 20.0
+    # PAD reduced from 20 → 4 after user feedback: "the borders of the
+    # matrices are too big.  The squares around the matrices should be
+    # calculated carefully to be just around the matrix tightly."  Cells
+    # already have their own borders, so a thick outer frame just looks
+    # like wasted whitespace around the matrix.
+    PAD = 4.0
 
     def _resize_group(group_match: re.Match) -> str:
         inner = group_match.group(0)
