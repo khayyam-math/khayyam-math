@@ -22,9 +22,11 @@ state is plain Python objects.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -360,11 +362,54 @@ class Canvas:
             self.svg = svg
             self.revision += 1
             self.updated_at = time.time()
+        # Persist to durable storage so a Fargate task replacement
+        # doesn't wipe this canvas from the user's perspective.  The
+        # REGISTRY rehydrates from the same key on a get() miss.
+        # Best-effort: failures log but don't break the request.
+        try:
+            self._persist_state()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[canvas] persist_state failed for {self.canvas_id!r}: "
+                  f"{type(exc).__name__}: {exc}",
+                  flush=True, file=sys.stderr)
         return {
             "canvas_id": self.canvas_id,
             "revision": self.revision,
             "n_elements_indexed": len(ids),
         }
+
+    # ---------- durable persistence (S3 / file) ----------
+    def _persist_state(self) -> None:
+        """Write a JSON blob with enough state to rehydrate this canvas.
+
+        Keyed under ``<canvas_id>/state.json`` in the configured storage
+        backend (S3 in prod, local file in dev).  Loaded by
+        :meth:`CanvasRegistry._try_rehydrate` when an in-memory miss
+        happens — e.g. after an ECS task replacement that wiped the
+        process's REGISTRY but left S3 objects intact.
+        """
+        from service.storage import get_storage
+        payload = {
+            "canvas_id": self.canvas_id,
+            "svg": self.svg,
+            "is_raw_svg": self.is_raw_svg,
+            "raw_svg_ids": sorted(self.raw_svg_ids),
+            "math_mode": self.math_mode,
+            "width": self.width,
+            "height": self.height,
+            "animate": self.animate,
+            "revision": self.revision,
+            "updated_at": self.updated_at,
+            "created_at": self.created_at,
+            "genesis_prompt": self.genesis_prompt,
+            "narration_manifest": self.narration_manifest,
+            "transition_text": self.transition_text,
+        }
+        data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        get_storage().upload_bytes(
+            data, f"{self.canvas_id}/state.json",
+            content_type="application/json",
+        )
 
     # ---------- narration ----------
     def narrate(self, script: list[dict]) -> dict[str, Any]:
@@ -437,6 +482,15 @@ class Canvas:
             self.narration_wav = str(wav_path)
             self.narration_manifest = manifest
             self.revision += 1
+        # Persist updated state so a post-narration rehydration
+        # picks up the manifest (otherwise the viewer would
+        # rehydrate the SVG but lose phrase-timed highlights).
+        try:
+            self._persist_state()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[canvas] persist_state failed in narrate() for "
+                  f"{self.canvas_id!r}: {type(exc).__name__}: {exc}",
+                  flush=True, file=sys.stderr)
             self.updated_at = time.time()
         return {
             "canvas_id": self.canvas_id,
@@ -559,8 +613,60 @@ class CanvasRegistry:
     def get(self, canvas_id: str) -> Canvas:
         with self._lock:
             c = self._canvases.get(canvas_id)
-        if c is None:
-            raise KeyError(f"canvas {canvas_id!r} not found")
+        if c is not None:
+            return c
+        # In-memory miss — try rehydrating from durable storage.
+        # Survives ECS task replacement: the process restarts with
+        # an empty REGISTRY, but S3 still has each canvas's
+        # ``<id>/state.json`` from the last set_raw_svg/narrate.
+        rehydrated = self._try_rehydrate(canvas_id)
+        if rehydrated is not None:
+            return rehydrated
+        raise KeyError(f"canvas {canvas_id!r} not found")
+
+    def _try_rehydrate(self, canvas_id: str) -> Canvas | None:
+        """Load <canvas_id>/state.json from storage and reconstruct a
+        Canvas.  Returns None if the blob doesn't exist or is malformed.
+        """
+        try:
+            from service.storage import get_storage
+            raw = get_storage().download_bytes(f"{canvas_id}/state.json")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[registry] rehydrate failed for {canvas_id!r}: "
+                  f"{type(exc).__name__}: {exc}",
+                  flush=True, file=sys.stderr)
+            return None
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        try:
+            c = Canvas(
+                canvas_id=payload["canvas_id"],
+                math_mode=bool(payload.get("math_mode", False)),
+                width=int(payload.get("width", 700)),
+                height=int(payload.get("height", 440)),
+                animate=bool(payload.get("animate", False)),
+            )
+            c.svg = payload.get("svg", "") or ""
+            c.is_raw_svg = bool(payload.get("is_raw_svg", False))
+            c.raw_svg_ids = set(payload.get("raw_svg_ids") or [])
+            c.revision = int(payload.get("revision", 0))
+            c.created_at = float(payload.get("created_at", time.time()))
+            c.updated_at = float(payload.get("updated_at", time.time()))
+            c.genesis_prompt = payload.get("genesis_prompt") or None
+            c.narration_manifest = payload.get("narration_manifest") or None
+            c.transition_text = payload.get("transition_text") or None
+        except (KeyError, ValueError, TypeError):
+            return None
+        with self._lock:
+            # Race: another thread may have rehydrated already.
+            existing = self._canvases.get(canvas_id)
+            if existing is not None:
+                return existing
+            self._canvases[canvas_id] = c
         return c
 
     def close(self, canvas_id: str) -> bool:

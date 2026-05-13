@@ -39,6 +39,11 @@ class Storage(Protocol):
     def upload_file(self, local_path: Path, key: str,
                     content_type: str = "application/octet-stream") -> None: ...
 
+    def upload_bytes(self, data: bytes, key: str,
+                     content_type: str = "application/octet-stream") -> None: ...
+
+    def download_bytes(self, key: str) -> bytes | None: ...
+
     def presigned_get_url(self, key: str, expires_s: int = 3600) -> str | None: ...
 
     def is_remote(self) -> bool: ...
@@ -59,6 +64,23 @@ class FileStorage:
         # File already lives at its canonical local path; nothing to do.
         # Kept as a method so call sites are backend-agnostic.
         return
+
+    def upload_bytes(self, data: bytes, key: str,
+                     content_type: str = "application/octet-stream") -> None:
+        # Write under the storage root so dev runs can rehydrate
+        # canvases across restarts (mirrors S3Storage semantics).
+        target = self.root / key
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    def download_bytes(self, key: str) -> bytes | None:
+        target = self.root / key
+        if not target.exists():
+            return None
+        try:
+            return target.read_bytes()
+        except OSError:
+            return None
 
     def presigned_get_url(self, key: str, expires_s: int = 3600) -> str | None:
         # No remote URL for a local-disk backend.
@@ -107,6 +129,35 @@ class S3Storage:
             print(f"[storage] S3 upload failed for {key!r}: "
                   f"{type(exc).__name__}: {exc}",
                   flush=True, file=sys.stderr)
+
+    def upload_bytes(self, data: bytes, key: str,
+                     content_type: str = "application/octet-stream") -> None:
+        try:
+            self._s3.put_object(
+                Bucket=self.bucket,
+                Key=self._qualified_key(key),
+                Body=data,
+                ContentType=content_type,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[storage] S3 put_object failed for {key!r}: "
+                  f"{type(exc).__name__}: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def download_bytes(self, key: str) -> bytes | None:
+        try:
+            obj = self._s3.get_object(
+                Bucket=self.bucket,
+                Key=self._qualified_key(key),
+            )
+            return obj["Body"].read()
+        except self._s3.exceptions.NoSuchKey:
+            return None
+        except Exception as exc:  # noqa: BLE001
+            print(f"[storage] S3 get_object failed for {key!r}: "
+                  f"{type(exc).__name__}: {exc}",
+                  flush=True, file=sys.stderr)
+            return None
 
     def presigned_get_url(self, key: str, expires_s: int = 3600) -> str | None:
         try:
