@@ -454,25 +454,85 @@
   </main>
 </div>
 <script>
-  // ── State (in-memory only; reload starts fresh) ──
-  // localStorage persistence was removed: each page load should give a
-  // clean conversation and a clean canvas slot, so the user never gets
-  // an old figure replayed silently.
-  let canvasId = null;
+  // ── State ──
+  // Chat history is NOT persisted (each page load should be clean) but
+  // the active canvasId IS persisted so iOS Safari's aggressive tab-
+  // suspension doesn't lose the user's figure when they switch apps
+  // mid-generation and come back.  The user explicitly reported this:
+  // "when I open another page on my phone, before the canvas appears,
+  // when I come back, the canvas is not there."
+  const CANVAS_KEY = 'sevim_studio_active_canvas_v1';
+
+  function _readPersistedCanvas() {
+    try {
+      const raw = localStorage.getItem(CANVAS_KEY);
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      // Drop entries older than 30 min — long-stale canvases are
+      // probably from a different intent.
+      if (!o || !o.id || !o.ts || Date.now() - o.ts > 30 * 60 * 1000) {
+        localStorage.removeItem(CANVAS_KEY);
+        return null;
+      }
+      return o.id;
+    } catch (_) { return null; }
+  }
+
+  function _writePersistedCanvas(id) {
+    try {
+      if (id) {
+        localStorage.setItem(CANVAS_KEY, JSON.stringify({id, ts: Date.now()}));
+      } else {
+        localStorage.removeItem(CANVAS_KEY);
+      }
+    } catch (_) {}
+  }
+
+  let canvasId = _readPersistedCanvas();
 
   // ── Canvas-restore on visibility change ─────────────────────────
   // iOS Safari (and any tab the OS decides to swap out) frequently
   // discards the <iframe>'s loaded document while keeping the rest
   // of the page alive — when the user comes back the iframe is
-  // visible but empty.  We close that gap by re-loading the canvas
-  // whenever the document becomes visible AND we still remember
-  // its canvas_id but the iframe doesn't have it loaded.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    if (!canvasId) return;
-    const expected = '/canvas/' + canvasId + '/view';
+  // visible but empty.  Also: if iOS killed the whole JS context,
+  // the page reloads with canvasId === null but localStorage still
+  // has the active canvas — restore that too.  Recovery flow:
+  //   1. Recover canvasId from localStorage if it was lost.
+  //   2. Ensure iframe.src points at /canvas/<id>/view.
+  //   3. Un-hide the canvas-pane if it was display:none.
+  // Also tries /canvases to recover canvases created WHILE the tab
+  // was backgrounded (express finished server-side, tool_result
+  // event was missed because the SSE connection died).
+  async function restoreCanvas() {
     try {
-      const cur = (frame && frame.src) || '';
+      if (!canvasId) {
+        // No id in memory.  Check localStorage first; then fall back
+        // to /canvases (most recent) when a chat turn is in flight.
+        canvasId = _readPersistedCanvas();
+      }
+      if (!canvasId) {
+        // Look for an in-flight asst placeholder — signals that the
+        // user submitted a prompt but never got the tool_result.
+        const inflight = document.querySelector('.msg.asst:last-of-type');
+        const looksPending = inflight && (inflight.textContent || '').trim() === '…';
+        if (looksPending) {
+          try {
+            const r = await fetch('/canvases');
+            if (r.ok) {
+              const data = await r.json();
+              const list = (data && data.canvases) || [];
+              if (list.length) {
+                canvasId = list[list.length - 1].canvas_id || list[list.length - 1].id;
+                _writePersistedCanvas(canvasId);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      if (!canvasId) return;
+      const expected = '/canvas/' + canvasId + '/view';
+      if (!frame) return;
+      const cur = frame.src || '';
       if (cur.indexOf(expected) < 0 || cur.endsWith('about:blank')) {
         frame.src = expected;
       }
@@ -480,7 +540,18 @@
       const ph = document.getElementById('placeholder');
       if (ph) ph.style.display = 'none';
       document.body.classList.add('has-canvas');
-    } catch (_) { /* iframe not ready yet */ }
+    } catch (_) {}
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    restoreCanvas();
+  });
+  // Also try once on initial page load, in case iOS reloaded the page
+  // and the canvasId comes from localStorage.
+  window.addEventListener('DOMContentLoaded', () => {
+    // Defer one tick so `frame` is in scope by the time we touch it.
+    setTimeout(restoreCanvas, 50);
   });
   let history = [];           // [{role, content}, ...]
   // Canvas IDs the user has pinned with the 📌 button on prior asst
@@ -530,6 +601,7 @@
     if (!confirm('Clear conversation?')) return;
     history = [];
     canvasId = null;
+    _writePersistedCanvas(null);
     log.innerHTML = '';
     placeholder.style.display = 'flex';
     frame.style.display = 'none';
@@ -1034,6 +1106,7 @@
               // placeholder.  By 'done' the primer is settled.
               if (r.canvas_id && r.canvas_id !== canvasId) {
                 canvasId = r.canvas_id;
+                _writePersistedCanvas(canvasId);
                 placeholder.style.display = 'none';
                 frame.style.display = 'block';
                 frame.src = '/canvas/' + canvasId + '/view';
