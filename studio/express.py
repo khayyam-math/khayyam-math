@@ -414,6 +414,65 @@ _EXPRESS_SYSTEM = (
     "narration is pointing at one term inside it — the learner needs "
     "the eye-tracking cue to land on the specific thing being said.\n"
     "\n"
+    "SEMANTIC VALUES ≠ SVG COORDINATES — the numbers in the user's "
+    "prompt (radius r = 5, base b = 8, side a = 3, angle θ = 30°) are "
+    "SEMANTIC labels.  They tell you what to print on the figure as a "
+    "<text> next to the shape.  THEY ARE NOT TO BE USED AS viewBox "
+    "COORDINATES.\n"
+    "  WRONG: <circle cx='450' cy='300' r='5'/> for 'circle with r=5'.  "
+    "    A 5-pixel-radius circle is invisible at viewBox scale and the "
+    "    figure renders as empty space with one text label.\n"
+    "  RIGHT: <circle cx='450' cy='300' r='180'/>  AND  "
+    "    <text>r = 5</text> next to a radius line.  The DRAWN size "
+    "    fills the canvas; the label conveys the semantic value.\n"
+    "Sizing rule of thumb (for a 900x650 viewBox):\n"
+    "  • Main shapes (circle, polygon, triangle, parallelogram, "
+    "    parabola, function curve) occupy 50-80% of the diagram area "
+    "    — typically 300-600 px in their longest dimension.\n"
+    "  • Triangle/trapezoid base: ~300-500 px wide.\n"
+    "  • Triangle/trapezoid height: ~200-350 px tall.\n"
+    "  • Circle radius: ~150-250 px.\n"
+    "  • Line segment, chord, radius arrow: ~200-400 px.\n"
+    "  • Axes for function plots: ~500-700 px wide, ~300-450 px tall.\n"
+    "  • Matrix cell: ~50-80 px square; total matrix grid 200-400 px.\n"
+    "These are GUIDELINES, not absolutes — adapt to the figure — but "
+    "NEVER make a primary shape smaller than ~80 px in any dimension.\n"
+    "When the user prompt contains 'r = 5' or 'base = 8' or 'angle = "
+    "30°', treat those numbers ONLY as the label content; the visual "
+    "size is independent of them.\n"
+    "\n"
+    "DRAW THE SHAPE — every figure for a geometric/visual topic MUST "
+    "include at least one geometric primitive (<polygon>, <circle>, "
+    "<ellipse>, <line>, <path>, <rect>) sized per the rules above.  A "
+    "'figure' that is only a heading + <text> formulas with no shape "
+    "is NOT acceptable — it's a textbook page, not a teaching "
+    "illustration.  Specifically:\n"
+    "  • A circle question requires a <circle>, sized to fill the "
+    "    diagram, with a radius line drawn to a labelled point on the "
+    "    boundary.\n"
+    "  • An arc / sector / central-angle question requires a <circle> "
+    "    PLUS a <path d='M ... A ...'> for the arc, with both radii "
+    "    drawn.\n"
+    "  • A parabola / quadratic question requires axes (<line>) plus "
+    "    a curve (<path d='M ... Q ...' or many <line> segments) "
+    "    through ~10+ sample points, plus roots marked as dots "
+    "    (<circle r='4'>) on the x-axis.\n"
+    "  • A triangle / trapezoid / polygon question requires a "
+    "    <polygon> with vertex coords arranged so the shape is "
+    "    visible at the sizes above.\n"
+    "  • A cone / pyramid / cylinder / 3-D solid: draw an oblique 2-D "
+    "    projection — base ellipse (cone/cylinder) plus side lines to "
+    "    the apex, OR an isometric outline; use dashed strokes for "
+    "    hidden edges.\n"
+    "  • An algebraic-transformation question (complete-the-square, "
+    "    factor, expand) — show the algebra step-by-step in stacked "
+    "    <text> rows AND visualise the geometric meaning (e.g. for "
+    "    completing the square, draw the corresponding rectangle / "
+    "    square geometry on coordinates).\n"
+    "If the topic genuinely has NO visual content (e.g. 'define a "
+    "field axiomatically'), the figure may consist mostly of labelled "
+    "<text>; otherwise a missing shape is a hard failure.\n"
+    "\n"
     "MENTION = SHOW — every measurable quantity you NAME in narration "
     "must also be VISIBLY DRAWN on the figure as a labelled element "
     "with the same letter.  No exceptions.  Concretely:\n"
@@ -3310,6 +3369,107 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
                 "(top band y<60, bottom band y>" + str(int(vb_h - 80)) +
                 ", or right column x>" + str(int(vb_w * 0.7)) + ") so "
                 "the diagram region stays readable."
+            )
+
+    # 4z. Micro-figure check — when the viewBox is normal-sized (>= 400
+    # wide), any primary <circle>/<polygon>/<rect> with a dimension
+    # under 14 viewBox units is almost certainly the model literally
+    # using the user's prompt numbers as SVG coords ('r=5' rendered as
+    # a 5-pixel circle).  Threshold 14 catches r<=12 (the trapezoid
+    # bug had r=5) but lets typical vertex-node radii (r=15-25) pass.
+    # Skip entirely when no viewBox is set (test fixtures, mini SVGs).
+    # Strip <text> blocks so we don't count text content as visual
+    # below.  Always computed, used by both micro-figure and no-shape
+    # checks.
+    svg_no_text = re.sub(r'<text\b[^>]*>.*?</text>', '', svg, flags=re.S)
+    svg_no_text = re.sub(r'<tspan\b[^>]*>.*?</tspan>', '', svg_no_text, flags=re.S)
+    micro_shapes: list[str] = []
+    if vb_w >= 400 and vb_h >= 300:
+        primary_shape_re = re.compile(
+            r'<(?P<tag>circle|ellipse|polygon|rect|path)\b'
+            r'([^>]*\bid\s*=\s*["\'][^"\']+["\'][^>]*)/?>',
+            re.S,
+        )
+        for m in primary_shape_re.finditer(svg_no_text):
+            tag = m.group("tag")
+            attrs = m.group(2)
+            if tag == "circle":
+                rm = re.search(r"\br\s*=\s*['\"]([0-9.]+)['\"]", attrs)
+                if rm and float(rm.group(1)) < 14:
+                    micro_shapes.append(
+                        f"<circle r='{rm.group(1)}'> — well under "
+                        "readable size"
+                    )
+            elif tag == "ellipse":
+                rxm = re.search(r"\brx\s*=\s*['\"]([0-9.]+)['\"]", attrs)
+                rym = re.search(r"\bry\s*=\s*['\"]([0-9.]+)['\"]", attrs)
+                rx = float(rxm.group(1)) if rxm else 9999
+                ry = float(rym.group(1)) if rym else 9999
+                if rx < 14 or ry < 14:
+                    micro_shapes.append(
+                        f"<ellipse rx='{rx}' ry='{ry}'> — under 14 vb units"
+                    )
+            elif tag == "rect":
+                wm = re.search(r"\bwidth\s*=\s*['\"]([0-9.]+)['\"]", attrs)
+                hm = re.search(r"\bheight\s*=\s*['\"]([0-9.]+)['\"]", attrs)
+                w = float(wm.group(1)) if wm else 9999
+                h = float(hm.group(1)) if hm else 9999
+                if w < 14 or h < 14:
+                    micro_shapes.append(
+                        f"<rect w='{w}' h='{h}'> — under 14 vb units"
+                    )
+            elif tag == "polygon":
+                pts_m = re.search(r"points\s*=\s*['\"]([^'\"]+)['\"]", attrs)
+                if pts_m:
+                    coords = [float(c) for c in
+                              re.findall(r"-?[0-9.]+", pts_m.group(1))]
+                    if len(coords) >= 4:
+                        xs = coords[0::2]; ys = coords[1::2]
+                        w = max(xs) - min(xs); h = max(ys) - min(ys)
+                        if w < 30 or h < 30:
+                            micro_shapes.append(
+                                f"<polygon> bbox {w:.0f}×{h:.0f} — too small"
+                            )
+
+    if micro_shapes:
+        sample = "; ".join(micro_shapes[:4])
+        more = (f" (and {len(micro_shapes) - 4} more)"
+                if len(micro_shapes) > 4 else "")
+        issues.append(
+            "micro_figure: " + str(len(micro_shapes)) +
+            " primary geometric primitive(s) are rendered at "
+            "near-invisible scale — they are likely using the user's "
+            f"prompt numbers as viewBox coordinates: {sample}{more}.  "
+            "User-supplied values like 'r = 5', 'base = 8', "
+            "'side = 3' are SEMANTIC labels for <text>, NOT viewBox "
+            "coords.  Rescale: a primary circle radius should be "
+            "150-250 px; a polygon/triangle/trapezoid bbox should be "
+            "at least 300x200 px; a rect at least 60x60 px.  The "
+            "label retains the original numeric value via a "
+            "<text>r = 5</text>."
+        )
+
+    # 4y. No-shape check — a figure that has only <text> elements and
+    # no geometric primitives is a textbook page, not a diagram.  Only
+    # flag on real-sized viewBoxes (>= 400 wide) AND when there are
+    # several text labels — a 1-2-label SVG might be a tiny callout or
+    # a test fixture, not a real diagram-replacement-by-text failure.
+    if vb_w >= 400 and vb_h >= 300:
+        shape_re = re.compile(
+            r'<(circle|ellipse|polygon|rect|line|path|polyline)\b', re.I)
+        shape_count = len(shape_re.findall(svg_no_text))
+        text_count = len(re.findall(r'<text\b', svg))
+        if shape_count == 0 and text_count >= 3:
+            issues.append(
+                "no_geometric_primitive: the SVG contains "
+                f"{text_count} <text> labels but ZERO geometric "
+                "primitives (no <circle>, <polygon>, <line>, <path>, "
+                "etc.). A figure for a visual topic must draw the "
+                "subject, not just transcribe its formula. Add at "
+                "least one shape that depicts the concept (circle "
+                "for a circle problem, polygon for area-of-a-polygon "
+                "problems, axes + curve for function plots, etc.) "
+                "sized to fill 50-80% of the viewBox."
             )
 
     # 5. Named-quantity-not-shown.  When narration names a geometric

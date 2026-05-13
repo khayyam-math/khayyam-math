@@ -418,6 +418,34 @@
     // is a comfortable readable scale on any device.
     svg.style.minWidth  = `${Math.min(nw, 1100)}px`;
     svg.style.minHeight = `${Math.min(nh, 800)}px`;
+    // After the SVG settles, center `main`'s scroll on the content
+    // bounding box.  Without this, the default scroll position is
+    // (0, 0) — when the model lays out its figure on the right half
+    // of viewBox, the user sees an empty left half and has to
+    // discover horizontal scrolling.
+    requestAnimationFrame(() => {
+      try {
+        const main = svg.closest('main');
+        if (!main) return;
+        const svgRect = svg.getBoundingClientRect();
+        const mainRect = main.getBoundingClientRect();
+        if (!svgRect.width || !svgRect.height) return;
+        // bbox is in viewBox units; convert to client px proportional
+        // to the rendered SVG size.
+        const scaleX = svgRect.width / nw;
+        const scaleY = svgRect.height / nh;
+        const contentCx = (bbox.x + bbox.width / 2 - nx) * scaleX;
+        const contentCy = (bbox.y + bbox.height / 2 - ny) * scaleY;
+        // Where the centre should land in main's scrollable area:
+        // svg's left edge inside main + content centre in svg.
+        const svgLeftInMain = svgRect.left - mainRect.left + main.scrollLeft;
+        const svgTopInMain = svgRect.top - mainRect.top + main.scrollTop;
+        const targetX = svgLeftInMain + contentCx - mainRect.width / 2;
+        const targetY = svgTopInMain + contentCy - mainRect.height / 2;
+        if (targetX > 0) main.scrollLeft = targetX;
+        if (targetY > 0) main.scrollTop = targetY;
+      } catch (_) {}
+    });
   }
 
   function applyState(state) {

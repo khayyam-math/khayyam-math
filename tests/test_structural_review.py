@@ -299,8 +299,11 @@ def test_bottom_overflow_with_unused_right_flagged():
 
 def test_two_column_layout_does_not_overflow():
     # Same content split across two columns, no element below y=620.
+    # Includes a primary shape so the no_geometric_primitive check
+    # doesn't legitimately fire on this overlap-detection test.
     svg = (
         "<svg viewBox='0 0 900 650'>"
+        "<circle cx='450' cy='300' r='100'/>"
         "<text x='50' y='100'>step 1</text>"
         "<text x='50' y='200'>step 2</text>"
         "<text x='500' y='100'>step 3</text>"
@@ -864,3 +867,86 @@ def test_named_quantity_passes_for_greek_when_labelled():
     narration = [{"speak": "The angle θ is 30 degrees.", "highlight": []}]
     issues = _structural_review(svg, narration)
     assert not any("named_quantity_not_shown" in i for i in issues), issues
+
+
+# ---------------------------------------------------------------------
+# micro_figure — primary shape rendered at near-invisible scale because
+# the model used user-prompt numbers as viewBox coordinates.
+# ---------------------------------------------------------------------
+
+def test_micro_figure_flags_tiny_circle():
+    # Model literally used 'r = 5' from the user prompt as the SVG
+    # radius, producing a 5-pixel-radius circle inside a 900x650 vb.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<circle id="circle" cx="450" cy="300" r="5"/>'
+        '<text x="20" y="50">Circle with r = 5</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("micro_figure" in i for i in issues), issues
+
+
+def test_micro_figure_passes_normal_radius():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<circle id="circle" cx="450" cy="300" r="180"/>'
+        '<text x="20" y="50">Circle with r = 5</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert not any("micro_figure" in i for i in issues), issues
+
+
+def test_micro_figure_passes_in_small_viewbox():
+    # Small viewBoxes are test fixtures; don't false-flag them.
+    svg = (
+        '<svg>'
+        '<circle id="A" cx="100" cy="100" r="20"/>'
+        '<circle id="B" cx="200" cy="100" r="20"/>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert not any("micro_figure" in i for i in issues), issues
+
+
+def test_micro_figure_flags_tiny_polygon():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon id="trap" points="450,300 460,300 458,295 452,295"/>'
+        '<text x="20" y="50">Tiny trapezoid</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("micro_figure" in i for i in issues), issues
+
+
+# ---------------------------------------------------------------------
+# no_geometric_primitive — SVG contains only <text>, no shape at all.
+# ---------------------------------------------------------------------
+
+def test_no_geometric_primitive_flags_text_only():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="100">Area of a circle: A = πr²</text>'
+        '<text x="20" y="150">Given r = 5</text>'
+        '<text x="20" y="200">A = π · 25</text>'
+        '<text x="20" y="250">A ≈ 78.54</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert any("no_geometric_primitive" in i for i in issues), issues
+
+
+def test_no_geometric_primitive_passes_with_circle():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<circle cx="450" cy="300" r="180"/>'
+        '<text x="20" y="100">Area of a circle: A = πr²</text>'
+        '<text x="20" y="150">Given r = 5</text>'
+        '<text x="20" y="200">A = π · 25</text>'
+        '<text x="20" y="250">A ≈ 78.54</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [])
+    assert not any("no_geometric_primitive" in i for i in issues), issues
