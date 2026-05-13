@@ -213,6 +213,14 @@ class SevimStack(Stack):
             "SEVIM_AUTH_REQUIRED": "1",
             "SEVIM_VLLM_URL": "https://api.openai.com/v1",
             "SEVIM_VLLM_MODEL": "gpt-4o",
+            # Deploy-time override of the admin's active-model choice.
+            # Without this, resolve_backend() respects whatever was set
+            # via /studio/admin (which had drifted to gpt-4o-mini and
+            # produced text-only figures with bad arithmetic).  Setting
+            # it here forces every Fargate task to use gpt-4o until
+            # this line is removed.  Unset (next cdk deploy with the
+            # line removed) to release the override.
+            "SEVIM_FORCE_ACTIVE_MODEL": "gpt-4o",
             # Figure-review backend (math-correctness inspector).
             # Default: gpt-4o-mini in SVG-as-text mode -- ~15x cheaper
             # than gpt-4o-vision and works regardless of which model
