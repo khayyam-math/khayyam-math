@@ -711,6 +711,117 @@ def plan_groups(svg: str, *, time_limit_s: float = 2.0,
                 count=1,
             )
         out = out[:g.tag_start] + new_open + out[g.tag_end:]
+    # After groups have been moved, expand any top-level "frame" rect
+    # so it still contains the groups it originally wrapped.  User
+    # report: "there is an extra rectangle in the scene which apparently
+    # is supposed to surround the two matrices, but it contains one of
+    # them and the half of the other."  A frame rect is a top-level
+    # <rect> (sibling of <g>) whose bbox originally overlapped two or
+    # more groups by ≥50% of those groups' areas; expand it to cover
+    # every such group's NEW bbox plus 8 px of margin.
+    out = _expand_wrapper_rects(out, groups, picked)
+    return out
+
+
+def _expand_wrapper_rects(svg: str, groups: List[GroupItem],
+                          picked: List[Tuple[float, float]]) -> str:
+    """Walk top-level <rect> elements; for each one that wraps two or
+    more groups, expand its bbox to cover the groups' NEW positions.
+
+    "Wraps" means the rect's bbox contained ≥50% of the group's
+    original bbox.  We use the ORIGINAL positions to identify
+    associations (the rect existed BEFORE plan_groups moved anyone)
+    and the NEW positions to compute the expanded bbox.
+    """
+    # Collect top-level <rect> char positions (siblings of <g>).
+    # Skip rects nested inside any <g> — those are matrix cells etc.
+    g_spans: List[Tuple[int, int]] = []
+    depth = 0
+    for m in re.finditer(r'<g\b[^>]*>|</g>', svg, re.S):
+        if m.group(0).startswith("</"):
+            depth -= 1
+            if depth == 0:
+                g_spans[-1] = (g_spans[-1][0], m.end())
+        else:
+            if depth == 0:
+                g_spans.append((m.start(), -1))
+            depth += 1
+
+    def _in_group(pos: int) -> bool:
+        return any(s <= pos < e for s, e in g_spans if e > 0)
+
+    rect_re = re.compile(r'<rect\b[^/]*?/>|<rect\b[^>]*>\s*</rect>', re.S)
+    edits: List[Tuple[int, int, str]] = []
+    for m in rect_re.finditer(svg):
+        if _in_group(m.start()):
+            continue
+        tag = m.group(0)
+        attrs = _attrs(tag)
+        try:
+            rx = float(attrs.get("x", "0"))
+            ry = float(attrs.get("y", "0"))
+            rw = float(attrs.get("width", "0"))
+            rh = float(attrs.get("height", "0"))
+        except ValueError:
+            continue
+        if rw <= 0 or rh <= 0:
+            continue
+        # Identify groups this rect originally wrapped.
+        rect_bbox = (rx, ry, rx + rw, ry + rh)
+        wrapped: List[int] = []
+        for gi, gr in enumerate(groups):
+            g_bbox = (gr.bbox_x, gr.bbox_y, gr.bbox_x + gr.width,
+                      gr.bbox_y + gr.height)
+            # Containment ≥50% of group area.
+            ix0 = max(rect_bbox[0], g_bbox[0])
+            iy0 = max(rect_bbox[1], g_bbox[1])
+            ix1 = min(rect_bbox[2], g_bbox[2])
+            iy1 = min(rect_bbox[3], g_bbox[3])
+            if ix1 <= ix0 or iy1 <= iy0:
+                continue
+            inter = (ix1 - ix0) * (iy1 - iy0)
+            g_area = (g_bbox[2] - g_bbox[0]) * (g_bbox[3] - g_bbox[1])
+            if g_area > 0 and inter / g_area >= 0.5:
+                wrapped.append(gi)
+        if len(wrapped) < 2:
+            # Single-group "wrapper" is typically the matrix's own
+            # outer border — leave it alone.
+            continue
+        # Compute the expanded bbox covering all wrapped groups at
+        # their NEW positions.
+        nx0 = ny0 = float("inf")
+        nx1 = ny1 = float("-inf")
+        for gi in wrapped:
+            dx, dy = picked[gi]
+            gr = groups[gi]
+            nx0 = min(nx0, gr.bbox_x + dx)
+            ny0 = min(ny0, gr.bbox_y + dy)
+            nx1 = max(nx1, gr.bbox_x + gr.width + dx)
+            ny1 = max(ny1, gr.bbox_y + gr.height + dy)
+        margin = 8.0
+        new_x = nx0 - margin
+        new_y = ny0 - margin
+        new_w = (nx1 + margin) - new_x
+        new_h = (ny1 + margin) - new_y
+        # Skip if the rect's bbox is already approximately right.
+        if (abs(new_x - rx) < 2 and abs(new_y - ry) < 2
+                and abs(new_w - rw) < 4 and abs(new_h - rh) < 4):
+            continue
+        new_tag = tag
+        for attr_name, val in (("x", new_x), ("y", new_y),
+                                ("width", new_w), ("height", new_h)):
+            pat = re.compile(
+                r'\b' + attr_name + r'\s*=\s*(?:"[^"]*"|\'[^\']*\')'
+            )
+            new_tag = pat.sub(f'{attr_name}="{val:.0f}"', new_tag, count=1)
+        edits.append((m.start(), m.end(), new_tag))
+    if not edits:
+        return svg
+    # Apply right-to-left so offsets stay valid.
+    edits.sort(key=lambda t: -t[0])
+    out = svg
+    for start, end, repl in edits:
+        out = out[:start] + repl + out[end:]
     return out
 
 
