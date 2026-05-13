@@ -950,3 +950,262 @@ def test_no_geometric_primitive_passes_with_circle():
     )
     issues = _structural_review(svg, [])
     assert not any("no_geometric_primitive" in i for i in issues), issues
+
+
+# --- 7. Topic-keyword required primitive ---
+
+def test_circle_topic_flags_when_no_big_circle():
+    # Unit circle prompt + narration but only axes drawn (no circle).
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<line x1="450" y1="50" x2="450" y2="600" stroke="black"/>'
+        '<line x1="50" y1="325" x2="850" y2="325" stroke="black"/>'
+        '<circle cx="600" cy="200" r="6"/>'  # tiny dot, not the circle
+        '<text x="700" y="200">P</text>'
+        '</svg>'
+    )
+    narr = [{"speak": "On the unit circle the coordinates are (cos θ, sin θ).", "highlight": []}]
+    issues = _structural_review(
+        svg, narr,
+        user_prompt="Show sin θ and cos θ on the unit circle for θ = 60.",
+    )
+    assert any("circle_topic_no_big_circle" in i for i in issues), issues
+
+
+def test_circle_topic_passes_when_big_circle_present():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<circle cx="450" cy="325" r="200" fill="none" stroke="black"/>'
+        '<line x1="450" y1="325" x2="550" y2="151" stroke="blue"/>'
+        '<text x="560" y="151">P</text>'
+        '</svg>'
+    )
+    narr = [{"speak": "On the unit circle we have the point P.", "highlight": []}]
+    issues = _structural_review(
+        svg, narr,
+        user_prompt="Show sin θ and cos θ on the unit circle for θ = 60.",
+    )
+    assert not any("missing_required_primitive" in i for i in issues), issues
+
+
+def test_function_plot_flags_when_no_curve_path():
+    # Integral prompt but only empty axes.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<line x1="100" y1="600" x2="800" y2="600" stroke="black"/>'
+        '<line x1="100" y1="50" x2="100" y2="600" stroke="black"/>'
+        '<text x="820" y="610">x</text>'
+        '<text x="80" y="40">y</text>'
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Compute the integral of f(x) = 2x from x=1 to x=4 as the area under the curve.",
+    )
+    assert any("function_plot_no_curve" in i for i in issues), issues
+
+
+def test_function_plot_passes_when_curve_present():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<line x1="100" y1="600" x2="800" y2="600" stroke="black"/>'
+        '<line x1="100" y1="50" x2="100" y2="600" stroke="black"/>'
+        '<path d="M 100 600 L 200 580 L 300 540 L 400 480 L 500 400 L 600 300 L 700 180 L 800 50" stroke="orange" fill="none"/>'
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Compute the integral of f(x) = 2x from x=1 to x=4.",
+    )
+    assert not any("function_plot_no_curve" in i for i in issues), issues
+
+
+def test_tangent_missing_flags_when_curve_present_but_no_extra_line():
+    # Curve exists (parabola) and axes are short -> < 3 lines total
+    # plus tangent topic -> flag.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<line x1="450" y1="50" x2="450" y2="600" stroke="black"/>'
+        '<line x1="50" y1="500" x2="850" y2="500" stroke="black"/>'
+        '<path d="M 100 600 Q 450 -100 800 600" stroke="orange" fill="none"/>'
+        '<circle cx="500" cy="425" r="6" fill="blue"/>'
+        '<text x="520" y="425">(2,4)</text>'
+        '</svg>'
+    )
+    narr = [{"speak": "The derivative gives the slope of the tangent line at x = 2.", "highlight": []}]
+    issues = _structural_review(
+        svg, narr,
+        user_prompt="Show the derivative of f(x) = x² at x = 2 as the slope of the tangent line.",
+    )
+    assert any("tangent_missing" in i for i in issues), issues
+
+
+def test_set_topic_flags_when_no_two_ovals():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="200" y="200">1</text>'
+        '<text x="200" y="250">2</text>'
+        '<text x="200" y="300">3</text>'
+        '<text x="400" y="200">4</text>'
+        '<text x="600" y="200">5</text>'
+        '<circle cx="100" cy="100" r="6"/>'  # small dot, not a set oval
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Illustrate set difference A \\ B for two overlapping sets with example elements.",
+    )
+    assert any("set_topic_no_venn" in i for i in issues), issues
+
+
+def test_set_topic_passes_with_two_ellipses():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<ellipse cx="380" cy="325" rx="180" ry="130" fill="#fcc" stroke="red"/>'
+        '<ellipse cx="540" cy="325" rx="180" ry="130" fill="#ccf" stroke="blue"/>'
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Illustrate set difference A \\ B for two overlapping sets.",
+    )
+    assert not any("set_topic_no_venn" in i for i in issues), issues
+
+
+def test_graph_topic_flags_when_no_edges():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="450" y="325">3SAT to Vertex Cover</text>'
+        '<text x="450" y="360">construct the gadgets here</text>'
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Reduce 3SAT to vertex cover: show clause gadgets, variable gadgets, and the chosen cover on the constructed graph.",
+    )
+    assert any("graph_topic_no_edges" in i for i in issues), issues
+
+
+def test_algorithm_trace_flags_when_no_digit_steps():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="100" y="100">Euclidean Algorithm for gcd(252, 105)</text>'
+        '<line x1="100" y1="200" x2="400" y2="200" stroke="black"/>'
+        '<line x1="100" y1="250" x2="400" y2="250" stroke="black"/>'
+        '<line x1="100" y1="300" x2="400" y2="300" stroke="black"/>'
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Compute gcd(252, 105) using the Euclidean algorithm.",
+    )
+    assert any("algorithm_trace_no_steps" in i for i in issues), issues
+
+
+def test_algorithm_trace_passes_with_step_rows():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="100" y="100">252 = 2·105 + 42</text>'
+        '<text x="100" y="150">105 = 2·42 + 21</text>'
+        '<text x="100" y="200">42 = 2·21 + 0</text>'
+        '<text x="100" y="250">gcd = 21</text>'
+        '</svg>'
+    )
+    issues = _structural_review(
+        svg, [],
+        user_prompt="Compute gcd(252, 105) using the Euclidean algorithm.",
+    )
+    assert not any("algorithm_trace_no_steps" in i for i in issues), issues
+
+
+# --- looks_like_refinement classifier ---
+
+def test_refinement_cues_classify_as_refinement():
+    from studio.express import looks_like_refinement
+    refinements = [
+        "Add a label for the hypotenuse.",
+        "Highlight C2 in red.",
+        "Change the colour of the parabola to blue.",
+        "Continue with the next step.",
+        "Now explain step 3 in more detail.",
+        "Remove the dashed line at the top.",
+        "Move the formula to the top of the figure.",
+        "Fix the typo on the label.",
+        "Make this figure larger.",
+        "Relabel b₁ as b_top.",
+    ]
+    for p in refinements:
+        assert looks_like_refinement(p), f"expected refinement: {p!r}"
+
+
+def test_new_topic_classify_as_not_refinement():
+    from studio.express import looks_like_refinement
+    new_topics = [
+        "Compute the integral of f(x) = 2x from x = 1 to x = 4 as the area under the curve.",
+        "Show the derivative of f(x) = x² at x = 2 as the slope of the tangent line.",
+        "Multiply the 2×2 matrices A = [[1,2],[3,4]] and B = [[5,6],[7,8]] step by step.",
+        "Show sin θ and cos θ on the unit circle for θ = 60 degrees.",
+        "Apply the Pythagorean theorem to a right triangle with legs a = 3 and b = 4.",
+        "Compute the volume of a cone with radius r = 3 and height h = 7.",
+        "Compute gcd(252, 105) using the Euclidean algorithm.",
+        "Enumerate the vertex cover of a 5-cycle graph C₅.",
+    ]
+    for p in new_topics:
+        assert not looks_like_refinement(p), f"expected NEW topic: {p!r}"
+
+
+# --- text-text overlap critic ---
+
+def test_text_text_overlap_flags_two_long_labels_at_same_y():
+    # Two long captions at the same y at x=20 and x=200 — the first is
+    # 60 chars (~ 60*16*0.6 = 576 px wide), so it runs UNDER the second
+    # at x=200.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="200" font-size="16">'
+        'The first long formula that runs all the way across the canvas'
+        '</text>'
+        '<text x="200" y="200" font-size="16">'
+        'The second formula sits inside the first'
+        '</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [], user_prompt="")
+    assert any("text_text_overlap" in i for i in issues), issues
+
+
+def test_text_text_overlap_passes_well_spaced_rows():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<text x="20" y="100" font-size="16">First label</text>'
+        '<text x="20" y="200" font-size="16">Second label</text>'
+        '<text x="20" y="300" font-size="16">Third label</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [], user_prompt="")
+    assert not any("text_text_overlap" in i for i in issues), issues
+
+
+def test_caption_overlaps_diagram_now_fires_on_edge_grazing():
+    # 25% overlap should now trigger (was 50%).  Caption sitting on
+    # the top edge of a rect with ~30% of its area inside.
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<rect id="trap" x="200" y="200" width="500" height="200" fill="#cef"/>'
+        '<text x="250" y="195" font-size="18">b_2 = 10 long</text>'
+        '</svg>'
+    )
+    issues = _structural_review(svg, [], user_prompt="")
+    # Position the text so its bbox dips ~5 px into the rect, ~30% area
+    # inside.  The text baseline at y=195 with fs=18 means bbox y∈[195-18,
+    # 195+0.2*18] = [177, 198.6]; rect starts at y=200 so overlap is 0.
+    # Recompute: text bbox uses (ty - fs, h=fs*1.2) → y∈[177, 198.6].
+    # That misses the rect.  Use ty=205 instead.
+    svg2 = (
+        '<svg viewBox="0 0 900 650">'
+        '<rect id="trap" x="200" y="200" width="500" height="200" fill="#cef"/>'
+        '<text x="250" y="215" font-size="18">b_2 = 10 long</text>'
+        '</svg>'
+    )
+    issues2 = _structural_review(svg2, [], user_prompt="")
+    assert any("caption_overlaps_diagram" in i for i in issues2), issues2

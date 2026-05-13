@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -425,6 +426,18 @@ _EXPRESS_SYSTEM = (
     "  RIGHT: <circle cx='450' cy='300' r='180'/>  AND  "
     "    <text>r = 5</text> next to a radius line.  The DRAWN size "
     "    fills the canvas; the label conveys the semantic value.\n"
+    "  LABEL TEXT MUST BE THE USER'S NUMBER, NOT THE SVG COORD.  If "
+    "    the user wrote 'r = 5' in their prompt, the <text> next to "
+    "    the radius reads 'r = 5' — NEVER 'r = 180' or 'r = 200' or "
+    "    whatever value you chose for the SVG attribute.  Same for "
+    "    base/height/side/angle: keep the user's number in the label "
+    "    and any computed final answer; the SVG coord is purely a "
+    "    rendering detail the learner never sees as a number.\n"
+    "  EXAMPLE — user prompt 'compute the circumference of a circle "
+    "    with radius r = 5':  SVG has <circle r='180'/> AND the labels "
+    "    on the figure read 'r = 5', 'C = 2π·5 = 10π ≈ 31.42'.  Even "
+    "    though the visual radius is 180 px, the label and the "
+    "    computation use r = 5.\n"
     "Sizing rule of thumb (for a 900x650 viewBox):\n"
     "  • Main shapes (circle, polygon, triangle, parallelogram, "
     "    parabola, function curve) occupy 50-80% of the diagram area "
@@ -472,6 +485,42 @@ _EXPRESS_SYSTEM = (
     "If the topic genuinely has NO visual content (e.g. 'define a "
     "field axiomatically'), the figure may consist mostly of labelled "
     "<text>; otherwise a missing shape is a hard failure.\n"
+    "\n"
+    "TOPIC-REQUIRED PRIMITIVE — a non-negotiable subset of DRAW THE "
+    "SHAPE: certain prompts have an ABSOLUTELY REQUIRED visual element "
+    "without which the figure is wrong even if labels are correct. "
+    "Self-check before emitting:\n"
+    "  • Prompt or narration mentions 'unit circle', 'arc length', "
+    "    'chord', 'sector', or 'circle of radius'  →  there MUST be a "
+    "    <circle> with r in the 150-220 vb-unit range. A tiny <circle "
+    "    r='5'> dot is NOT enough.\n"
+    "  • Prompt mentions 'derivative', 'integral', 'area under the "
+    "    curve', 'f(x) = …', 'the parabola y = …', or any other "
+    "    function plot  →  there MUST be a <path d='M … L … L … '> "
+    "    with at least 10 sample points (or C/Q Bezier commands) "
+    "    tracing the curve, IN ADDITION TO axes lines. Empty axes are "
+    "    not a function plot.\n"
+    "  • Prompt mentions 'tangent line at x = x₀' or 'slope of the "
+    "    tangent'  →  there MUST be both (a) the curve <path> AND "
+    "    (b) a separate <line> through the tangent point, spanning "
+    "    ~200-300 vb units, with slope = f'(x₀).\n"
+    "  • Prompt mentions 'set A and set B', 'overlapping sets', Venn, "
+    "    set union/intersection/difference  →  there MUST be at least "
+    "    TWO <ellipse rx='180' ry='130'> (or large overlapping "
+    "    <circle>) shapes, NOT plain numbers floating in space.\n"
+    "  • Prompt asks to 'show / construct / illustrate / reduce' a "
+    "    graph, tree, or gadget structure  →  there MUST be at least "
+    "    3 <line>/<path> edges connecting <circle> vertices; an empty "
+    "    framed area with a title is a hard failure.\n"
+    "  • Prompt names an iterative algorithm (Euclidean / gcd / long "
+    "    division / Newton's method)  →  there MUST be at least 3 "
+    "    <text> rows containing the actual numeric step (e.g. "
+    "    '252 = 2·105 + 42'). Empty horizontal rules with no numbers "
+    "    are a hard failure.\n"
+    "Before emitting the JSON: re-read the user's prompt, identify "
+    "which of these categories applies, and confirm the matching "
+    "primitive is present. The deterministic critic will flag any "
+    "miss and force a retry.\n"
     "\n"
     "MENTION = SHOW — every measurable quantity you NAME in narration "
     "must also be VISIBLY DRAWN on the figure as a labelled element "
@@ -575,7 +624,57 @@ _EXPRESS_SYSTEM = (
     "the original three phrases plus the two new ones.\n"
     "\n"
     "If the user's request can't reasonably be drawn, emit a small SVG "
-    "saying so plus a one-phrase narration explaining why."
+    "saying so plus a one-phrase narration explaining why.\n"
+    "\n"
+    "==== TEMPLATES FOR PROMPTS WHERE THE MODEL HISTORICALLY FAILS ====\n"
+    "Two prompt families are routinely produced as EMPTY figures because "
+    "the model can't decide on a layout.  When the user's prompt falls "
+    "into one of these families, follow the matching template closely "
+    "(adapt to the user's actual numbers, but keep the layout).\n"
+    "\n"
+    "(A) ITERATIVE-ALGORITHM TRACE (gcd, long division, Newton's method, "
+    "Euclidean algorithm):\n"
+    "  • Lay out 4-5 rows of step text, each one <text> on its own row, "
+    "    y values spaced 60 px apart, font-size 28-32 px, x = 80.\n"
+    "  • Each row shows the equation for that step using ACTUAL numbers, "
+    "    not blanks.  For Euclidean gcd(a,b): row 1 'a = q1·b + r1', row "
+    "    2 'b = q2·r1 + r2', etc., until remainder = 0.  Final row: "
+    "    'gcd = <last non-zero remainder>'.\n"
+    "  • Optional: a 2-column grid <g> with 'dividend', 'quotient', "
+    "    'remainder' headers on top and the per-step values below.\n"
+    "  • Concrete example for gcd(252, 105):\n"
+    "    <text x='80' y='120' font-size='30'>252 = 2 · 105 + 42</text>\n"
+    "    <text x='80' y='180' font-size='30'>105 = 2 · 42 + 21</text>\n"
+    "    <text x='80' y='240' font-size='30'>42  = 2 · 21 + 0</text>\n"
+    "    <text x='80' y='320' font-size='34' font-weight='bold'>gcd(252, 105) = 21</text>\n"
+    "  • The narration walks through one row per phrase, highlighting "
+    "    the matching <text id='step_k'>.\n"
+    "\n"
+    "(B) REDUCTION CONSTRUCTION (3SAT → vertex cover, SAT → 3SAT, "
+    "Hamiltonian → TSP, etc.):\n"
+    "  • Draw a SMALL concrete instance, not the general abstract "
+    "    construction.  For 3SAT → VC, use a 2-clause / 2-variable "
+    "    example like φ = (x₁ ∨ x₂) ∧ (¬x₁ ∨ x₂).\n"
+    "  • Lay out two vertical bands:\n"
+    "    LEFT BAND (variable gadgets, x ≈ 150-400): for each variable "
+    "    xᵢ draw two <circle r='28'> with labels 'xᵢ' and '¬xᵢ', "
+    "    connected by a <line>.  Stack the gadgets vertically.\n"
+    "    RIGHT BAND (clause gadgets, x ≈ 600-850): for each clause "
+    "    draw a triangle of three <circle r='28'> with the literal "
+    "    labels of the clause inside; connect the three circles with "
+    "    <line> elements to form the triangle.\n"
+    "  • Then draw cross-edges (<line>) from each clause vertex to "
+    "    its corresponding variable vertex in the left band.\n"
+    "  • Highlight the chosen vertex cover (e.g., colour those "
+    "    <circle> with a thicker stroke or distinct fill).\n"
+    "  • Add a <text> at the bottom stating |VC| = k for the matching "
+    "    SAT assignment.\n"
+    "  • The narration walks through: variable gadgets → clause gadgets "
+    "    → cross-edges → vertex cover choice → why it works.\n"
+    "\n"
+    "When the prompt does NOT fall into these families, ignore the "
+    "templates and use your own layout.  But never emit an empty "
+    "framed canvas — that is always wrong."
 )
 
 
@@ -594,8 +693,22 @@ _REVIEW_SYSTEM = (
     "wrong concept)\n"
     "  • main content missing entirely (e.g. 'matrix multiplication' "
     "with no matrices visible at all)\n"
-    "  • text overlapping text such that nothing is readable\n"
+    "  • TEXT OVERLAP — any text element whose bounding box visibly "
+    "overlaps another text element, a shape interior, a stroke, or an "
+    "axis tick label, such that one of the strings is partially or "
+    "fully hidden.  Look carefully at the rendered PNG: if a learner "
+    "would have to mentally separate two collided strings to read "
+    "them, that's a FAIL.  Common forms: caption overlapping a label "
+    "INSIDE a polygon; two labels stacked at the same y; a long "
+    "formula crossing an axis or arrow; tick labels of different "
+    "series sharing pixel space.  Be strict — overlapping text is "
+    "the #1 reason learners give up on a figure.\n"
     "  • wrong topology (3SAT-clique drawn as a tree, etc.)\n"
+    "  • the figure is clearly the WRONG TOPIC compared to the user's "
+    "prompt (e.g. user asked for an integral, the figure shows a "
+    "triangle with no curve), OR the figure visibly carries over "
+    "content from a previous turn that does not belong in this one "
+    "(stale matrix sitting next to a new circle, etc.).\n"
     "\n"
     "FAIL on these MATH-CORRECTNESS problems (these matter at least as "
     "much as visual problems — a beautiful figure that teaches a wrong "
@@ -1144,13 +1257,14 @@ async def express_figure(
     base_url: str,
     model: str,
     api_key: str | None,
-    # max_retries=1 — one shot at fixing what the reviewer flagged.
-    # Earlier this was bumped to 2 but on hard prompts the model
-    # keeps producing FAIL-rated figures so all three attempts ran
-    # (40 s each) for a 2 min 20 s wall clock the user found
-    # untenable.  Quality on hard prompts is bounded by the model
-    # itself, not by retry count; better to ship faster.
-    max_retries: int = 1,
+    # max_retries=2 — vision-review needs more chances to fix
+    # real geometric/overlap issues that take more than one shot.
+    # The earlier max_retries=1 was tuned against TEXT-mode review
+    # which mostly fired on factual claims (cheap to fix in one
+    # round); vision review fires on layout overlaps that genuinely
+    # require multiple rounds.  Hard wall remains the per-call
+    # timeout — even with 2 retries the worst case is ~3 × 40 s.
+    max_retries: int = 2,
     context_canvases: list[dict[str, Any]] | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
@@ -1379,12 +1493,17 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"wrap_overlong_text FAILED: {type(exc).__name__}: {exc}")
+        # Run reflow up to 3 times until idempotent.  A single pass
+        # can introduce new overlaps when it shifts text into a region
+        # that already has neighbours; iterating converges the layout.
         try:
-            reflowed = reflow_overlapping_text(result["svg"])
-            if reflowed != result["svg"]:
+            for _pass in range(3):
+                reflowed = reflow_overlapping_text(result["svg"])
+                if reflowed == result["svg"]:
+                    break
                 _log(
-                    f"reflow_overlapping_text: rewrote {len(result['svg'])} -> "
-                    f"{len(reflowed)} chars"
+                    f"reflow_overlapping_text pass={_pass}: rewrote "
+                    f"{len(result['svg'])} -> {len(reflowed)} chars"
                 )
                 result["svg"] = reflowed
         except Exception as exc:  # noqa: BLE001
@@ -1417,6 +1536,7 @@ async def express_figure(
         # "the artifact under attention was not highlighted").
         structural_issues = _structural_review(
             result.get("svg", ""), result.get("narration") or [],
+            user_prompt=user_prompt,
         )
         if structural_issues:
             _log(f"structural review: {len(structural_issues)} issue(s)")
@@ -1511,13 +1631,39 @@ async def express_figure(
                 ),
             })
         else:
-            png = _svg_to_png(result["svg"])
-            b64 = base64.b64encode(png).decode("ascii")
-            messages.append({"role": "user", "content": [
-                {"type": "text", "text": retry_text},
-                {"type": "image_url",
-                 "image_url": {"url": f"data:image/png;base64,{b64}"}},
-            ]})
+            # Rasterising can fail if the model emitted malformed XML
+            # (unclosed tag, unescaped &, etc.).  Without this guard,
+            # the cairosvg ParseError bubbles all the way up and the
+            # whole turn crashes — the user sees a tool error instead
+            # of a corrected figure.  When PNG render fails, send only
+            # the text critique + the raw SVG-as-text so the model can
+            # still see what it produced and fix it.
+            try:
+                png = _svg_to_png(result["svg"])
+                b64 = base64.b64encode(png).decode("ascii")
+                messages.append({"role": "user", "content": [
+                    {"type": "text", "text": retry_text},
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ]})
+            except Exception as render_exc:  # noqa: BLE001
+                _log(
+                    f"retry PNG render FAILED ({type(render_exc).__name__}: "
+                    f"{render_exc}); sending text-only critique with "
+                    f"the raw SVG"
+                )
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        retry_text
+                        + "\n\nNote: your previous SVG could not be "
+                        "rasterised, likely because the XML is malformed "
+                        "(unclosed tag, unescaped & or <, mismatched "
+                        "quotes).  Re-emit a CLEAN, well-formed SVG.  "
+                        "Your previous (broken) output was:\n```svg\n"
+                        + result.get("svg", "")[:8000] + "\n```"
+                    ),
+                })
 
     # Loop exited with a still-failing figure — return last attempt anyway.
     # No repair pair recorded: nothing was actually corrected.
@@ -1580,13 +1726,15 @@ async def express_figure(
 def _review_config() -> tuple[str, str, str, str | None]:
     """Return (mode, model, base_url, api_key) for the reviewer.
 
-    Mode is one of 'text', 'vision', 'off'.  Defaults match the
-    "GPT-4o-mini reviews SVG-as-text" recommendation; flip via env.
+    Mode is one of 'text', 'vision', 'off'.  Default is now vision-on-
+    gpt-4o: the reviewer rasterises the SVG to PNG and inspects the
+    pixels, which is the only way to catch real text-overlap.  Text
+    mode (cheaper, no vision needed) remains available via env.
     """
-    mode = (os.environ.get("SEVIM_REVIEW_MODE") or "text").lower().strip()
+    mode = (os.environ.get("SEVIM_REVIEW_MODE") or "vision").lower().strip()
     if mode not in ("text", "vision", "off"):
-        mode = "text"
-    model = os.environ.get("SEVIM_REVIEW_MODEL") or "gpt-4o-mini"
+        mode = "vision"
+    model = os.environ.get("SEVIM_REVIEW_MODEL") or "gpt-4o"
     base_url = (os.environ.get("SEVIM_REVIEW_URL")
                 or os.environ.get("SEVIM_VLLM_URL")
                 or "https://api.openai.com/v1").rstrip("/")
@@ -2778,7 +2926,11 @@ def reflow_overlapping_text(svg: str) -> str:
             return 0.0, 0.0
         return 0.0, 0.0
 
-    PAD = 4.0       # min separation between text bboxes
+    # 10 px PAD (was 4) — a 4-px gap is too tight when the rendered
+    # font is 16-18 px and may include diacritics / subscripts that
+    # extend the visual bbox.  10 px ≈ 0.6 line-height; gives a
+    # comfortable visual gap even for the busiest figures.
+    PAD = 10.0      # min separation between text bboxes
     STEP = 4.0      # shift increment
     COL_DX = 480.0  # second-column x offset
     TOP_MARGIN = 30.0
@@ -2934,7 +3086,8 @@ def reflow_overlapping_text(svg: str) -> str:
     return out
 
 
-def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
+def _structural_review(svg: str, narration: list[dict[str, Any]],
+                        user_prompt: str = "") -> list[str]:
     """Return a list of structural issues with the (svg, narration) pair.
 
     Empty list means structural review passes; non-empty list is
@@ -3353,7 +3506,11 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             text_area = max(1.0, tw * th)
             for dx, dy, dw, dh, did in diagram_boxes:
                 ov = _overlap_area((tx, ty, tw, th), (dx, dy, dw, dh))
-                if ov / text_area >= 0.5:
+                # Tightened from 0.5 → 0.25: edge-grazing overlap is
+                # still a readability failure for the learner; we
+                # caught real bugs (label-on-trapezoid-edge) that the
+                # 0.5 threshold let slip through.
+                if ov / text_area >= 0.25:
                     snippet = content[:24] + ("…" if len(content) > 24 else "")
                     target = f"box id='{did}'" if did else "an unlabelled box"
                     overlaps.append(f"caption {snippet!r} overlaps {target}")
@@ -3369,6 +3526,56 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
                 "(top band y<60, bottom band y>" + str(int(vb_h - 80)) +
                 ", or right column x>" + str(int(vb_w * 0.7)) + ") so "
                 "the diagram region stays readable."
+            )
+
+        # 5b. Text-text overlap.  Pairwise check of every <text>'s
+        # estimated bbox against every other's — flag the pair when
+        # they share >= 20% of the smaller box's area.  Catches the
+        # "two labels stacked at the same y" failure that the LLM
+        # produces when it sets multiple <text> with the same y in
+        # different x-anchored positions and the lengths collide.
+        # Pre-existing reflow_overlapping_text resolves this for
+        # top-level text but does NOT touch text inside <g>; this
+        # critic surfaces residual overlaps so the LLM rewrites them
+        # at the source rather than relying on post-processing.
+        tt_overlaps: list[str] = []
+        for i in range(len(text_boxes)):
+            ax, ay, aw, ah, a_content = text_boxes[i]
+            for j in range(i + 1, len(text_boxes)):
+                bx, by, bw, bh, b_content = text_boxes[j]
+                ov = _overlap_area(
+                    (ax, ay, aw, ah), (bx, by, bw, bh),
+                )
+                if ov <= 0:
+                    continue
+                smaller_area = max(1.0, min(aw * ah, bw * bh))
+                if ov / smaller_area >= 0.20:
+                    a_snip = a_content[:20] + ("…" if len(a_content) > 20 else "")
+                    b_snip = b_content[:20] + ("…" if len(b_content) > 20 else "")
+                    tt_overlaps.append(
+                        f"{a_snip!r} collides with {b_snip!r}"
+                    )
+                    break  # one collision per A is enough
+            if len(tt_overlaps) >= 10:
+                break
+        if tt_overlaps:
+            sample = "; ".join(tt_overlaps[:6])
+            more = (f" (and {len(tt_overlaps) - 6} more)"
+                    if len(tt_overlaps) > 6 else "")
+            issues.append(
+                "text_text_overlap: " + str(len(tt_overlaps)) +
+                " pair(s) of <text> elements overlap in pixel space: "
+                + sample + more +
+                ".  Two text strings should never share pixel area — "
+                "the learner cannot read either.  Fix by re-stacking "
+                "the offending labels on different y values "
+                "(min spacing 1.4 × font-size apart), OR by moving "
+                "one to a different column (x ≥ "
+                + str(int(vb_w * 0.65)) +
+                "), OR by removing a redundant duplicate.  Long "
+                "formulas must be BROKEN into multiple <text> rows "
+                "on stacked y values, not laid out side-by-side at "
+                "the same y."
             )
 
     # 4z. Micro-figure check — when the viewBox is normal-sized (>= 400
@@ -3579,7 +3786,250 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
             "from the narration."
         )
 
+    # 7. Topic-keyword required primitive — when the prompt or narration
+    # explicitly names a topic that requires a specific visual element
+    # (circle, function curve, two overlapping sets, graph edges), the
+    # SVG must include that element at readable size.  Catches gpt-4o
+    # failures where the figure is built ALMOST right but the central
+    # subject is missing: 'unit circle' question with no <circle>,
+    # 'derivative as tangent line' with no tangent <line>, 'integral as
+    # area under the curve' with no curve <path>, 'overlapping sets A
+    # and B' with no Venn ellipses.  Only fire on real-sized viewBoxes
+    # so test fixtures aren't flagged.
+    if vb_w >= 400 and vb_h >= 300:
+        prompt_lower = (user_prompt or "").lower()
+        narr_lower = " ".join(
+            ((p or {}).get("speak", "") or "") for p in (narration or [])
+        ).lower()
+        combined = prompt_lower + " || " + narr_lower
+
+        circle_radii_all: list[float] = []
+        for m in re.finditer(
+            r'<circle\b[^>]*\br\s*=\s*["\']?\s*([0-9.]+)', svg_no_text,
+        ):
+            try:
+                circle_radii_all.append(float(m.group(1)))
+            except ValueError:
+                continue
+        big_circles = [r for r in circle_radii_all if r >= 60]
+        big_ellipses = len(re.findall(
+            r'<ellipse\b[^>]*\brx\s*=\s*["\']?\s*[6-9][0-9]', svg_no_text,
+        )) + len(re.findall(
+            r'<ellipse\b[^>]*\brx\s*=\s*["\']?\s*[1-9][0-9]{2,}', svg_no_text,
+        ))
+        path_decls = re.findall(
+            r'<path\b[^>]*\bd\s*=\s*["\']([^"\']+)["\']', svg_no_text,
+        )
+        # A "curve path" has multiple Bezier or many line-to commands so
+        # we don't count a single 'M 0 0 L 100 100' as a function curve.
+        curve_paths = [
+            d for d in path_decls
+            if len(re.findall(r'[CQ]', d)) >= 1
+            or len(re.findall(r'[LMlm]', d)) >= 6
+        ]
+        all_line_count = len(re.findall(r'<line\b', svg_no_text))
+
+        topic_misses: list[str] = []
+
+        # 7a. Circle-required topics.  Match phrases that pin the topic
+        # ON the circle as primary subject; exclude 'circumference of
+        # a sphere' style false positives via context check.
+        circle_topic = bool(re.search(
+            r'\bunit\s+circle\b|\bthe\s+circle\b|\ba\s+circle\b|'
+            r'\bcircle\s+(?:of|with)\s+radius\b|\bcircle\s+for\b|'
+            r'\bsin\s*[θ\w]?\s+and\s+cos\s*[θ\w]?\b|'
+            r'\barc\s+length\b|\bsector\b|\bchord\b',
+            combined,
+        ))
+        if circle_topic and not big_circles:
+            topic_misses.append(
+                "circle_topic_no_big_circle: prompt or narration names a "
+                "circle / unit circle / arc / sector / chord as the "
+                "subject, but the SVG contains no <circle> with radius "
+                ">= 60 vb units. Add a <circle cx=… cy=… r='180'/> at "
+                "the diagram centre BEFORE drawing any chords, radii, "
+                "or angle markers on it."
+            )
+
+        # 7b. Function plot / curve topics.  When the user asks for
+        # derivative, integral, area under curve, or names a function
+        # f(x)=..., the SVG must contain a curve <path>.
+        curve_topic = bool(re.search(
+            r'\bderivative\b|\bintegral\b|\barea\s+under\s+the\s+curve\b|'
+            r'\bf\s*\(\s*x\s*\)\s*=|\bg\s*\(\s*x\s*\)\s*=|'
+            r'\bplot\s+(?:of|the)\b|\bgraph\s+(?:of|the)\s+function\b|'
+            r'\bthe\s+parabola\b|\bthe\s+curve\b|\bthe\s+function\b',
+            combined,
+        ))
+        if curve_topic and not curve_paths:
+            topic_misses.append(
+                "function_plot_no_curve: prompt or narration names a "
+                "function / derivative / integral / parabola / curve, "
+                "but the SVG has no <path d='…'> that traces a curve "
+                "(needs C/Q Bezier commands OR >= 6 polyline points). "
+                "Draw the curve as <path d='M x0 y0 L x1 y1 L x2 y2 …'> "
+                "with at least 10 samples across the domain, in addition "
+                "to axes lines."
+            )
+
+        # 7c. Tangent-line topic.  Needs BOTH a curve AND a separate
+        # straight <line> for the tangent.  If a curve is present but
+        # no tangent line, flag specifically.
+        tangent_topic = bool(re.search(
+            r'\btangent\s+line\b|\btangent\s+at\s+x\b|'
+            r'\bslope\s+of\s+the\s+tangent\b',
+            combined,
+        ))
+        if tangent_topic and curve_paths and all_line_count < 3:
+            topic_misses.append(
+                "tangent_missing: narration names a tangent line at a "
+                "specific point but the SVG has no separate <line> for "
+                "the tangent (only axes and the curve are present). Add "
+                "<line x1=… y1=… x2=… y2=…/> through the tangent point, "
+                "with slope = f'(x₀), spanning ~200-300 vb units."
+            )
+
+        # 7d. Overlapping-sets topic.  Set A and Set B (or Venn) need
+        # at least two large circular/elliptical shapes.
+        set_topic = bool(re.search(
+            r'\bset\s+a\b.*\bset\s+b\b|'
+            r'\boverlapping\s+sets\b|\bvenn\b|'
+            r'\ba\s*[∩∪\\]\s*b\b|'
+            r'\bset\s+difference\b|\bset\s+intersection\b|'
+            r'\bset\s+union\b',
+            combined, re.S,
+        ))
+        venn_shapes = len([r for r in circle_radii_all if r >= 80]) + big_ellipses
+        if set_topic and venn_shapes < 2:
+            topic_misses.append(
+                "set_topic_no_venn: prompt or narration names two sets "
+                "(A and B, set difference, union, intersection, Venn) "
+                "but the SVG has fewer than 2 large circular/elliptical "
+                "shapes. Draw set A and set B as two overlapping "
+                "<ellipse rx='180' ry='130'/> shapes with light fill + "
+                "stroke, positioned so they overlap, THEN place element "
+                "labels inside their regions."
+            )
+
+        # 7e. Graph / tree-construction topics with no edges.  When the
+        # prompt asks to 'show', 'construct', 'enumerate', 'reduce' a
+        # graph, tree, or gadget structure, the SVG must include
+        # multiple <line>/<path> edges.
+        graph_topic = bool(re.search(
+            r'\bgraph\b|\btree\b|\bgadget\b|\bclause\b.*\bvariable\b|'
+            r'\bvertex\s+cover\b|\bspanning\s+tree\b|\bedges?\b',
+            combined,
+        ))
+        graph_cue = bool(re.search(
+            r'\bshow\b|\billustrate\b|\bconstruct\b|\benumerate\b|'
+            r'\breduce\b|\bvisuali[sz]e\b|\bdraw\b',
+            combined,
+        ))
+        # rough edge count: <line> + curve_path count
+        edge_estimate = all_line_count + len(curve_paths)
+        if graph_topic and graph_cue and edge_estimate < 3:
+            topic_misses.append(
+                "graph_topic_no_edges: prompt asks to draw / construct / "
+                "reduce a graph or tree, but the SVG has fewer than 3 "
+                "<line>/<path> edges. Draw vertices as <circle r='18'/> "
+                "and each edge as <line x1=… y1=… x2=… y2=…/>; for a "
+                "3SAT → vertex-cover reduction draw each variable "
+                "gadget (2 vertices joined) and each clause gadget (3 "
+                "vertices in a triangle) AND the cross-edges between "
+                "them."
+            )
+
+        # 7f. Algorithm trace with no content — Euclidean algorithm,
+        # long-division, etc., need step rows with actual numbers, not
+        # empty horizontal rules.  Detect by 'algorithm' or 'gcd' +
+        # very low text-with-digits count.
+        algo_topic = bool(re.search(
+            r'\beuclidean\s+algorithm\b|\bgcd\b|\blong\s+division\b|'
+            r'\bbisection\b|\bnewton\'?s?\s+method\b',
+            combined,
+        ))
+        if algo_topic:
+            digit_texts = len(re.findall(
+                r'<text\b[^>]*>[^<]*\d[^<]*</text>', svg,
+            ))
+            if digit_texts < 3:
+                topic_misses.append(
+                    "algorithm_trace_no_steps: prompt names an "
+                    "iterative algorithm (Euclidean / gcd / long "
+                    "division / Newton) but the SVG has fewer than 3 "
+                    "<text> labels containing digits. Render each "
+                    "iteration as one <text> row showing the equation "
+                    "for that step (e.g. for gcd(252,105): '252 = "
+                    "2·105 + 42', '105 = 2·42 + 21', '42 = 2·21 + 0', "
+                    "'gcd = 21')."
+                )
+
+        if topic_misses:
+            issues.append(
+                "missing_required_primitive: " +
+                str(len(topic_misses)) +
+                " topic-specific primitive(s) missing — " +
+                " | ".join(topic_misses) +
+                " The topic-required primitive is the most important "
+                "thing on the figure; without it the learner sees a "
+                "page that does not match what the narration says."
+            )
+
     return issues
+
+
+_REFINEMENT_CUE_RE = re.compile(
+    r"\b("
+    r"add|adds|adding|added|"
+    r"remove|removes|removing|removed|"
+    r"delete|deletes|deleting|deleted|"
+    r"change|changes|changing|changed|"
+    r"replace|replaces|replacing|replaced|"
+    r"highlight|highlights|highlighting|highlighted|"
+    r"emphasi[sz]e|emphasi[sz]ed|"
+    r"continue|continues|continuing|"
+    r"keep\s+going|next\s+step|"
+    r"explain|explains|explaining|explained|"
+    r"more\s+detail|more\s+on|"
+    r"this|that|"
+    r"the\s+figure|the\s+canvas|the\s+diagram|the\s+previous|"
+    r"the\s+above|prior|earlier|"
+    r"refine|refines|refining|refined|"
+    r"clean\s+up|simplify|simplifies|simplifying|"
+    r"zoom\s+in|zoom\s+out|"
+    r"colour|color|colours|colors|recolou?r|"
+    r"label|labels|labelling|labeling|labelled|labeled|relabel|"
+    r"annotate|annotates|annotating|"
+    r"shrink|shrinks|shrinking|enlarge|enlarges|enlarging|"
+    r"move|moves|moving|moved|reposition|"
+    r"fix|fixes|fixing|fixed|correct|corrects|correcting|corrected"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def looks_like_refinement(prompt: str) -> bool:
+    """Heuristic: True when the prompt reads like a follow-up that
+    refines the previous figure ('add a label', 'highlight C2',
+    'change the colour', 'continue'), False when it looks like a
+    self-contained new topic ('Compute the integral of f(x) = 2x ...',
+    'Apply the Pythagorean theorem ...').
+
+    A multi-turn audit revealed that gpt-4o, when given a prior canvas
+    via context_canvases, ALWAYS treats the next turn as refinement and
+    overlays the new figure on the old one — even when the user has
+    clearly switched topics.  We pre-classify on the server side so an
+    unrelated follow-up does NOT trigger REFINEMENT MODE in the prompt.
+    """
+    text = (prompt or "").strip()
+    if not text:
+        return False
+    # Bare imperative templates ('Compute X', 'Show Y', 'Apply Z',
+    # 'Illustrate W') with no anaphora and no refinement cue are
+    # almost always topic switches.
+    if _REFINEMENT_CUE_RE.search(text):
+        return True
+    return False
 
 
 def _build_user_content(

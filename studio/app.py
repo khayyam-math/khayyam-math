@@ -410,21 +410,31 @@ async def _execute_tool(
     # Conversational context: pull prior canvases out of REGISTRY so
     # gpt-4o sees the actual figure(s) the user is refining (SVG XML +
     # PNG snapshot + original prompt + narration script).
+    #
+    # A multi-turn audit found that when the user switches TOPIC (e.g.,
+    # T1 'trapezoid area' → T2 'derivative of f(x)=x²'), passing the
+    # prior canvas as context causes the model to OVERLAY the new
+    # figure on the old one ('refinement creep').  We pre-classify the
+    # new prompt: if it has no refinement cue (add / change / continue
+    # / 'this figure' / etc.) we drop the prior context so each new
+    # topic gets a fresh canvas.
+    from studio.express import looks_like_refinement
     context_ids = list(args.get("context_canvas_ids") or [])
     context_canvases: list[dict[str, Any]] = []
-    for prior_id in context_ids[:3]:  # cap at 3 prior figures (cost)
-        try:
-            pc = REGISTRY.get(prior_id)
-        except KeyError:
-            continue
-        if not getattr(pc, "svg", None):
-            continue
-        context_canvases.append({
-            "id": pc.canvas_id,
-            "svg": pc.svg,
-            "prompt": pc.genesis_prompt or "",
-            "narration": (pc.narration_manifest or {}).get("phrases") or [],
-        })
+    if context_ids and looks_like_refinement(prompt):
+        for prior_id in context_ids[:3]:  # cap at 3 prior figures (cost)
+            try:
+                pc = REGISTRY.get(prior_id)
+            except KeyError:
+                continue
+            if not getattr(pc, "svg", None):
+                continue
+            context_canvases.append({
+                "id": pc.canvas_id,
+                "svg": pc.svg,
+                "prompt": pc.genesis_prompt or "",
+                "narration": (pc.narration_manifest or {}).get("phrases") or [],
+            })
     t0 = _time.monotonic()
     # Backend selection is admin-controlled, not request-controlled:
     # ``resolve_backend()`` consults the server-side ``active_model``
