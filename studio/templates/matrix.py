@@ -722,62 +722,120 @@ def system_of_equations(
     if var_names is None:
         var_names = ([f"x&#x208{i+1};" for i in range(n)]
                      if n <= 9 else [f"x{i+1}" for i in range(n)])
-    cell = _pick_cell(n)
+    cell = _pick_cell(n + 1)   # slightly smaller — two rows of matrices fit
     PAD = 4
-    FONT = max(14, int(cell * 0.45))
+    FONT = max(13, int(cell * 0.45))
     OP_GAP = 22
-    OP_W = 24
+    OP_W = 30
 
-    # Layout: [ A ] [ x_col ] [ = ] [ b_col ]
+    # Layout — TWO rows of matrices so the inverse and the matrix-
+    # vector product are both VISIBLE, not just narrated:
+    #
+    #   Row 1:   [ A ]  [ x_col ]  =  [ b_col ]
+    #
+    #   Row 2:   x =  [ A^(-1) ]  ·  [ b_col_copy ]  =  [ solution_col ]
+    #
     rhs_col = [[v] for v in rhs]
     x_col: List[List[str]] = [[var_names[i]] for i in range(n)]
     w_a = n * cell + 2 * PAD
     w_x = cell + 2 * PAD
     w_b = cell + 2 * PAD
-    total_w = w_a + OP_GAP + w_x + OP_GAP + OP_W + OP_GAP + w_b
+    row1_w = w_a + OP_GAP + w_x + OP_GAP + OP_W + OP_GAP + w_b
     h_block = n * cell + 2 * PAD
-    # Auto-tight canvas: title + matrix + solution line + margin.
-    if canvas_h is None:
-        canvas_h = max(360, 130 + h_block + 90)
-    x0 = (canvas_w - total_w) // 2
-    y_a = 110
-    y_center = y_a + h_block // 2
 
-    parts: List[str] = []
-    parts.append(_svg_open(canvas_w, canvas_h, "System of equations: A x = b"))
-    parts.append(_matrix_block("matrix_a", coeffs, x0, y_a, n, n,
-                               cell, PAD, FONT))
-    parts.append(_matrix_block("vector_x", x_col,
-                               x0 + w_a + OP_GAP, y_a, n, 1,
-                               cell, PAD, FONT))
-    op_y = y_center + FONT // 3
-    parts.append(_op_text(
-        "op_equals",
-        x0 + w_a + OP_GAP + w_x + OP_GAP + OP_W // 2, op_y,
-        "=", size=28,
-    ))
-    parts.append(_matrix_block("vector_b", rhs_col,
-                               x0 + w_a + OP_GAP + w_x + OP_GAP + OP_W + OP_GAP,
-                               y_a, n, 1, cell, PAD, FONT))
-
-    # Solution panel below.
+    # Compute solution before laying out so we know if row 2 exists.
     solution = None
+    inv = None
     if show_solution:
         inv = _inverse(coeffs)
         if inv is not None:
             solution = [sum(inv[i][k] * rhs[k] for k in range(n))
                         for i in range(n)]
+
+    sol_col: List[List[float]] = [[v] for v in (solution or [0.0] * n)]
+
+    # Row 2 layout:  "x =" label + A^-1 + dot + b_col + = + solution_col
+    LABEL_W = 50      # space for "x ="
+    DOT_W = 24        # for · between A^-1 and b
+    row2_w = (LABEL_W + OP_GAP + w_a + OP_GAP + DOT_W + OP_GAP + w_b
+              + OP_GAP + OP_W + OP_GAP + w_b)
+    total_w = max(row1_w, row2_w)
+    x0_row1 = (canvas_w - row1_w) // 2
+    x0_row2 = (canvas_w - row2_w) // 2
+
+    y_a = 110
+    row_gap = 70          # extra space between rows
+    y_b = y_a + h_block + row_gap + 30   # row 2 starts here (after step text)
+    steps_y = y_a + h_block + 30         # step 1/2 caption row
+    sol_text_y = y_b + h_block + 40      # final "Solution: x1=..." line
+
+    if canvas_h is None:
+        if solution is not None:
+            canvas_h = max(440, sol_text_y + 40)
+        else:
+            canvas_h = max(360, y_a + h_block + 90)
+
+    op_y_r1 = y_a + h_block // 2 + FONT // 3
+    op_y_r2 = y_b + h_block // 2 + FONT // 3
+
+    parts: List[str] = []
+    parts.append(_svg_open(canvas_w, canvas_h, "System of equations: A x = b"))
+    # ── Row 1: original equation ────────────────────────────────
+    parts.append(_matrix_block("matrix_a", coeffs, x0_row1, y_a, n, n,
+                               cell, PAD, FONT))
+    parts.append(_matrix_block("vector_x", x_col,
+                               x0_row1 + w_a + OP_GAP, y_a, n, 1,
+                               cell, PAD, FONT))
+    parts.append(_op_text(
+        "op_equals",
+        x0_row1 + w_a + OP_GAP + w_x + OP_GAP + OP_W // 2, op_y_r1,
+        "=", size=28,
+    ))
+    parts.append(_matrix_block("vector_b", rhs_col,
+                               x0_row1 + w_a + OP_GAP + w_x + OP_GAP
+                               + OP_W + OP_GAP,
+                               y_a, n, 1, cell, PAD, FONT))
+
     if solution is not None:
-        sol_y = y_a + h_block + 40
-        text = "Solution: " + ", ".join(
-            f"{var_names[i].replace('&#x208', 'x_').replace(';', '')}"
-            f" = {_fmt(solution[i])}"
-            for i in range(n)
+        # Step caption between rows.
+        det_a = _det(coeffs)
+        parts.append(
+            f'<text id="step_det" x="{canvas_w // 2}" y="{steps_y}" '
+            f'font-size="18" text-anchor="middle" font-family="serif" '
+            f'fill="#111">Step 1. det(A) = {_fmt(det_a)} (non-zero) — '
+            f'a unique solution exists, given by x = A^(-1) b</text>'
         )
-        # Use plain xN= form to keep entity-noise low in narration too.
+        # ── Row 2: x = A^-1 · b = solution ──────────────────────
+        x_pos = x0_row2
+        # "x =" label
+        parts.append(
+            f'<text id="step_xeq_label" x="{x_pos + LABEL_W // 2}" '
+            f'y="{op_y_r2}" font-size="22" text-anchor="middle" '
+            f'font-family="serif" fill="#111">x =</text>'
+        )
+        x_pos += LABEL_W + OP_GAP
+        parts.append(_matrix_block("matrix_a_inv", inv, x_pos, y_b, n, n,
+                                   cell, PAD, FONT))
+        x_pos += w_a + OP_GAP
+        parts.append(_op_text(
+            "op_dot",
+            x_pos + DOT_W // 2, op_y_r2, "*", size=24,
+        ))
+        x_pos += DOT_W + OP_GAP
+        parts.append(_matrix_block("vector_b_copy", rhs_col,
+                                   x_pos, y_b, n, 1, cell, PAD, FONT))
+        x_pos += w_b + OP_GAP
+        parts.append(_op_text(
+            "op_equals_r2",
+            x_pos + OP_W // 2, op_y_r2, "=", size=24,
+        ))
+        x_pos += OP_W + OP_GAP
+        parts.append(_matrix_block("vector_solution", sol_col, x_pos, y_b,
+                                   n, 1, cell, PAD, FONT))
+        # Solution line below row 2.
         plain = ",   ".join(f"x{i+1} = {_fmt(solution[i])}" for i in range(n))
         parts.append(
-            f'<text id="solution" x="{canvas_w // 2}" y="{sol_y}" '
+            f'<text id="solution" x="{canvas_w // 2}" y="{sol_text_y}" '
             f'font-size="20" text-anchor="middle" font-family="serif" '
             f'fill="#111">{plain}</text>'
         )
@@ -797,21 +855,25 @@ def system_of_equations(
          "highlight": ["vector_b"]},
     ]
     if solution is not None:
-        det_a = _det(coeffs)
         narration.extend([
-            {"speak": (f"Step one: check whether the coefficient matrix is "
-                       f"invertible.  Its determinant is {_fmt(det_a)}, which "
-                       "is non-zero — so a unique solution exists."),
-             "highlight": ["matrix_a"]},
-            {"speak": ("Step two: multiply both sides of A x equals b on the "
-                       "left by A-inverse.  Since A-inverse times A is the "
-                       "identity, the left side collapses to just x."),
-             "highlight": ["matrix_a", "vector_x"]},
-            {"speak": ("Step three: x equals A-inverse times b.  Compute "
-                       "the matrix-vector product on the right."),
-             "highlight": ["vector_b"]},
-            {"speak": (f"The result is the solution to the system, "
-                       "shown below the equation."),
+            {"speak": (f"Step one: check whether A is invertible — its "
+                       f"determinant is non-zero, so a unique solution "
+                       f"exists.  This is shown in the line below."),
+             "highlight": ["step_det"]},
+            {"speak": ("Step two: write the solution explicitly as x equals "
+                       "A inverse times b.  Both factors are shown below — "
+                       "A inverse on the left, b in the middle, and their "
+                       "product on the right."),
+             "highlight": ["matrix_a_inv", "vector_b_copy",
+                           "vector_solution"]},
+            {"speak": ("The leftmost matrix is A inverse, computed by the "
+                       "cofactor formula: adjugate divided by determinant."),
+             "highlight": ["matrix_a_inv"]},
+            {"speak": ("Multiplying A inverse by b row-by-row gives the "
+                       "rightmost column — that is the solution vector x."),
+             "highlight": ["vector_solution"]},
+            {"speak": ("The individual values for each unknown are summarised "
+                       "below."),
              "highlight": ["solution"]},
         ])
     else:
