@@ -52,7 +52,17 @@
     /* Make the play button thumb-friendly on touch. */
     min-height: 40px; min-width: 40px;
   }
-  header button.play-btn:disabled { opacity: 0.5; cursor: default; }
+  header button.play-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+    background: var(--muted);
+    border-color: var(--muted);
+    animation: emergePulse 1.6s ease-in-out infinite;
+  }
+  @keyframes emergePulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.85; }
+  }
   header button.play-btn.hidden { display: none; }
   main {
     display: flex; align-items: center; justify-content: center;
@@ -350,15 +360,43 @@
   // Once playback starts, the standard browser <audio> controls (when
   // exposed) handle pause / resume / seek.
 
-  // Make the header Play button visible the moment audio is ready.
-  function showPlayButton() {
+  // Header Play button has three states:
+  //   hidden     — initial load, before any figure has been requested
+  //   emerging   — partial SVG arrived, but no final narration yet
+  //                (or a retry kicked off after a prior figure landed).
+  //                Visible but disabled, label reads "Emerging…".
+  //   ready      — final narration delivered AND its audio fired canplay.
+  //                Enabled, label reads "▶ Play narration".
+  // The intermediate "emerging" state is important because the express
+  // loop streams SVG chunks during retries — clicking Play on the prior
+  // turn's audio while a new figure is being drawn produces a narration
+  // that doesn't match the figure on screen.
+  let playBtnReady = false;
+  function showPlayEmerging() {
+    playBtn.classList.remove('hidden');
+    playBtn.style.display = '';
+    playBtn.disabled = true;
+    playBtn.textContent = 'Emerging…';
+    playBtnReady = false;
+  }
+  function showPlayReady() {
     playBtn.classList.remove('hidden');
     playBtn.style.display = '';
     playBtn.disabled = false;
     playBtn.textContent = '▶ Play narration';
+    playBtnReady = true;
   }
-  intro.addEventListener('canplay', showPlayButton);
-  audio.addEventListener('canplay', showPlayButton);
+  // Only flip to READY once BOTH the narration manifest arrived AND
+  // the <audio>'s data is loaded; otherwise a click would 404 on the
+  // not-yet-written WAV.
+  let narrationManifestReady = false;
+  function maybeFlipReady() {
+    if (narrationManifestReady && audio.src && audio.readyState >= 2) {
+      showPlayReady();
+    }
+  }
+  intro.addEventListener('canplay', maybeFlipReady);
+  audio.addEventListener('canplay', maybeFlipReady);
 
   // Prelude finished → start the narration WAV (which begins with
   // the transition phrase server-side).
@@ -509,6 +547,12 @@
       audio.src = `/canvas/${cid}/narration.wav?t=${Date.now()}`;
       audio.load();
     }
+    // The figure + narration are now FINAL — server has finished the
+    // review loop, audio file is on disk.  Allow the Play button to
+    // flip to READY once <audio>'s canplay fires (or immediately, if
+    // it has already fired for this src).
+    narrationManifestReady = true;
+    maybeFlipReady();
     // Audio does NOT auto-play here.  Narration is loaded into the
     // <audio> element; the user clicks the header Play button to
     // start.  intro.ended still hands off to narration so that one
@@ -947,6 +991,12 @@
       stage.innerHTML = partial;
       fitSvgToContent(stage.querySelector('svg'));
       stage.classList.remove('pulse');
+      // While the figure is being (re-)drawn, the Play button cannot
+      // safely fire — its audio is from the prior attempt and would
+      // narrate a stale figure.  Switch to the disabled "Emerging…"
+      // state until a fresh narration manifest arrives.
+      narrationManifestReady = false;
+      showPlayEmerging();
     }
   });
 
