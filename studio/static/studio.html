@@ -574,12 +574,14 @@
     if (document.visibilityState !== 'visible') return;
     restoreCanvas();
   });
-  // Also try once on initial page load, in case iOS reloaded the page
-  // and the canvasId comes from localStorage.
-  window.addEventListener('DOMContentLoaded', () => {
-    // Defer one tick so `frame` is in scope by the time we touch it.
-    setTimeout(restoreCanvas, 50);
-  });
+  // User explicit-reload should give a CLEAN canvas — the user
+  // reported: "the old diagram is always in the canvas even when I
+  // refresh the page".  We only restore on visibility-change (tab
+  // switch back) where the canvas was already on-screen and a
+  // session was already in progress.  An explicit page reload clears
+  // the persisted canvas so the user gets a fresh start.
+  _writePersistedCanvas(null);
+  canvasId = null;
   let history = [];           // [{role, content}, ...]
   // Canvas IDs the user has pinned with the 📌 button on prior asst
   // messages.  Sent to Studio with each new prompt so gpt-4o sees the

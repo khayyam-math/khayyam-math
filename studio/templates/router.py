@@ -57,9 +57,10 @@ Supported templates:
     "accept": true unless the prompt explicitly says otherwise.
 
 Rules:
-1. Only return a template if the prompt CLEARLY maps to one of the above.  Vague matrix questions like "explain matrix multiplication" without specific matrices should return null — those need the LLM-SVG path for an illustrative figure.
-2. If the prompt names matrices but doesn't give entries (e.g. "multiply two 2x2 matrices A and B" without saying what A and B contain), invent small simple entries (1-9, no zeros except where natural) so the template renders something meaningful.
-3. System-of-equations: parse linear equations into coeffs (each row = one equation's coefficients in variable order) and rhs (right-hand side).  Variables appearing once on the left of "=" with their coefficients; rhs is whatever's on the right.
+1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b) OR a finite-state machine / DFA / NFA, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
+2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
+3. System-of-equations: parse linear equations into coeffs (each row = one equation's coefficients in variable order, missing variable = 0) and rhs.  Variables on the LHS, constants on the RHS.
+4. **Only return null** when the prompt has NO connection to these template families — e.g. "explain partial derivatives", "draw a Venn diagram", "show the Pythagorean theorem", "graph y = sin(x)".  Those need the LLM-SVG path.
 
 Respond with ONLY a JSON object in one of these shapes (no prose, no markdown):
   {"template": "matrix_multiplication", "args": {"a": [[1,2],[3,4]], "b": [[5,6],[7,8]]}}
