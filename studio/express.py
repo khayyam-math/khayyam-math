@@ -1671,7 +1671,21 @@ async def express_figure(
         # covers both classes.  If vision passed but structural failed,
         # we still need to retry; if vision failed too, the critic
         # checklist gets both kinds of fixes.
-        if structural_issues:
+        #
+        # Exception: caption_overlaps_diagram alone is a known
+        # asymptotic case — the model rarely fully resolves it across
+        # retries (it just shifts where the overlap happens).  When
+        # that's the ONLY remaining issue AND vision review passed,
+        # accept the figure and stop retrying.  CloudWatch logs show
+        # this scenario costing 60 s of pointless retries per slow
+        # turn ("inverse of a 5×5 matrix" was the canonical example).
+        only_caption_overlap = (
+            verdict is None
+            and structural_issues
+            and all(s.startswith("caption_overlaps_diagram")
+                    for s in structural_issues)
+        )
+        if structural_issues and not only_caption_overlap:
             structural_block = (
                 "Structural review: FAIL.\n\n"
                 "Apply these specific fixes, in order:\n"
@@ -1681,6 +1695,12 @@ async def express_figure(
                 structural_block
                 if verdict is None
                 else verdict + "\n\n" + structural_block
+            )
+        elif only_caption_overlap:
+            _log(
+                "structural review: caption_overlaps_diagram only "
+                f"({len(structural_issues)} issue(s)) — accepting figure, "
+                "skipping further retries (asymptotic case)"
             )
         if verdict is None:  # PASS or unable to review
             # If a previous attempt failed and this one passed, the pair
