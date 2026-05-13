@@ -266,6 +266,50 @@
          still scroll WITHIN the canvas iframe (overflow:auto on
          <main>) to see the rest. */
       max-height: 70vh;
+      /* PIN the live canvas at the top while the user scrolls the
+         chat under it.  Each prior turn's figure is frozen into the
+         chat history as an <img> snapshot (see msg-figure below), so
+         scrolling up shows the conversation WITH its associated
+         figures inline — the sticky canvas always reflects the
+         CURRENT turn.  z-index keeps it above chat message bubbles. */
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--bg);
+    }
+    /* Frozen snapshot of a prior canvas, inserted at the top of the
+       assistant message that produced it when a NEW canvas replaces
+       the previous one in the live iframe.  Sits in the chat flow so
+       scrolling back through the conversation shows the figure that
+       went with each answer.  Border + subtle shadow distinguish it
+       from inline math; max-width:100% keeps it inside the message
+       bubble on phones. */
+    .msg-figure {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+      margin: 0.4em 0 0.6em 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    /* For position:sticky on .canvas-pane to actually pin during
+       scroll, the BODY/PAGE has to be the scroll container — not
+       .chat-log.  Otherwise sticky has nothing to attach to because
+       its containing block (.layout) never leaves the viewport.
+       Release chat-log's internal overflow on mobile and let it grow
+       inline; the input row gets sticky:bottom:0 so it stays
+       reachable even after the page extends below the viewport. */
+    .chat { min-height: 0; height: auto; overflow: visible; }
+    .chat-log { overflow-y: visible; flex: 0 0 auto; }
+    .chat .input-row {
+      position: sticky;
+      bottom: 0;
+      background: var(--bg);
+      z-index: 9;
+      border-top: 1px solid var(--border);
     }
     /* Iframe takes the natural aspect of the SVG viewBox (900x650
        by default).  Width matches the pane; height follows.  No
@@ -734,6 +778,66 @@
     primerSpeaking = false;
     primerEnded = false;
 
+    // Freeze the live canvas SVG into this turn's primer bubble as
+    // an inline data: URL once the iframe has settled.  Called from
+    // BOTH the express tool_result handler AND the final 'done'
+    // event so a refinement-style turn (no tool_result canvas_id,
+    // canvas updates via SSE inside the iframe instead) still keeps
+    // its figure inline.  Idempotent — if a snapshot already exists,
+    // we replace it with the current state.  Polls for up to ~12s.
+    let snapshotScheduled = false;
+    function takeSnapshotForThisTurn() {
+      if (snapshotScheduled) return;
+      snapshotScheduled = true;
+      // CAPTURE the snapshot target NOW (at call time), not later
+      // inside trySnap.  `primerEl` is an outer-scope variable that
+      // gets reset to null when the NEXT sendMessage starts; if
+      // trySnap reads it 800ms later, the outer ref may have already
+      // been wiped.  We always have asstEl (local const), and at
+      // 'done' time primerEl is the current turn's bubble — bind it.
+      const turnPrimerEl = primerEl;
+      const turnAsstEl = asstEl;
+      let attempts = 0;
+      const trySnap = () => {
+        attempts++;
+        try {
+          const doc = frame.contentDocument;
+          const liveSvg = doc && doc.querySelector('#stage svg');
+          const ready = liveSvg && liveSvg.querySelectorAll('*').length > 3;
+          if (!ready) {
+            if (attempts < 30) setTimeout(trySnap, 400);
+            return;
+          }
+          const targetEl = turnPrimerEl || turnAsstEl;
+          // When the snapshot ends up in the asstEl placeholder
+          // (because no primer streamed for this turn), the bubble
+          // was hidden by the primer_chunk handler — restore it so
+          // the user actually sees the frozen figure.
+          if (targetEl === turnAsstEl && turnAsstEl.style.display === 'none') {
+            turnAsstEl.style.display = '';
+            turnAsstEl.style.opacity = '';
+          }
+          if (!targetEl) return;
+          const clone = liveSvg.cloneNode(true);
+          if (!clone.getAttribute('xmlns')) {
+            clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+          }
+          const xml = new XMLSerializer().serializeToString(clone);
+          const dataUrl = 'data:image/svg+xml;charset=utf-8,'
+                        + encodeURIComponent(xml);
+          const existing = targetEl.querySelector('.msg-figure');
+          if (existing) existing.remove();
+          const snap = document.createElement('img');
+          snap.className = 'msg-figure';
+          snap.src = dataUrl;
+          snap.alt = 'Figure snapshot for this turn';
+          snap.loading = 'lazy';
+          targetEl.insertBefore(snap, targetEl.firstChild);
+        } catch (e) { /* fail silent */ }
+      };
+      setTimeout(trySnap, 800);
+    }
+
     // Stream from /studio/chat
     console.log('[studio] POST /studio/chat — sending', {user, canvasId});
     try {
@@ -910,6 +1014,24 @@
               // model and no svg_chunks fired).
               const lo = document.getElementById('canvas-loading');
               if (lo) lo.hidden = true;
+              // Freeze the figure for THIS turn as an inline <img>
+              // in the visible primer bubble (the streamed-text
+              // bubble is what the user actually sees; asstEl is the
+              // "…" placeholder which is usually hidden once the
+              // primer renders).  Per-turn, NOT delta-based on
+              // canvas_id — express sometimes treats a topic switch
+              // as a refinement and reuses the same canvas_id, and
+              // refinements may not include canvas_id in the result
+              // payload at all.  Fire whenever we know there's a
+              // live canvas in the iframe.  Serialize the iframe's
+              // current SVG into a data: URL so the snapshot is a
+              // true point-in-time freeze, not a live reference to
+              // /canvas/<id>/svg that would change on next refinement.
+              // Snapshot deferred to the 'done' event below — at this
+              // point the primer bubble may not exist yet (express
+              // can finish before primer streaming starts), so taking
+              // the snapshot here lands it in the hidden asstEl
+              // placeholder.  By 'done' the primer is settled.
               if (r.canvas_id && r.canvas_id !== canvasId) {
                 canvasId = r.canvas_id;
                 placeholder.style.display = 'none';
@@ -949,6 +1071,15 @@
               }
             } catch {}
           } else if (evt === 'done') {
+            // Belt-and-suspenders snapshot trigger.  Some turns
+            // update the canvas via SSE/refinement WITHOUT firing a
+            // tool_result event in studio's stream, so the figure
+            // would never get frozen into the chat.  Calling here
+            // covers both paths — the function is idempotent (no-op
+            // if a snapshot is already in place via tool_result).
+            if (canvasId || document.querySelector('iframe#canvas-frame')) {
+              takeSnapshotForThisTurn();
+            }
             // Pick where to anchor the 📌 pin button:
             //   * primer node if the primer streamed anything — that's
             //     the meatiest assistant bubble on the screen, so the
