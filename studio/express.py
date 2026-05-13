@@ -414,6 +414,46 @@ _EXPRESS_SYSTEM = (
     "narration is pointing at one term inside it — the learner needs "
     "the eye-tracking cue to land on the specific thing being said.\n"
     "\n"
+    "MENTION = SHOW — every measurable quantity you NAME in narration "
+    "must also be VISIBLY DRAWN on the figure as a labelled element "
+    "with the same letter.  No exceptions.  Concretely:\n"
+    "  • If narration says 'the height h is 4', the SVG must include "
+    "    a dashed perpendicular segment between the parallel sides AND "
+    "    a <text> reading 'h' (or 'h = 4') next to that segment.  Don't "
+    "    just say 'the height h' without drawing it.\n"
+    "  • If narration says 'the base b₁ = 6', the SVG must show that "
+    "    base with a <text> 'b₁' or 'b₁ = 6' adjacent to the segment.\n"
+    "  • If narration says 'angle θ = 30°', the SVG must show an arc at "
+    "    the vertex with a <text> 'θ' or 'θ = 30°' next to the arc.\n"
+    "  • Same for radius, diameter, hypotenuse, altitude, side a/b/c, "
+    "    angle α/β/γ, perimeter, area — if the narration NAMES it with "
+    "    a letter, the figure must DRAW it AND LABEL it with that letter.\n"
+    "Rule of thumb: before emitting the JSON, scan your own narration "
+    "for every '<quantity-word> <letter>' pair and verify each letter "
+    "appears as the content of a <text> element in your SVG.  If any "
+    "doesn't, EITHER add the labelled element to the SVG, OR drop the "
+    "mention from the narration.  Naming a quantity you didn't draw is "
+    "a hard failure — the learner hears a measurement that isn't on "
+    "the page.\n"
+    "\n"
+    "VERIFY ARITHMETIC — before stating any final numeric answer in "
+    "narration:\n"
+    "  • Write the formula on the figure as a <text> element "
+    "    (symbolic).\n"
+    "  • Write the substituted form with the actual numbers on the "
+    "    figure as a separate <text> element.\n"
+    "  • Compute the final value DELIBERATELY: do the arithmetic step "
+    "    by step in your head, then write the result on the figure too.\n"
+    "  • RE-CHECK the arithmetic before emitting.  A wrong final "
+    "    number in the narration is a hard failure; treat the value "
+    "    you compute with the same care a textbook author treats a "
+    "    worked example.  Common error modes to guard against: "
+    "    dropped factor of 1/2, sign flip, off-by-one on subscripts, "
+    "    forgetting a unit, transcription error between symbolic and "
+    "    numeric form.\n"
+    "  • The narration's concluding phrase MUST match the value "
+    "    written on the figure.  If they disagree, recompute both.\n"
+    "\n"
     "FIRST NARRATION PHRASE — must be specific to THE QUESTION the "
     "user asked.  Not a generic transition.  Examples:\n"
     "  • User asks 'show how the angles of a triangle sum to π' → first "
@@ -3271,6 +3311,113 @@ def _structural_review(svg: str, narration: list[dict[str, Any]]) -> list[str]:
                 ", or right column x>" + str(int(vb_w * 0.7)) + ") so "
                 "the diagram region stays readable."
             )
+
+    # 5. Named-quantity-not-shown.  When narration names a geometric
+    # quantity with an explicit variable letter ('height h', 'base b₁',
+    # 'angle θ'), that variable letter MUST appear as the content of
+    # some <text> element in the SVG.  Without this, the learner hears
+    # about a measurement that isn't drawn on the page — exactly the
+    # 'height mentioned but not shown' failure the user reported.
+    _QUANTITY_WORDS = (
+        "height|base|radius|side|angle|diameter|hypotenuse|altitude|"
+        "apothem|leg|width|depth|chord|arc|segment|sector"
+    )
+    named_quantity_re = re.compile(
+        r"\b(?:the\s+|with\s+|and\s+|its\s+|of\s+)?"
+        r"(?P<quantity>" + _QUANTITY_WORDS + r")"
+        r"\s+"
+        r"(?:(?:is|=|equals?|of\s+length\s+|of\s+measure\s+|"
+        r"of\s+magnitude\s+|called|denoted(?:\s+by)?|labeled|labelled)\s+)?"
+        # Variable: a single letter (Latin or Greek) optionally followed
+        # by a subscript.  Accept Unicode subscript chars, LaTeX-style
+        # _digit, or a plain trailing digit (b1, b2).
+        r"(?P<var>[a-zA-Zα-ωΑ-Ω])"
+        r"(?:[₀-₉]+|_\d+|_\{[^}]*\}|\d+)?"
+        r"(?=[\s.,;:!?)(]|$)",
+        re.IGNORECASE,
+    )
+    # Common English words that the regex would otherwise capture as a
+    # one-letter variable.  Skip when the word after looks like more
+    # English text (i.e. the 'letter' is really a stop-word).
+    _ENGLISH_STOPWORDS = {
+        "a", "i", "o", "u",  # bare article / pronoun / interjection
+        "to", "of", "in", "on", "by", "at", "as", "is", "be",
+        "or", "an", "we", "us", "he", "it", "so", "do", "no",
+        "if", "up",
+    }
+    # Build the set of text tokens that exist in the SVG.  We split
+    # each <text>/<tspan> content on whitespace and common punctuation
+    # so a label like 'h = 4' contributes both 'h' and '4'.
+    svg_text_tokens: set[str] = set()
+    svg_text_starts: set[str] = set()
+    for m in re.finditer(
+        r'<(?:text|tspan)\b[^>]*>([^<]*)</(?:text|tspan)>', svg, re.S,
+    ):
+        content = m.group(1).strip()
+        if not content:
+            continue
+        # Strip Unicode subscript digits and underscores so 'h₁' and
+        # 'h_1' both contribute the bare 'h' token too.
+        bare = re.sub(r'[₀-₉]+|_\d+|_\{[^}]*\}', '', content)
+        for tok in re.split(r'[\s=,()/\[\]:]+', bare):
+            if tok:
+                svg_text_tokens.add(tok)
+        # Track first-character starts so we can also accept content
+        # like '4 units' (the leading char might be the value, not the
+        # variable — usually still fine because the variable label
+        # 'h' lives elsewhere).
+        svg_text_starts.add(bare[:1])
+
+    unshown: list[tuple[int, str, str]] = []  # (phrase_idx, quantity, var)
+    for i, phrase in enumerate(narration or []):
+        speak = (phrase or {}).get("speak", "") or ""
+        if not speak:
+            continue
+        for m in named_quantity_re.finditer(speak):
+            var = (m.group("var") or "").strip()
+            quantity = (m.group("quantity") or "").lower()
+            if not var:
+                continue
+            # Skip when the captured 'variable' is really an English
+            # filler word followed by more English (e.g. 'side a
+            # triangle' captures 'a' but it's an article).  We allow
+            # 'side a' at end-of-phrase or before punctuation — that
+            # is a legitimate math label.
+            if var.lower() in _ENGLISH_STOPWORDS:
+                tail = speak[m.end():].lstrip()
+                if tail and re.match(r"[A-Za-z]{2,}", tail):
+                    continue
+            # Variable shown in SVG?  Accept exact-token match OR
+            # appearance as the first character of any text label
+            # (covers 'h = 4' style labels).
+            if var in svg_text_tokens or var in svg_text_starts:
+                continue
+            # Accept the quantity word itself as label (e.g. <text>
+            # 'height'</text> with no separate 'h' label).
+            if quantity in {t.lower() for t in svg_text_tokens}:
+                continue
+            unshown.append((i, quantity, var))
+
+    if unshown:
+        sample = "; ".join(
+            f"phrase[{i}] names '{q} {v}'" for i, q, v in unshown[:5]
+        )
+        more = (f" (and {len(unshown) - 5} more)"
+                if len(unshown) > 5 else "")
+        issues.append(
+            "named_quantity_not_shown: " + str(len(unshown)) +
+            " narration phrase(s) name a geometric quantity with an "
+            "explicit variable letter but the SVG has no <text> label "
+            f"for that letter: {sample}{more}. Whenever narration says "
+            "'height h', 'base b₁', 'radius r', 'angle θ', etc., the "
+            "figure MUST draw that quantity (dashed perpendicular for "
+            "a height, arc for an angle, line segment for a side) AND "
+            "label it with the same variable letter as a <text> "
+            "element. Otherwise the learner hears about a measurement "
+            "that isn't on the page. Fix: add the missing labelled "
+            "element to the SVG, or remove the unsupported mention "
+            "from the narration."
+        )
 
     return issues
 

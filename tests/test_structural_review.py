@@ -718,3 +718,149 @@ def test_clamp_then_reflow_separates_stacked_headers():
     assert len(ys) == 3 and len(set(ys)) == 3, f"ys not distinct: {ys}"
     for prev, cur in zip(ys, ys[1:]):
         assert cur > prev, f"ys not monotonic: {ys}"
+
+
+# ---------------------------------------------------------------------
+# named_quantity_not_shown — narration mentions a labelled measurement
+# (height h, base b₁, radius r, angle θ, ...) that the SVG never draws.
+# ---------------------------------------------------------------------
+
+def test_named_quantity_shown_passes_when_label_present():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon points="100,400 400,400 350,200 150,200" id="trap"/>'
+        '<line x1="250" y1="200" x2="250" y2="400" stroke-dasharray="4 4"/>'
+        '<text x="260" y="310">h</text>'
+        '<text x="250" y="420">b</text>'
+        '</svg>'
+    )
+    narration = [
+        {"speak": "Here is a trapezoid.", "highlight": []},
+        {"speak": "The height h is 4 units.", "highlight": []},
+    ]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues), issues
+
+
+def test_named_quantity_not_shown_flags_height_without_label():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon points="100,400 400,400 350,200 150,200"/>'
+        '<text x="250" y="420">b</text>'
+        '</svg>'
+    )
+    narration = [
+        {"speak": "The trapezoid has bases b₁ and b₂.", "highlight": []},
+        {"speak": "The height h equals 4.", "highlight": []},
+    ]
+    issues = _structural_review(svg, narration)
+    flagged = [i for i in issues if "named_quantity_not_shown" in i]
+    assert len(flagged) == 1
+    assert "'height h'" in flagged[0]
+
+
+def test_named_quantity_flags_multiple_missing():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<circle cx="200" cy="200" r="80"/>'
+        '</svg>'
+    )
+    narration = [
+        {"speak": "The radius r is 80 units.", "highlight": []},
+        {"speak": "The diameter d is 160 units.", "highlight": []},
+    ]
+    issues = _structural_review(svg, narration)
+    flagged = [i for i in issues if "named_quantity_not_shown" in i]
+    assert len(flagged) == 1
+    assert "'radius r'" in flagged[0]
+    assert "'diameter d'" in flagged[0]
+
+
+def test_named_quantity_passes_when_label_has_value():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon points="100,400 400,400 350,200 150,200"/>'
+        '<text x="260" y="310">h = 4</text>'
+        '</svg>'
+    )
+    narration = [{"speak": "The height h is 4.", "highlight": []}]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues)
+
+
+def test_named_quantity_passes_when_unicode_subscript_label():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon points="100,400 400,400 350,200 150,200"/>'
+        '<text x="250" y="420">b₁</text>'
+        '<text x="250" y="190">b₂</text>'
+        '<text x="260" y="310">h</text>'
+        '</svg>'
+    )
+    narration = [
+        {"speak": "The base b₁ is the longer parallel side.", "highlight": []},
+        {"speak": "The base b₂ is the shorter parallel side.", "highlight": []},
+        {"speak": "The height h equals 4.", "highlight": []},
+    ]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues), issues
+
+
+def test_named_quantity_passes_when_quantity_word_used_as_label():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon points="100,400 400,400 350,200 150,200"/>'
+        '<text x="260" y="310">height</text>'
+        '</svg>'
+    )
+    narration = [{"speak": "The height h is 4.", "highlight": []}]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues)
+
+
+def test_named_quantity_ignores_quantity_without_letter():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<polygon points="100,400 400,400 350,200 150,200"/>'
+        '</svg>'
+    )
+    narration = [
+        {"speak": "Now we compute the height of the trapezoid.", "highlight": []},
+    ]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues)
+
+
+def test_named_quantity_ignores_base_case_idiom():
+    svg = '<svg viewBox="0 0 900 650"><circle/></svg>'
+    narration = [
+        {"speak": "In the base case the recursion terminates.", "highlight": []},
+    ]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues)
+
+
+def test_named_quantity_handles_greek_letter():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<line x1="100" y1="500" x2="400" y2="500"/>'
+        '<line x1="100" y1="500" x2="350" y2="200"/>'
+        '</svg>'
+    )
+    narration = [{"speak": "The angle θ is 30 degrees.", "highlight": []}]
+    issues = _structural_review(svg, narration)
+    flagged = [i for i in issues if "named_quantity_not_shown" in i]
+    assert len(flagged) == 1
+    assert "θ" in flagged[0]
+
+
+def test_named_quantity_passes_for_greek_when_labelled():
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<path d="M 150 480 A 50 50 0 0 0 130 440"/>'
+        '<text x="135" y="475">θ</text>'
+        '</svg>'
+    )
+    narration = [{"speak": "The angle θ is 30 degrees.", "highlight": []}]
+    issues = _structural_review(svg, narration)
+    assert not any("named_quantity_not_shown" in i for i in issues), issues
