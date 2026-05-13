@@ -19,7 +19,9 @@ def _ids(svg: str) -> set[str]:
 
 def test_mul_2x2_correct_product():
     svg, narr = matrix_multiplication([[1, 2], [3, 4]], [[5, 6], [7, 8]])
-    assert "viewBox=\"0 0 900 650\"" in svg
+    # canvas_h is now dynamic (tight-fit to content) — just check the
+    # width is 900 and viewBox is present.
+    assert 'viewBox="0 0 900' in svg
     # Product entries should appear: c00=19, c01=22, c10=43, c11=50.
     for v in ("19", "22", "43", "50"):
         assert f">{v}<" in svg

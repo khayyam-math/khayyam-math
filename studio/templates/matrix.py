@@ -116,7 +116,7 @@ def matrix_multiplication(
     *,
     result: Optional[List[List[float | int]]] = None,
     canvas_w: int = 900,
-    canvas_h: int = 650,
+    canvas_h: int | None = None,
 ) -> Tuple[str, List[dict]]:
     """Render ``A · B = C`` as a deterministic SVG with narration.
 
@@ -174,15 +174,17 @@ def matrix_multiplication(
     h_b = rows_b * cell + 2 * PAD
     h_c = rows_c * cell + 2 * PAD
     max_h = max(h_a, h_b, h_c)
+    # Auto-tight canvas height so the figure isn't lost in a tall
+    # empty stage rectangle (the "useless square" user complaint).
+    canvas_h = max(360, 130 + max_h + 60)
 
     # Horizontal centring in the canvas.
     x0 = (canvas_w - total_w) // 2
-    y_center = canvas_h // 2
-    # Vertical centring per matrix so different-height matrices align
-    # at their MIDDLE (looks natural for math).
-    y_a = y_center - h_a // 2
-    y_b = y_center - h_b // 2
-    y_c = y_center - h_c // 2
+    y_top = 110
+    y_a = y_top
+    y_b = y_top + (max_h - h_b) // 2
+    y_c = y_top + (max_h - h_c) // 2
+    y_center = y_top + max_h // 2
 
     x_a = x0
     x_op1 = x_a + w_a + OP_GAP
@@ -315,7 +317,7 @@ def matrix_transpose(
     a: List[List[float | int]],
     *,
     canvas_w: int = 900,
-    canvas_h: int = 650,
+    canvas_h: int | None = None,
 ) -> Tuple[str, List[dict]]:
     """A and its transpose A^T side-by-side with an arrow."""
     if not a or not a[0]:
@@ -333,12 +335,16 @@ def matrix_transpose(
     total_w = w_a + OP_GAP + OP_W + OP_GAP + w_at
     h_a = rows * cell + 2 * PAD
     h_at = cols * cell + 2 * PAD
+    max_h = max(h_a, h_at)
+    if canvas_h is None:
+        canvas_h = max(360, 130 + max_h + 60)
     x_a = (canvas_w - total_w) // 2
     x_op = x_a + w_a + OP_GAP
     x_at = x_op + OP_W + OP_GAP
-    y_center = canvas_h // 2
-    y_a = y_center - h_a // 2
-    y_at = y_center - h_at // 2
+    y_top = 110
+    y_a = y_top + (max_h - h_a) // 2
+    y_at = y_top + (max_h - h_at) // 2
+    y_center = y_top + max_h // 2
 
     parts: List[str] = []
     parts.append(_svg_open(canvas_w, canvas_h, "Matrix transpose: A &#x2192; A&#x1d40;"))
@@ -377,7 +383,7 @@ def matrix_determinant(
     a: List[List[float | int]],
     *,
     canvas_w: int = 900,
-    canvas_h: int = 650,
+    canvas_h: int | None = None,
 ) -> Tuple[str, List[dict]]:
     """A with its determinant value (and 2x2 formula when applicable)."""
     n = len(a)
@@ -389,11 +395,13 @@ def matrix_determinant(
     FONT = max(14, int(cell * 0.45))
     w_a = n * cell + 2 * PAD
     h_a = n * cell + 2 * PAD
+    if canvas_h is None:
+        canvas_h = max(360, 130 + h_a + 60)
     # Two-column layout: matrix on left, formula/value on right.
     x_a = (canvas_w // 2) - w_a - 30
-    y_a = canvas_h // 2 - h_a // 2
+    y_a = 110
     x_text = canvas_w // 2 + 30
-    y_text = canvas_h // 2
+    y_text = y_a + h_a // 2
 
     parts: List[str] = []
     parts.append(_svg_open(canvas_w, canvas_h, "Determinant of A"))
@@ -441,7 +449,7 @@ def matrix_inverse(
     a: List[List[float | int]],
     *,
     canvas_w: int = 900,
-    canvas_h: int = 650,
+    canvas_h: int | None = None,
 ) -> Tuple[str, List[dict]]:
     """A and A^(-1) side-by-side; singular case shows error message."""
     n = len(a)
@@ -458,12 +466,21 @@ def matrix_inverse(
     total_w = w_a + OP_GAP + OP_W + OP_GAP + w_inv
     h_a = n * cell + 2 * PAD
     h_inv = n * cell + 2 * PAD
+    # Auto-tight canvas height: title (~80) + matrix + bottom (~50).
+    # Avoids the "huge empty stage rectangle" the user reported when
+    # a 178-px matrix was centred in a 650-px viewBox — most of the
+    # frame was empty whitespace and the iframe clipped the bottom
+    # row on mobile.
+    if canvas_h is None:
+        canvas_h = max(360, 130 + h_a + 60)
     x_a = (canvas_w - total_w) // 2
     x_op = x_a + w_a + OP_GAP
     x_inv = x_op + OP_W + OP_GAP
-    y_center = canvas_h // 2
-    y_a = y_center - h_a // 2
-    y_inv = y_center - h_inv // 2
+    # Anchor near the top — leaves room for the title above and a
+    # comfortable margin below.
+    y_a = 110
+    y_inv = 110
+    y_center = y_a + h_a // 2
 
     parts: List[str] = []
     parts.append(_svg_open(canvas_w, canvas_h, "Matrix inverse: A and A&#x207b;&#xb9;"))
@@ -524,7 +541,7 @@ def system_of_equations(
     var_names: List[str] | None = None,
     show_solution: bool = True,
     canvas_w: int = 900,
-    canvas_h: int = 650,
+    canvas_h: int | None = None,
 ) -> Tuple[str, List[dict]]:
     """Render Ax = b plus the solution x = A^(-1) b when applicable."""
     n = len(coeffs)
@@ -548,10 +565,13 @@ def system_of_equations(
     w_x = cell + 2 * PAD
     w_b = cell + 2 * PAD
     total_w = w_a + OP_GAP + w_x + OP_GAP + OP_W + OP_GAP + w_b
-    x0 = (canvas_w - total_w) // 2
-    y_center = canvas_h // 2
     h_block = n * cell + 2 * PAD
-    y_a = y_center - h_block // 2
+    # Auto-tight canvas: title + matrix + solution line + margin.
+    if canvas_h is None:
+        canvas_h = max(360, 130 + h_block + 90)
+    x0 = (canvas_w - total_w) // 2
+    y_a = 110
+    y_center = y_a + h_block // 2
 
     parts: List[str] = []
     parts.append(_svg_open(canvas_w, canvas_h, "System of equations: A x = b"))

@@ -135,10 +135,14 @@
   }
   #stage {
     max-width: 100%; max-height: 100%;
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    /* No border/shadow on the stage container.  Earlier the stage
+       had a 1-px grey border + drop shadow that drew a rectangle
+       around the SVG's entire viewBox — so when a small figure sat
+       inside a tall viewBox, the user saw the figure floating
+       inside a "useless square" of empty whitespace.  Removing the
+       chrome makes the figure blend into the iframe background; the
+       SVG content itself supplies whatever framing it needs. */
     background: white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
   /* Scroll behaviour: when the figure exceeds the visible area
      (either because the model emitted content outside the viewBox
