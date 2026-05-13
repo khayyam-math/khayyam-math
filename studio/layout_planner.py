@@ -127,6 +127,13 @@ class TextItem:
     # without losing other attributes (font-family, fill, id, ...).
     raw_tag: str
 
+    # id attribute, if present.  Used by plan_layout to skip texts
+    # that narration highlights — moving them away from their
+    # geometric anchor breaks the visual link between the highlight
+    # rect (which snaps to the id'd element's getBBox) and the
+    # primitive the narration is describing.
+    elem_id: str = ""
+
 
 def _est_char_width(font_size: float) -> float:
     """Conservative per-character width estimate (0.6 em)."""
@@ -206,6 +213,7 @@ def extract_text_items(svg: str) -> List[TextItem]:
             text_anchor=text_anchor,
             font_size=fs,
             raw_tag=m.group(0),
+            elem_id=attrs.get("id", ""),
         ))
     return items
 
@@ -229,6 +237,13 @@ class Candidate:
 # Candidate grid: 8 cardinal directions × 3 radial offsets, plus the
 # anchor itself.  Offsets are in viewBox units; tuned for typical
 # 900×650 figures with 16-32px text.
+#
+# Narration-anchored labels (those whose id appears in a highlight
+# phrase) are *pinned* by plan_layout's protected_ids parameter so
+# the canvas viewer's highlight rect stays over the right primitive.
+# Everything else can move up to 56 px from its anchor — enough to
+# clear typical wide-label overlaps but small enough that the moved
+# label remains visually associated with its anchor.
 _DIRS: List[Tuple[float, float]] = [
     (0.0, 0.0),   # anchor itself
     (1.0, 0.0),   # E
@@ -437,8 +452,16 @@ def count_overlaps(items: List[TextItem], candidates: List[Candidate],
 # ── Public entry point ─────────────────────────────────────────────
 
 
-def plan_layout(svg: str, *, time_limit_s: float = 2.0) -> str:
+def plan_layout(svg: str, *, time_limit_s: float = 2.0,
+                protected_ids: Optional[set] = None) -> str:
     """Optimise top-level <text> positions in the SVG.
+
+    ``protected_ids`` (set of strings): elements whose ``id`` appears
+    in this set are kept at their original (x, y).  Used to pin
+    narration-highlighted labels: the canvas viewer's highlight rect
+    snaps to an element's getBBox(), so moving a labelled element
+    away from its associated primitive would render the highlight
+    "far from the thing it describes."
 
     Fails open: any error or solver infeasibility returns the
     original SVG unchanged so a layout bug never blocks a figure.
@@ -452,7 +475,34 @@ def plan_layout(svg: str, *, time_limit_s: float = 2.0) -> str:
     if len(items) < 2:
         # Nothing to optimise.
         return svg
-    candidates = gen_candidates(items, vb)
+    # Protected items keep their original position — generate ONLY
+    # the anchor candidate for them.  Other items get the full set.
+    protected_ids = protected_ids or set()
+    movable: List[TextItem] = []
+    pinned: List[TextItem] = []
+    for it in items:
+        if it.elem_id and it.elem_id in protected_ids:
+            pinned.append(it)
+        else:
+            movable.append(it)
+    # Run the candidate generator on the FULL list so candidate
+    # indices align with item indices; but for pinned items only
+    # the anchor candidate is generated.
+    candidates: List[Candidate] = []
+    for i, item in enumerate(items):
+        if item in pinned:
+            bbox = _bbox_at(item.anchor_x, item.anchor_y, item.width,
+                            item.height, item.text_anchor)
+            candidates.append(Candidate(
+                item_idx=i, x=item.anchor_x, y=item.anchor_y,
+                bbox=bbox, displacement_cost=0,
+            ))
+        else:
+            for c in gen_candidates([item], vb):
+                # gen_candidates assigned item_idx=0 (single-item call);
+                # rewrite to the global index.
+                c.item_idx = i
+                candidates.append(c)
     if not candidates:
         return svg
     picked = solve_layout(items, candidates, time_limit_s=time_limit_s)

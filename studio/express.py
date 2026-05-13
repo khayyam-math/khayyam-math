@@ -1546,17 +1546,69 @@ async def express_figure(
         # Placement and solves to optimality.  Fails open if ortools
         # is missing or the model is infeasible — the SVG passes
         # through unchanged, so reflow's output remains the floor.
-        try:
-            from studio.layout_planner import plan_layout
-            planned = plan_layout(result["svg"], time_limit_s=2.0)
-            if planned != result["svg"]:
-                _log(
-                    f"plan_layout: rewrote {len(result['svg'])} -> "
-                    f"{len(planned)} chars (CP-SAT)"
+        # Env-toggle for A/B testing — bench_layout_planner.py uses
+        # SEVIM_LAYOUT_PLANNER=off to compare overlap counts and
+        # screenshots planner-on vs off.
+        if os.environ.get("SEVIM_LAYOUT_PLANNER", "on").lower() == "off":
+            _log("plan_layout: SKIPPED (SEVIM_LAYOUT_PLANNER=off)")
+        else:
+            try:
+                from studio.layout_planner import (
+                    plan_layout, extract_text_items,
+                    _viewbox, _bbox_at, _bboxes_overlap,
                 )
-                result["svg"] = planned
-        except Exception as exc:  # noqa: BLE001
-            _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
+
+                # Pre-planner overlap count for telemetry — same bbox
+                # estimator the planner uses internally.
+                def _overlap_count(svg_str: str) -> int:
+                    vb = _viewbox(svg_str)
+                    if vb is None:
+                        return -1
+                    items = extract_text_items(svg_str)
+                    boxes = [_bbox_at(it.anchor_x, it.anchor_y, it.width,
+                                      it.height, it.text_anchor)
+                             for it in items]
+                    n = 0
+                    for i in range(len(boxes)):
+                        for j in range(i + 1, len(boxes)):
+                            if _bboxes_overlap(boxes[i], boxes[j]):
+                                n += 1
+                    return n
+
+                pre = _overlap_count(result["svg"])
+                # Collect every element id referenced by narration
+                # highlights — those get pinned so the canvas
+                # viewer's highlight rect (which uses getBBox on the
+                # id'd element) stays over the right primitive.
+                narration = result.get("narration") or []
+                protected: set[str] = set()
+                for phrase in narration:
+                    hl = phrase.get("highlight") or []
+                    if isinstance(hl, str):
+                        hl = [hl]
+                    for h in hl:
+                        if isinstance(h, str) and h:
+                            protected.add(h)
+                planned = plan_layout(
+                    result["svg"],
+                    time_limit_s=2.0,
+                    protected_ids=protected,
+                )
+                post = (_overlap_count(planned)
+                        if planned != result["svg"] else pre)
+                if planned != result["svg"]:
+                    _log(
+                        f"plan_layout: CP-SAT moved labels, overlaps "
+                        f"{pre} -> {post}, svg {len(result['svg'])} -> "
+                        f"{len(planned)} chars"
+                    )
+                    result["svg"] = planned
+                elif pre > 0:
+                    # Ran but couldn't improve — infeasible, narrow
+                    # candidate set, or solver hit time limit.
+                    _log(f"plan_layout: NO IMPROVEMENT, overlaps stayed at {pre}")
+            except Exception as exc:  # noqa: BLE001
+                _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
 
         # Inspection on streamed SVG: while the LLM was streaming, the
         # canvas iframe was painting the RAW model output into #stage

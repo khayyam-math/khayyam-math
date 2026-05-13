@@ -178,6 +178,25 @@ def test_double_and_single_quoted_attrs():
 # ── Sanity: integration with real-looking SVG ─────────────────────
 
 
+def test_protected_ids_stay_put():
+    """Texts whose id is in protected_ids must keep their original (x, y).
+
+    Real-world driver: narration highlights snap to element ids via
+    the canvas viewer's getBBox(), so moving a labelled element
+    away from its primitive renders the highlight rect "far from the
+    thing it describes."
+    """
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 650">'
+           '<text id="lblA" x="100" y="100" font-size="22">PIN ME HERE</text>'
+           '<text x="150" y="100" font-size="22">overlap</text></svg>')
+    result = plan_layout(svg, protected_ids={"lblA"})
+    # The first text MUST still be at (100, 100); the second may move.
+    assert 'id="lblA" x="100.00" y="100.00"' in result \
+        or 'id="lblA"' in result and 'x="100"' in result
+    # Final layout has no remaining overlaps.
+    assert _post_overlaps(result) == 0
+
+
 def test_realistic_pythagoras_svg():
     """Mimics what express might emit for the 3-4-5 triangle prompt."""
     svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 650">
