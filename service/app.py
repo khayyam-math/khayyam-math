@@ -317,8 +317,10 @@ def canvas_state(cid: str):
         return {
             "canvas_id": c.canvas_id,
             "revision": c.revision,
-            "node_count": len(c.graph.nodes),
-            "edge_count": len(c.graph.edges),
+            "node_count": (c.raw_node_count if c.raw_node_count is not None
+                           else len(c.graph.nodes)),
+            "edge_count": (c.raw_edge_count if c.raw_edge_count is not None
+                           else len(c.graph.edges)),
             "math_mode": c.math_mode,
             "width": c.width,
             "height": c.height,
@@ -353,8 +355,14 @@ async def canvas_events(cid: str, request: Request):
                     payload = {
                         "canvas_id": c.canvas_id,
                         "revision": rev,
-                        "node_count": len(c.graph.nodes),
-                        "edge_count": len(c.graph.edges),
+                        "node_count": (
+                            c.raw_node_count if c.raw_node_count is not None
+                            else len(c.graph.nodes)
+                        ),
+                        "edge_count": (
+                            c.raw_edge_count if c.raw_edge_count is not None
+                            else len(c.graph.edges)
+                        ),
                         "updated_at": c.updated_at,
                         "svg": c.svg,
                         "narration": c.narration_manifest,

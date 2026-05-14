@@ -1377,6 +1377,48 @@ async def express_figure(
     _log(f"start prompt={user_prompt[:60]!r} model={model}")
 
     # ── Template fast-path ────────────────────────────────────────
+    # Graphviz fast-path: for prompts that look graph-shaped (state
+    # machines, Turing machines, DAGs, trees, Hasse diagrams, Cayley
+    # graphs, etc.), have the LLM emit DOT source and render with
+    # the `dot` binary instead of going through the full LLM-SVG
+    # loop. Graphviz's 30+ year-old layout engine handles positioning
+    # and overlap-avoidance with hard correctness guarantees.
+    # Disabled via SEVIM_GRAPHVIZ_ROUTE=off or when `dot` is missing.
+    if (api_key
+            and os.environ.get("SEVIM_GRAPHVIZ_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.graphviz_route import (
+                generate_graphviz_svg, is_graphviz_binary_available,
+                is_graphviz_prompt,
+            )
+            if (is_graphviz_binary_available()
+                    and is_graphviz_prompt(user_prompt)):
+                gv_result = await generate_graphviz_svg(
+                    user_prompt,
+                    api_key=api_key or "",
+                    base_url=base_url,
+                )
+                if gv_result is not None:
+                    gv_svg, gv_dot = gv_result
+                    _log(f"graphviz fast-path: dot={len(gv_dot)} chars "
+                         f"svg={len(gv_svg)} chars")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(gv_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": gv_svg,
+                        "narration": [],
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "graphviz",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"graphviz route errored: {type(exc).__name__}: {exc}")
+
     # Try the prompt → template classifier before the full LLM-SVG
     # loop.  If the prompt is asking for a matrix operation the
     # template library can render deterministically, skip the 30-90s

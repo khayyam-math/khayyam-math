@@ -67,6 +67,7 @@ RUN apt-get update \
         libffi8 libxml2 \
         fonts-dejavu-core fonts-noto-core \
         ca-certificates \
+        graphviz \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
  && useradd --system --create-home --home-dir /home/sevim --uid 1001 sevim \
  && mkdir -p /var/sevim/canvases /opt/sevim/voices \

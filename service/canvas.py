@@ -165,6 +165,14 @@ class Canvas:
     # SceneGraph node ids.
     is_raw_svg: bool = False
     raw_svg_ids: set[str] = field(default_factory=set, repr=False)
+    # When a raw-svg canvas comes from Graphviz (the graphviz fast-path)
+    # the underlying graph is in the rendered SVG, not in self.graph,
+    # so node_count/edge_count from len(self.graph.nodes/edges) is 0.
+    # Override fields below let set_raw_svg populate a per-figure count
+    # from the SVG itself (counting `<g class="node">` / `<g class="edge">`)
+    # so the viewer header is honest.
+    raw_node_count: int | None = None
+    raw_edge_count: int | None = None
     # The user-facing prompt that generated this canvas.  Set by
     # sevim_express; used by the conversational-context layer so a
     # follow-up turn can attach this canvas as "prior figure for
@@ -356,9 +364,17 @@ class Canvas:
         if not svg or "<svg" not in svg:
             raise ValueError("set_raw_svg requires a valid SVG string")
         ids = set(re.findall(r'\bid="([^"]+)"', svg))
+        # Count Graphviz-style nodes/edges. For LLM-emitted SVGs that
+        # don't use these classes the counts stay None and the snapshot
+        # falls back to the structured-graph counts (which are 0, but
+        # those figures aren't graph-shaped anyway).
+        gv_nodes = len(re.findall(r'<g\s[^>]*class="node"', svg))
+        gv_edges = len(re.findall(r'<g\s[^>]*class="edge"', svg))
         with self.lock:
             self.is_raw_svg = True
             self.raw_svg_ids = ids
+            self.raw_node_count = gv_nodes if gv_nodes else None
+            self.raw_edge_count = gv_edges if gv_edges else None
             self.svg = svg
             self.revision += 1
             self.updated_at = time.time()
@@ -557,11 +573,15 @@ class Canvas:
     # ---------- read ----------
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
+            n_nodes = (self.raw_node_count if self.raw_node_count is not None
+                       else len(self.graph.nodes))
+            n_edges = (self.raw_edge_count if self.raw_edge_count is not None
+                       else len(self.graph.edges))
             snap = {
                 "canvas_id": self.canvas_id,
                 "revision": self.revision,
-                "node_count": len(self.graph.nodes),
-                "edge_count": len(self.graph.edges),
+                "node_count": n_nodes,
+                "edge_count": n_edges,
                 "math_mode": self.math_mode,
                 "width": self.width,
                 "height": self.height,

@@ -62,3 +62,8 @@ infra/__pycache__/
 # Local distillation artefacts (corpora, LoRA adapters)
 distill/
 *.jsonl
+
+# Neural-layout research artifacts (large data + model checkpoints).
+# 990 MB combined; kept on the 5090 + S3, not in git.
+data/neural_layout/
+runs/
