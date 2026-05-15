@@ -96,6 +96,24 @@ def root():
     )
 
 
+@app.get("/screenshots/{name}", include_in_schema=False)
+def screenshot(name: str):
+    """Serve landing-page gallery screenshots from service/static/screenshots/.
+
+    Whitelisted by filename pattern to prevent path traversal.
+    """
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+\.png", name):
+        raise HTTPException(404)
+    path = _STATIC_DIR / "screenshots" / name
+    if not path.exists():
+        raise HTTPException(404)
+    return FileResponse(
+        path, media_type="image/png",
+        headers={"cache-control": "public, max-age=86400, immutable"},
+    )
+
+
 @app.get("/terms", include_in_schema=False)
 def terms_page():
     """Public terms-and-conditions page.  Static HTML, served from disk

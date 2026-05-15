@@ -923,6 +923,27 @@
           if (!clone.getAttribute('xmlns')) {
             clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
           }
+          // Make the snapshot scale to whatever width the chat bubble
+          // gives it. Without this, a 900-wide SVG embedded into a
+          // 320-wide mobile chat bubble overflows the bubble's right
+          // edge (and the figure looks chopped). Preserve aspect ratio.
+          //   1. Ensure viewBox exists. If only width/height are set,
+          //      synthesise one from them BEFORE stripping them.
+          //   2. Drop fixed width/height attrs.
+          //   3. Set preserveAspectRatio.
+          try {
+            let vb = clone.getAttribute('viewBox');
+            if (!vb) {
+              const w = parseFloat(clone.getAttribute('width'))  || 900;
+              const h = parseFloat(clone.getAttribute('height')) || 600;
+              clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+            }
+            clone.removeAttribute('width');
+            clone.removeAttribute('height');
+            if (!clone.getAttribute('preserveAspectRatio')) {
+              clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+            }
+          } catch (_) { /* fall through with original clone */ }
           const xml = new XMLSerializer().serializeToString(clone);
           const dataUrl = 'data:image/svg+xml;charset=utf-8,'
                         + encodeURIComponent(xml);

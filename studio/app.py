@@ -327,6 +327,60 @@ def require_admin(request: Request) -> str:
         raise HTTPException(404, "Not Found")
     return user
 
+# --------------------------------------------------------------------
+# Follow-up vs new-topic detection
+# --------------------------------------------------------------------
+
+# Phrases that strongly signal the user is iterating on the CURRENT
+# canvas rather than asking for a fresh topic. When ANY of these
+# appears in the prompt, the studio auto-attaches the current canvas
+# to sevim_express as REFINEMENT MODE context. Otherwise the express
+# call gets no implicit prior — a clean fresh figure is generated.
+#
+# Default is "no implicit prior" because the contamination cost
+# (old + new SVGs blended) is worse than the missed-refinement cost
+# (user can pin the canvas explicitly if they want continuity).
+_FOLLOWUP_KEYWORDS: tuple[str, ...] = (
+    # references to the existing figure
+    "this figure", "this diagram", "this canvas", "this image",
+    "the figure", "the diagram", "the canvas",
+    "in the same figure", "on the same figure", "same figure",
+    "in the picture", "on the picture",
+    # action verbs that mutate an existing figure
+    "add ", "remove ", "delete ", "change ", "modify ",
+    "highlight ", "annotate ", "extend ", "rotate ",
+    "color ", "colour ", "recolor", "recolour",
+    "scale ", "shrink ", "enlarge ", "move ",
+    "fix the", "fix this", "update the", "update this",
+    "refine", "improve",
+    # continuation
+    "continue", "next step", "explain step", "explain the ",
+    "elaborate", "more detail", "in more detail",
+    # explicit time-anchors
+    "now show", "now add", "now change", "now make",
+    "also show", "also add", "also include",
+    "instead", "instead of",
+    # bare pronouns referring to the current figure
+    "make it", "change it", "color it", "colour it",
+    "label it",
+)
+
+
+def _looks_like_followup(prompt: str) -> bool:
+    """Cheap heuristic: does this prompt look like a follow-up on
+    the current canvas, or a fresh new-topic request?
+
+    Returns True for follow-ups. Defaults to False (new topic) when
+    no follow-up signal is present, so a brand-new prompt like
+    "draw a Venn diagram" doesn't accidentally pull in the prior
+    Pythagorean SVG as REFINEMENT-MODE context.
+    """
+    if not prompt:
+        return False
+    p = prompt.lower().strip()
+    return any(kw in p for kw in _FOLLOWUP_KEYWORDS)
+
+
 router = APIRouter(prefix="/studio")
 
 
@@ -1034,10 +1088,21 @@ async def _stream_vllm_chat(req: ChatReq):
             if (tc.get("name") or "") == "sevim_express":
                 supplied = list(args.get("context_canvas_ids") or [])
                 ctx_ids: list[str] = []
+                # User-PINNED canvases: always attached (explicit
+                # user signal that they want continuity).
                 for pid in (req.prior_canvas_ids or []):
                     if pid and pid not in ctx_ids:
                         ctx_ids.append(pid)
-                if req.canvas_id and req.canvas_id not in ctx_ids:
+                # Current canvas: attach ONLY when the prompt looks
+                # like a follow-up on the current figure. A clear
+                # new-topic prompt ("show me X", "draw Y") generates
+                # a fresh figure without prior-SVG copy-paste — the
+                # LLM otherwise blends old and new SVG elements
+                # because REFINEMENT MODE tells it to "preserve
+                # every unchanged element byte-for-byte".
+                if (req.canvas_id
+                        and req.canvas_id not in ctx_ids
+                        and _looks_like_followup(req.user)):
                     ctx_ids.append(req.canvas_id)
                 for sid in supplied:
                     if sid and sid not in ctx_ids:

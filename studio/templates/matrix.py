@@ -666,11 +666,11 @@ def matrix_inverse(
                        "Step 2.   Compute the adjugate "
                        "(transpose of the cofactor matrix) — middle matrix", 1))
     parts.append(_step("step_formula",
-                       f"Step 3.   A^(-1) = adj(A) / det(A) "
+                       f"Step 3.   A&#x207b;&#xb9; = adj(A) / det(A) "
                        f"= adj(A) / {_fmt(det_val)}  — rightmost matrix", 2))
     parts.append(_step("step_verify",
-                       f"Verify:   A * A^(-1) = I  (the "
-                       f"{n}x{n} identity matrix)", 3))
+                       f"Verify:   A &#xb7; A&#x207b;&#xb9; = I  (the "
+                       f"{n}&#xd7;{n} identity matrix)", 3))
     parts.append("</svg>")
     svg = "".join(parts)
     narration = [
@@ -803,7 +803,7 @@ def system_of_equations(
             f'<text id="step_det" x="{canvas_w // 2}" y="{steps_y}" '
             f'font-size="18" text-anchor="middle" font-family="serif" '
             f'fill="#111">Step 1. det(A) = {_fmt(det_a)} (non-zero) — '
-            f'a unique solution exists, given by x = A^(-1) b</text>'
+            f'a unique solution exists, given by x = A&#x207b;&#xb9; b</text>'
         )
         # ── Row 2: x = A^-1 · b = solution ──────────────────────
         x_pos = x0_row2

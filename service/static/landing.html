@@ -159,21 +159,32 @@
     border-color: var(--accent); text-decoration: none;
   }
 
-  /* ── Demo SVG (the visual hero) ─────────────────────────────────── */
+  /* ── Demo image (the visual hero) ────────────────────────────────── */
   .demo {
-    background: var(--soft);
+    background: #fff;
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 1.4em;
-    aspect-ratio: 1.05;
+    padding: 0;
     display: flex; flex-direction: column;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04),
+                0 6px 24px rgba(0,0,0,0.08);
+  }
+  .demo img {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #fff;
   }
   .demo svg { width: 100%; height: 100%; max-height: 360px; }
   .demo .caption {
-    text-align: center; font-size: 0.92em; color: var(--muted);
-    margin-top: 0.5em; font-style: italic;
+    text-align: center; font-size: 0.9em; color: var(--muted);
+    padding: 0.7em 1em 0.95em;
+    border-top: 1px solid var(--border);
+    background: var(--soft);
+    line-height: 1.45;
   }
+  .demo .caption em { color: var(--fg); font-style: italic; }
 
   /* ── How it works ──────────────────────────────────────────────── */
   section.section { padding: clamp(2em, 6vh, 4em) 0;
@@ -201,7 +212,40 @@
   .step h3 { margin: 0 0 0.5em; font-size: 1.1em; }
   .step p { margin: 0; color: var(--muted); font-size: 0.95em; }
 
-  /* ── Examples ──────────────────────────────────────────────────── */
+  /* ── Examples gallery ──────────────────────────────────────────── */
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(28em, 100%), 1fr));
+    gap: 1.4em;
+    margin-top: 1.4em;
+  }
+  .gallery .shot {
+    margin: 0;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04),
+                0 4px 16px rgba(0,0,0,0.06);
+  }
+  .gallery .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+  }
+  .gallery .shot figcaption {
+    padding: 0.7em 1em 0.9em;
+    color: var(--muted);
+    font-size: 0.92em;
+    line-height: 1.4;
+  }
+  .gallery .shot figcaption em {
+    color: var(--fg);
+    font-style: italic;
+  }
+  /* legacy pill list (kept in case other pages use it) */
   .examples {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(13em, 1fr));
@@ -273,33 +317,17 @@
       </div>
     </div>
 
-    <!-- Inline demo SVG: triangle ABC with three angle arcs.  No JS,
-         no extra request — gives the visitor a sense of the output
-         style on first paint. -->
-    <div class="demo" aria-label="Example Khayyam Math figure: triangle with angle arcs">
-      <svg viewBox="0 0 360 320" role="img" aria-labelledby="demoTitle">
-        <title id="demoTitle">Triangle with three angle arcs at vertices A, B, C</title>
-        <!-- Triangle ABC -->
-        <polygon points="180,40 60,260 300,260"
-                 fill="none" stroke="var(--tri)" stroke-width="3"
-                 stroke-linejoin="round"/>
-        <!-- Vertex labels -->
-        <text x="180" y="32" text-anchor="middle" font-size="16"
-              font-weight="600" fill="currentColor">A</text>
-        <text x="48"  y="270" font-size="16" font-weight="600" fill="currentColor">B</text>
-        <text x="306" y="270" font-size="16" font-weight="600" fill="currentColor">C</text>
-        <!-- Angle arcs (small) -->
-        <path class="arc-a" d="M 162 67 A 28 28 0 0 1 198 67"
-              fill="none" stroke="#fbbf24" stroke-width="2.5"/>
-        <path class="arc-b" d="M 84 245 A 28 28 0 0 1 92 220"
-              fill="none" stroke="#22c55e" stroke-width="2.5"/>
-        <path class="arc-c" d="M 268 220 A 28 28 0 0 1 276 245"
-              fill="none" stroke="#ef4444" stroke-width="2.5"/>
-        <!-- Conclusion caption -->
-        <text x="180" y="300" text-anchor="middle" font-size="15"
-              fill="currentColor" font-style="italic">α + β + γ = π</text>
-      </svg>
-      <div class="caption">Sample figure rendered by Khayyam Math</div>
+    <!-- Hero demo: real Khayyam Math output for the Pythagorean
+         theorem prompt. Same path / same SVG you'd see in the
+         live canvas iframe — captured straight from production. -->
+    <div class="demo" aria-label="Real Khayyam Math figure: Pythagorean theorem with 3-4-5 triangle">
+      <img src="/screenshots/landing_geo_pythagoras.png"
+           alt="Pythagorean theorem illustrated with a 3-4-5 right triangle and three coloured squares (areas 9, 16, 25)."
+           loading="eager">
+      <div class="caption">
+        Real output from the prompt <em>"show the Pythagorean
+        theorem with a 3-4-5 triangle and squares on each side"</em>
+      </div>
     </div>
   </section>
 
@@ -334,24 +362,42 @@
   <section id="examples" class="section">
     <h2><span class="num">02</span>What people draw with Khayyam Math</h2>
     <p style="color: var(--muted); margin-top: -0.4em;">
-      A non-exhaustive sample. Khayyam Math is good at any concept that lives
-      well as a diagram — math, geometry, set theory, basic physics,
-      causal chains, simple algorithms.
+      Real figures, generated live from a one-line prompt. Each
+      below is a screenshot of the actual canvas — no
+      post-processing.
     </p>
-    <div class="examples">
-      <div class="example">Triangle interior-angle sum</div>
-      <div class="example">Unit circle with sin / cos</div>
-      <div class="example">Matrix multiplication, worked</div>
-      <div class="example">Riemann sum → integral</div>
-      <div class="example">Pythagorean theorem proof</div>
-      <div class="example">Set-theory Venn diagrams</div>
-      <div class="example">Vector addition, head-to-tail</div>
-      <div class="example">Derivative as tangent slope</div>
-      <div class="example">Pigeonhole-principle sketch</div>
-      <div class="example">3SAT → clique reduction</div>
-      <div class="example">Linked-list / tree structures</div>
-      <div class="example">Causal diagrams</div>
+    <div class="gallery">
+      <figure class="shot">
+        <img src="/screenshots/landing_linalg_matrix_mul.png"
+             alt="Matrix multiplication: A · B = C with worked example."
+             loading="lazy">
+        <figcaption><em>"multiply [[1,2],[3,4]] and [[5,6],[7,8]] with a worked example"</em></figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="/screenshots/landing_auto_dfa_ab.png"
+             alt="Deterministic finite automaton recognising strings ending in ab."
+             loading="lazy">
+        <figcaption><em>"draw a DFA for the language L = (a|b)* ending in ab"</em></figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="/screenshots/landing_geo_pythagoras.png"
+             alt="Pythagorean theorem with a 3-4-5 triangle and three coloured squares."
+             loading="lazy">
+        <figcaption><em>"show the Pythagorean theorem with a 3-4-5 triangle and squares on each side"</em></figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="/screenshots/landing_trig_unit_circle.png"
+             alt="Unit circle with sin and cos values at 30, 45, and 60 degrees."
+             loading="lazy">
+        <figcaption><em>"show the unit circle with sin and cos labelled at 30, 45, 60 degrees"</em></figcaption>
+      </figure>
     </div>
+    <p style="color: var(--muted); margin-top: 1.4em; font-size: 0.95em;">
+      Khayyam Math also handles vector addition, Riemann sums, set-theory
+      Venn diagrams, Turing machines, decision trees, complexity-class
+      reductions, derivatives as tangent slopes, and most other figures
+      that live well on a single canvas.
+    </p>
   </section>
 
   <!-- FAQ -->

@@ -364,6 +364,22 @@ _EXPRESS_SYSTEM = (
     "    (∑ ∏ ∈ ∀ ∨ ∧ ¬ · ≤ ≥ ≠).  Never ASCII substitutes, never "
     "    `\\\\sum`, `\\\\theta`, `\\\\frac`.  If you find yourself "
     "    typing a backslash inside a <text>, stop and rewrite.\n"
+    "  • ABSOLUTELY NEVER emit these literal strings inside any "
+    "    <text> in the SVG:  `\\(`, `\\)`, `$`, `\\frac{`, `\\times`, "
+    "    `\\cdot`, `\\sqrt{`, `\\sum`, `\\int`, `\\to`, `\\le`, `\\ge`. "
+    "    The canvas renders the SVG as-is, with no MathJax pass, so "
+    "    these print as garbage.  Convert at write-time:\n"
+    "      `\\frac{1}{2}` → `½` or `1/2`\n"
+    "      `\\times`      → `×` (or `·` for dot-product)\n"
+    "      `\\cdot`       → `·`\n"
+    "      `\\sqrt{x}`    → `√x` (or `√(x)` for compound arguments)\n"
+    "      `\\pi \\theta` → `π θ`\n"
+    "      `\\to`         → `→`\n"
+    "      `\\le \\ge`    → `≤ ≥`\n"
+    "      `\\sum_{i=1}^{n}` → `Σ ᵢ₌₁ⁿ` (or `Σ (i=1 to n)`)\n"
+    "    Areas, perimeters and other computed values: write them as "
+    "    plain numbers — `Area = (1/2) × (a + b) × h = 30000` — NOT "
+    "    `\\( \\frac{1}{2} \\times (a+b) \\times h \\)`.\n"
     "  • Formulas longer than ~60 characters CANNOT fit on one line "
     "    in a 900-wide viewBox.  Break them across multiple stacked "
     "    <text> elements (same x, y stepped by 22-28 px).  Example: "
@@ -1581,6 +1597,19 @@ async def express_figure(
         # "4×4 matrix laid out as 3 columns + 1 stacked separately"
         # failure mode that no overlap pass can repair on its own.
         try:
+            # First scrub any LaTeX the model leaked into <text> bodies.
+            # SVG is not MathJax — `\( \frac{1}{2} \times h \)` renders
+            # as literal characters and looks broken on the canvas.
+            fixed_svg = strip_latex_in_svg_text(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"strip_latex_in_svg_text: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"strip_latex_in_svg_text FAILED: {type(exc).__name__}: {exc}")
+        try:
             fixed_svg = normalize_matrix_layout(result["svg"])
             if fixed_svg != result["svg"]:
                 _log(
@@ -2134,6 +2163,146 @@ def _svg_to_png(svg: str, width: int = 1200) -> bytes:
 #     is a strong signal.  This is the
 #     "not all vertices were indicated on the graph" failure.
 # ---------------------------------------------------------------------------
+
+# --------------------------------------------------------------------
+# Defensive LaTeX scrubber for SVG <text> content.
+#
+# SVG <text> elements are NOT MathJax. When the LLM emits LaTeX
+# directly into a <text> (a common failure mode for area / formula
+# captions), it renders as literal `\( \frac{1}{2} \times ... \)`
+# garbage on the canvas. The chat panel renders LaTeX correctly
+# because the chat HTML is post-processed by MathJax; the canvas
+# is plain SVG.
+#
+# We scan every <text> / <tspan> body, detect LaTeX commands, and
+# rewrite them to Unicode / ASCII equivalents. Aggressive but safe:
+# any backslash-command inside a text body is either a typo or a
+# LaTeX command, and either way we want it gone.
+# --------------------------------------------------------------------
+
+# Order matters: longest patterns first so `\leq` doesn't match
+# `\l` then leave `eq` behind.
+_LATEX_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    # Delimiters
+    (r"\(", ""), (r"\)", ""),
+    (r"\[", ""), (r"\]", ""),
+    # Greek letters
+    (r"\alpha", "α"), (r"\beta", "β"), (r"\gamma", "γ"),
+    (r"\delta", "δ"), (r"\epsilon", "ε"), (r"\varepsilon", "ε"),
+    (r"\zeta", "ζ"), (r"\eta", "η"), (r"\theta", "θ"),
+    (r"\vartheta", "ϑ"), (r"\iota", "ι"), (r"\kappa", "κ"),
+    (r"\lambda", "λ"), (r"\mu", "μ"), (r"\nu", "ν"),
+    (r"\xi", "ξ"), (r"\pi", "π"), (r"\varpi", "ϖ"),
+    (r"\rho", "ρ"), (r"\sigma", "σ"), (r"\varsigma", "ς"),
+    (r"\tau", "τ"), (r"\upsilon", "υ"), (r"\phi", "φ"),
+    (r"\varphi", "φ"), (r"\chi", "χ"), (r"\psi", "ψ"),
+    (r"\omega", "ω"),
+    (r"\Gamma", "Γ"), (r"\Delta", "Δ"), (r"\Theta", "Θ"),
+    (r"\Lambda", "Λ"), (r"\Xi", "Ξ"), (r"\Pi", "Π"),
+    (r"\Sigma", "Σ"), (r"\Phi", "Φ"), (r"\Psi", "Ψ"),
+    (r"\Omega", "Ω"),
+    # Operators
+    (r"\times", "×"), (r"\cdot", "·"), (r"\div", "÷"),
+    (r"\pm", "±"), (r"\mp", "∓"),
+    (r"\le", "≤"), (r"\leq", "≤"),
+    (r"\ge", "≥"), (r"\geq", "≥"),
+    (r"\ne", "≠"), (r"\neq", "≠"),
+    (r"\approx", "≈"), (r"\equiv", "≡"),
+    (r"\propto", "∝"), (r"\sim", "∼"),
+    (r"\sum", "Σ"), (r"\prod", "Π"), (r"\int", "∫"),
+    (r"\partial", "∂"), (r"\nabla", "∇"),
+    (r"\infty", "∞"),
+    (r"\in", "∈"), (r"\notin", "∉"),
+    (r"\subset", "⊂"), (r"\supset", "⊃"),
+    (r"\subseteq", "⊆"), (r"\supseteq", "⊇"),
+    (r"\cup", "∪"), (r"\cap", "∩"),
+    (r"\emptyset", "∅"), (r"\varnothing", "∅"),
+    (r"\forall", "∀"), (r"\exists", "∃"),
+    (r"\rightarrow", "→"), (r"\leftarrow", "←"),
+    (r"\Rightarrow", "⇒"), (r"\Leftarrow", "⇐"),
+    (r"\leftrightarrow", "↔"), (r"\Leftrightarrow", "⇔"),
+    (r"\to", "→"), (r"\implies", "⇒"), (r"\iff", "⇔"),
+    (r"\mapsto", "↦"),
+    (r"\wedge", "∧"), (r"\vee", "∨"), (r"\neg", "¬"), (r"\lnot", "¬"),
+    (r"\angle", "∠"),
+    (r"\perp", "⊥"), (r"\parallel", "∥"),
+    # Spacing / formatting (just drop)
+    (r"\quad", " "), (r"\qquad", "  "),
+    (r"\,", " "), (r"\;", " "), (r"\:", " "),
+    (r"\!", ""),
+    (r"\\", " "),  # forced line break inside text — degrade to space
+    (r"\left", ""), (r"\right", ""),
+    (r"\big", ""), (r"\Big", ""),
+    (r"\bigg", ""), (r"\Bigg", ""),
+    (r"\text{", ""), (r"\mathrm{", ""), (r"\mathbf{", ""),
+    (r"\mathit{", ""), (r"\mathcal{", ""), (r"\mathbb{", ""),
+)
+
+_LATEX_FRAC_RE = re.compile(
+    r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}"
+)
+_LATEX_SQRT_RE = re.compile(
+    r"\\sqrt\s*\{([^{}]*)\}"
+)
+_LATEX_SUPSUB_BRACE_RE = re.compile(
+    r"([_^])\{([^{}]+)\}"
+)
+_LATEX_BACKSLASH_LEFTOVER_RE = re.compile(
+    r"\\[a-zA-Z]+"
+)
+# Find SVG <text> ... </text> AND <tspan> ... </tspan> bodies so we
+# only scrub user-facing text — not attribute values, comments,
+# or `<title>` metadata.
+_TEXT_BODY_RE = re.compile(
+    r"(<(?:text|tspan)\b[^>]*>)([^<]+)(</(?:text|tspan)>)",
+    flags=re.DOTALL,
+)
+
+
+def _scrub_latex(s: str) -> str:
+    """Convert LaTeX commands in `s` to Unicode equivalents."""
+    out = s
+    # Pairs first (frac, sqrt) — they consume `{...}` braces.
+    out = _LATEX_FRAC_RE.sub(r"(\1)/(\2)", out)
+    out = _LATEX_SQRT_RE.sub(r"√(\1)", out)
+    # Simple keyword replacements.
+    for k, v in _LATEX_REPLACEMENTS:
+        out = out.replace(k, v)
+    # Subscripts / superscripts: `x_{ij}` → `x_ij`, `x^{n+1}` → `x^(n+1)`.
+    # We can't always do real Unicode super/sub (only some chars exist),
+    # so degrade to underscore / caret form rather than leave braces.
+    out = _LATEX_SUPSUB_BRACE_RE.sub(
+        lambda m: (
+            m.group(1) + m.group(2) if len(m.group(2)) == 1
+            else f"{m.group(1)}({m.group(2)})"
+        ),
+        out,
+    )
+    # Anything still backslash-something at the end is unrecognised:
+    # strip the backslash so the literal name survives but doesn't
+    # look like a typo.
+    out = _LATEX_BACKSLASH_LEFTOVER_RE.sub(
+        lambda m: m.group(0)[1:], out,
+    )
+    # `$ ... $` MathJax inline delimiters — drop them.
+    out = out.replace("$", "")
+    return out
+
+
+def strip_latex_in_svg_text(svg: str) -> str:
+    """Walk every <text> / <tspan> body in the SVG and remove any
+    LaTeX syntax the LLM leaked through.  Idempotent.
+
+    Fails open: any regex error returns the input unchanged.
+    """
+    try:
+        return _TEXT_BODY_RE.sub(
+            lambda m: m.group(1) + _scrub_latex(m.group(2)) + m.group(3),
+            svg,
+        )
+    except Exception:
+        return svg
+
 
 def normalize_matrix_layout(svg: str) -> str:
     """Detect text elements that look like matrix cells (`a₁₁ = 4`,
