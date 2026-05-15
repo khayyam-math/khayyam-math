@@ -12,7 +12,7 @@ authors:
     email: REDACTED-email
 version: "0.1.0"
 repository-code: "https://github.com/arashkermaniprojects/sevim"
-license: CC-BY-NC-4.0
+license: MIT
 type: software
 abstract: >
   SeVim is a five-stage neuro-symbolic pipeline that converts natural-language

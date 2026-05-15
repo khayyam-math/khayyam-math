@@ -1,48 +1,31 @@
-Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+MIT License
 
 Copyright (c) 2026 Arash Kermani Kolankeh
 
-You are free to:
-  Share — copy and redistribute the material in any medium or format
-  Adapt — remix, transform, and build upon the material
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Under the following terms:
-  Attribution — You must give appropriate credit, provide a link to the license,
-                and indicate if changes were made.
-  NonCommercial — You may not use the material for commercial purposes.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Full license text: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 -------------------------------------------------------------------------------
-Note: This license applies while the associated paper is under review.
-Upon acceptance and publication, the license will be updated to MIT.
+ATTRIBUTION (preserved from the prior CC BY-NC 4.0 license)
 -------------------------------------------------------------------------------
 
--------------------------------------------------------------------------------
-ATTRIBUTION REQUIREMENT
--------------------------------------------------------------------------------
-
-The Attribution clause of CC BY-NC 4.0 §3(a) is hereby bound to the
-NOTICE file at the root of this repository. Any redistribution,
-adaptation, derivative work, or commercially-evaluated copy of this
-software must:
-
-  (i)   reproduce this LICENSE file verbatim alongside the work, and
-
-  (ii)  reproduce the NOTICE file verbatim alongside this LICENSE,
-        without removing or modifying the citation block, the author
-        block, or the attribution paragraph it carries, and
-
-  (iii) cite the SeVim paper using the BibTeX entry given in NOTICE
-        (or the venue-specific entry that supersedes it once the
-        paper is formally accepted at a journal).
-
-The citation requirement carried by NOTICE persists across any future
-relicensing of this software. If this license is later relaxed
-(for example, to the MIT or Apache-2.0 license upon formal journal
-acceptance), the successor license text must explicitly preserve the
-attribution requirement above for any copy that continues to ship the
-NOTICE file. A relicensing that drops NOTICE without an equivalent
-clause is a breach of the original license terms in the same way that
-removing the LICENSE file itself would be.
--------------------------------------------------------------------------------
+If you build on this software, please cite the associated paper. The
+canonical BibTeX entry lives in the NOTICE file at the repository root
+and is kept in sync with the paper's current venue. The MIT license
+above does NOT require this attribution, but the project's maintainers
+would appreciate it.

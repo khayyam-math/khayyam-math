@@ -71,15 +71,9 @@ courseware, in commercial evaluation, or in any other form — MUST cite
 the SeVim paper using the BibTeX entry above (or, after acceptance, the
 venue-specific entry that supersedes it).
 
-This requirement is part of the licence, not optional. The repository
-is currently distributed under Creative Commons Attribution-
-NonCommercial 4.0 International (CC BY-NC 4.0); §3(a) of that licence
-binds any redistribution to preserving this NOTICE file together with
-the licence text. Removing or modifying NOTICE constitutes a breach of
-the licence terms in the same way that removing the LICENSE file does.
-
-If the licence is later changed (for example, to MIT or Apache-2.0
-upon formal journal acceptance), the citation requirement carried by
-this NOTICE file remains in force for any version that ships with this
-NOTICE intact, and any successor licence text must explicitly preserve
-the same requirement.
+The repository is distributed under the MIT License (see LICENSE).
+The MIT License does NOT formally require citation, but if you build
+on this work in a paper, textbook, courseware, or commercial product,
+the maintainers would appreciate the BibTeX entry above being included.
+Academic citations help the project's research-community footprint and
+make future open-source contributions more likely.
