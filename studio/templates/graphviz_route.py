@@ -132,6 +132,13 @@ _GRAPHVIZ_KEYWORDS: tuple[str, ...] = (
     "cayley graph", "cayley diagram",
     "petersen graph", "k_{", "k_n", "complete graph k",
     "bipartite graph",
+    # category theory / commutative diagrams
+    "commutative diagram", "commuting diagram", "commutative square",
+    "isomorphism theorem", "first isomorphism", "second isomorphism",
+    "third isomorphism", "exact sequence", "short exact sequence",
+    "chain complex", "snake lemma", "pullback diagram",
+    "pushout diagram", "natural transformation", "category diagram",
+    "universal property",
     # workflow / process
     "flowchart", "flow chart", "state transition",
     "process diagram", "activity diagram",
@@ -164,6 +171,10 @@ _ENGINE_HINTS: tuple[tuple[str, str], ...] = (
     ("automaton", "dot"),
     ("decision tree", "dot"),
     ("binary tree", "dot"),
+    ("commutative", "dot"),
+    ("isomorphism", "dot"),
+    ("exact sequence", "dot"),
+    ("snake lemma", "dot"),
 )
 
 
@@ -209,6 +220,20 @@ demands more.
   8. Use `fontname="Helvetica"` and `fontsize=12` for legibility.
   9. For Turing machines: label edges `read/write,move` (e.g. \
 `"0/1,R"` for read-0 write-1 move-right).
+  10. For COMMUTATIVE DIAGRAMS (isomorphism theorems, exact \
+sequences, pullbacks/pushouts, category-theory diagrams): the \
+objects are mathematical structures, not states. Use \
+`node [shape=plaintext, fontname=Helvetica, fontsize=14]` so each \
+object renders as a plain label (e.g. `G`, `H`, `G/ker φ`, `im φ`). \
+Label EVERY arrow with its morphism. Use only Unicode letters that \
+render reliably (`φ`, `π`, `ι`, `θ`); avoid combining diacritics \
+(no macron/tilde over a letter). For an induced isomorphism, label \
+the arrow with the bare symbol `≅`. Use `rank=same` to align objects \
+that belong on the same row of the diagram so the square/triangle \
+shape is preserved. Draw the induced/canonical map as `style=dashed`. \
+Keep `splines=true`. Do NOT use circles or doublecircles here. \
+For a short exact sequence `0 -> A -> B -> C -> 0`, lay it out \
+left-to-right with `rankdir=LR`.
 
 DOT example (state machine):
 strict digraph G {
@@ -223,6 +248,18 @@ fontname=Helvetica, fontsize=12];
   q0 -> q1 [label="a"];
   q1 -> q2 [label="b"];
   q1 -> q1 [label="a"];
+}
+
+DOT example (commutative diagram — first isomorphism theorem,
+G/ker φ ≅ im φ):
+digraph G {
+  splines=true;
+  node [shape=plaintext, fontname=Helvetica, fontsize=14];
+  G; H [label="im φ"]; Q [label="G / ker φ"];
+  { rank=same; G; H; }
+  G -> H [label="φ"];
+  G -> Q [label="π"];
+  Q -> H [label="≅", style=dashed];
 }
 """
 

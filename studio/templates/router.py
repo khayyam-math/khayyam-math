@@ -56,11 +56,28 @@ Supported templates:
     state should have "initial": true and at least one should have
     "accept": true unless the prompt explicitly says otherwise.
 
+  pythagoras — "Pythagorean theorem", "a²+b²=c²", "right triangle with
+    squares on each side", "3-4-5 triangle", "prove the Pythagorean
+    theorem"
+    args: {"a": <leg>, "b": <leg>}   (positive numbers; the hypotenuse
+    is computed)
+    If the prompt names a triangle (e.g. "3-4-5", "6-8-10"), use those
+    leg values.  Otherwise default to a=3, b=4.
+
+  number_line — elementary arithmetic: "explain addition", "explain
+    subtraction", "add two numbers", "how does adding work",
+    "subtract 15 from 23"
+    args: {"a": <number>, "b": <number>, "operation": "+" | "-"}
+    If the prompt gives no numbers, invent small friendly ones
+    (e.g. a=23, b=15).  Use this for any plain add/subtract concept
+    prompt — a number line is the right minimal figure, far better
+    than a box-and-arrow flowchart.
+
 Rules:
-1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b) OR a finite-state machine / DFA / NFA, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
+1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b), a finite-state machine / DFA / NFA, the Pythagorean theorem, or elementary addition/subtraction, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
 2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
 3. System-of-equations: parse linear equations into coeffs (each row = one equation's coefficients in variable order, missing variable = 0) and rhs.  Variables on the LHS, constants on the RHS.
-4. **Only return null** when the prompt has NO connection to these template families — e.g. "explain partial derivatives", "draw a Venn diagram", "show the Pythagorean theorem", "graph y = sin(x)".  Those need the LLM-SVG path.
+4. **Only return null** when the prompt has NO connection to these template families — e.g. "explain partial derivatives", "draw a Venn diagram", "graph y = sin(x)".  Those need the LLM-SVG path.
 
 Respond with ONLY a JSON object in one of these shapes (no prose, no markdown):
   {"template": "matrix_multiplication", "args": {"a": [[1,2],[3,4]], "b": [[5,6],[7,8]]}}
@@ -136,7 +153,7 @@ def _build_dispatch() -> None:
     from studio.templates import (
         matrix_multiplication, matrix_transpose,
         matrix_determinant, matrix_inverse, system_of_equations,
-        state_diagram,
+        state_diagram, pythagoras, number_line,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -145,6 +162,8 @@ def _build_dispatch() -> None:
         "matrix_inverse": matrix_inverse,
         "system_of_equations": system_of_equations,
         "state_diagram": state_diagram,
+        "pythagoras": pythagoras,
+        "number_line": number_line,
     }
 
 

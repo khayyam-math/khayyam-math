@@ -21,6 +21,7 @@ from studio.templates.matrix import (
     system_of_equations,
 )
 from studio.templates.graph import state_diagram
+from studio.templates.geometry import pythagoras, number_line
 
 __all__ = [
     "matrix_multiplication",
@@ -29,4 +30,6 @@ __all__ = [
     "matrix_inverse",
     "system_of_equations",
     "state_diagram",
+    "pythagoras",
+    "number_line",
 ]
