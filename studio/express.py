@@ -1841,6 +1841,17 @@ async def express_figure(
             except Exception as exc:  # noqa: BLE001
                 _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
 
+        # Grow the viewBox if content overflows the bottom/right edge
+        # so an overflowing caption or formula column becomes visible
+        # instead of being clipped off the canvas.
+        try:
+            grown = autogrow_viewbox(result["svg"])
+            if grown != result["svg"]:
+                _log("autogrow_viewbox: expanded viewBox to fit content")
+                result["svg"] = grown
+        except Exception as exc:  # noqa: BLE001
+            _log(f"autogrow_viewbox FAILED: {type(exc).__name__}: {exc}")
+
         # Bind the narration to the FINAL SVG.  The generator nearly
         # always draws the figure WITHOUT id attributes, so narration
         # highlight ids resolve to nothing and the viewer spotlights
@@ -2719,6 +2730,87 @@ def bind_narration_to_svg(
         return svg2, out, n_grounded
     except Exception:  # noqa: BLE001
         return svg, narration, 0
+
+
+def autogrow_viewbox(svg: str) -> str:
+    """Grow the viewBox bottom/right edge so content that overflows the
+    canvas becomes visible instead of being clipped.
+
+    Only grows (never shrinks), only the bottom and right edges, and
+    only when the overflow is moderate (< 2.5x the original dimension
+    — a larger excess is a junk coordinate that clamp_text_to_viewbox
+    handles instead).  When it grows the viewBox it also rewrites the
+    root width/height so the aspect ratio stays correct.  Idempotent.
+    """
+    try:
+        root = re.search(r"<svg\b[^>]*>", svg)
+        if not root:
+            return svg
+        tag = root.group(0)
+        vbm = re.search(r'viewBox\s*=\s*"([-\d.\s]+)"', tag)
+        if not vbm:
+            return svg
+        parts = vbm.group(1).split()
+        if len(parts) != 4:
+            return svg
+        x0, y0, w, h = (float(p) for p in parts)
+        if w <= 0 or h <= 0:
+            return svg
+        max_x, max_y = x0 + w, y0 + h
+
+        def _g(attrs: str, name: str, default: str = "") -> str:
+            mm = re.search(rf'\b{name}\s*=\s*["\']([^"\']*)["\']', attrs)
+            return mm.group(1) if mm else default
+
+        def _f(s: str, default: float = 0.0) -> float:
+            try:
+                return float(s.rstrip("pxptem% "))
+            except (ValueError, AttributeError):
+                return default
+
+        for tm in re.finditer(r"<text\b([^>]*)>([^<]*)", svg):
+            attrs = tm.group(1)
+            xs, ys = _g(attrs, "x"), _g(attrs, "y")
+            if not xs or not ys:
+                continue
+            tx, ty = _f(xs), _f(ys)
+            fs = _f(_g(attrs, "font-size", "16"), 16.0) or 16.0
+            est_w = len(tm.group(2).strip()) * fs * 0.6
+            anchor = (_g(attrs, "text-anchor") or "start").lower()
+            x_right = (tx + est_w if anchor == "start"
+                       else tx + est_w / 2 if anchor == "middle"
+                       else tx)
+            max_x = max(max_x, x_right)
+            max_y = max(max_y, ty + fs * 0.35)
+        for rm in re.finditer(r"<rect\b([^>]*)>", svg):
+            attrs = rm.group(1)
+            max_x = max(max_x, _f(_g(attrs, "x", "0"))
+                        + _f(_g(attrs, "width", "0")))
+            max_y = max(max_y, _f(_g(attrs, "y", "0"))
+                        + _f(_g(attrs, "height", "0")))
+        for cm in re.finditer(r"<circle\b([^>]*)>", svg):
+            attrs = cm.group(1)
+            cx, cy = _f(_g(attrs, "cx", "0")), _f(_g(attrs, "cy", "0"))
+            cr = _f(_g(attrs, "r", "0"))
+            max_x = max(max_x, cx + cr)
+            max_y = max(max_y, cy + cr)
+        new_w, new_h = w, h
+        if x0 + w + 2 < max_x < x0 + w * 2.5:
+            new_w = max_x - x0 + 16
+        if y0 + h + 2 < max_y < y0 + h * 2.5:
+            new_h = max_y - y0 + 24
+        if new_w == w and new_h == h:
+            return svg
+        tag2 = re.sub(r'viewBox\s*=\s*"[^"]*"',
+                      f'viewBox="{x0:.0f} {y0:.0f} '
+                      f'{new_w:.0f} {new_h:.0f}"', tag)
+        tag2 = re.sub(r'\bwidth\s*=\s*"\d[^"]*"',
+                      f'width="{new_w:.0f}"', tag2)
+        tag2 = re.sub(r'\bheight\s*=\s*"\d[^"]*"',
+                      f'height="{new_h:.0f}"', tag2)
+        return svg[:root.start()] + tag2 + svg[root.end():]
+    except Exception:  # noqa: BLE001
+        return svg
 
 
 def strip_latex_in_svg_text(svg: str) -> str:
