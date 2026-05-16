@@ -796,6 +796,16 @@ _REVIEW_SYSTEM = (
     "triangle with no curve), OR the figure visibly carries over "
     "content from a previous turn that does not belong in this one "
     "(stale matrix sitting next to a new circle, etc.).\n"
+    "  • OVERSIZED ELEMENTS — a single shape so large it dominates the "
+    "canvas and crowds out the axes, labels or other content (e.g. an "
+    "SVM figure where the class 'blobs' are huge filled circles "
+    "covering the separating line and margins).  Every element must be "
+    "scaled sensibly relative to the figure.\n"
+    "  • IRRELEVANT ELEMENTS — a drawn element with no pedagogical "
+    "purpose for THIS prompt: a coordinate grid or axes behind a "
+    "pure-algebra derivation, a decorative curve that illustrates "
+    "nothing, a shape the narration never refers to.  Each element "
+    "must earn its place; flag the ones that do not.\n"
     "\n"
     "FAIL on these MATH-CORRECTNESS problems (these matter at least as "
     "much as visual problems — a beautiful figure that teaches a wrong "
@@ -4219,6 +4229,52 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
                 "multiple <text> elements on stacked y values "
                 "instead of running past the right edge."
             )
+
+        # 4b. Oversized elements — a single primitive that dominates
+        # the canvas and crowds out axes/labels (the SVM-blob failure
+        # mode).  A near-full-canvas rect is a legitimate background,
+        # so rects are only flagged between 60% and 93% of the area;
+        # a circle/ellipse over ~42% is almost never intended.
+        import math as _math
+        vb_area = vb_w * vb_h
+        if vb_area > 0:
+            oversized: list[str] = []
+            for m in re.finditer(
+                    r"<(rect|circle|ellipse)\b([^>]*)>", svg):
+                kind = m.group(1)
+                a = _attrs(m.group(2) + ">")
+                try:
+                    if kind == "rect":
+                        w = float(a.get("width", "0").rstrip("pxptem%"))
+                        h = float(a.get("height", "0").rstrip("pxptem%"))
+                        frac = (w * h) / vb_area
+                        if 0.60 < frac < 0.93:
+                            oversized.append(
+                                f"<rect> ~{frac * 100:.0f}% of canvas")
+                    elif kind == "circle":
+                        r = float(a.get("r", "0").rstrip("pxptem%"))
+                        frac = (_math.pi * r * r) / vb_area
+                        if frac > 0.42:
+                            oversized.append(
+                                f"<circle> ~{frac * 100:.0f}% of canvas")
+                    else:
+                        rx = float(a.get("rx", "0").rstrip("pxptem%"))
+                        ry = float(a.get("ry", "0").rstrip("pxptem%"))
+                        frac = (_math.pi * rx * ry) / vb_area
+                        if frac > 0.42:
+                            oversized.append(
+                                f"<ellipse> ~{frac * 100:.0f}% of canvas")
+                except ValueError:
+                    continue
+            if oversized:
+                issues.append(
+                    "oversized_element: " + str(len(oversized)) +
+                    " primitive(s) dominate the canvas: " +
+                    "; ".join(oversized[:4]) +
+                    ". Scale these down so they occupy a sensible "
+                    "fraction of the figure and stop crowding out the "
+                    "axes, labels and other content."
+                )
 
     # 5. Caption-overlaps-diagram: text whose bounding box intersects
     # the bounding box of a diagram element (rect/circle/path with
