@@ -80,7 +80,26 @@ investment and is only worth doing once A+B have absorbed the
 plot/graph prompts, leaving a smaller, well-defined set of
 dense-composition figures.
 
-## Status
+## Status (2026-05-17)
 
-See git history and `scripts/figure_benchmark.py`. This document is
-the source of truth for sequencing; update it as tracks land.
+- **Track D — DONE.** Reviewer prompt flags oversized/irrelevant
+  elements; deterministic `oversized_element` structural check.
+- **Track E — DONE.** `scripts/figure_benchmark.py` — 26-prompt
+  benchmark, non-zero exit on any hard defect.
+- **Track A — DONE.** `studio/templates/matplotlib_route.py` — a 4th
+  render route (plot2d / scatter / surface3d / contour) wired into
+  `express_figure`. matplotlib added as a dependency.
+- **Track B — DONE.** Named curve/surface forms folded into Track A.
+- **Track C — PARTIAL.** `autogrow_viewbox` landed (canvas grows to
+  fit overflowing content). The full typed-region packer is
+  deliberately DEFERRED — it is an express-v2 pipeline change too
+  large to land without supervision. That remains the open item.
+
+Benchmark after all tracks: 26/26 prompts clean (0 hard defects,
+0 soft warnings). Deployed to khayyammath.com.
+
+### Open future work
+- Track C full structured-scene region packer (typed regions → CP-SAT
+  packer; captions to margins by construction).
+- Wire the Phase-E layout-quality scorer into `figure_benchmark.py`
+  as a graded metric alongside the binary defect checks.
