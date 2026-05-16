@@ -17,6 +17,7 @@ dependencies = [
     # container won't crash, but production needs it for the
     # global-optimum guarantee on figure layouts.
     "ortools>=9.10",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

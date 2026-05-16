@@ -1474,6 +1474,46 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"graphviz route errored: {type(exc).__name__}: {exc}")
 
+    # Matplotlib fast-path: for plot-shaped prompts (regression, SVM /
+    # decision boundaries, function curves, 3-D surfaces, contour
+    # plots) the LLM emits a structured plot spec and matplotlib
+    # renders it deterministically — in-bounds and correctly scaled by
+    # construction, with genuine 3-D projection.  No LLM code is ever
+    # executed; the route accepts only a closed-vocabulary spec.
+    # Disabled via SEVIM_MATPLOTLIB_ROUTE=off.
+    if (api_key
+            and os.environ.get("SEVIM_MATPLOTLIB_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.matplotlib_route import (
+                generate_matplotlib_svg, is_matplotlib_prompt,
+            )
+            if is_matplotlib_prompt(user_prompt):
+                mpl_result = await generate_matplotlib_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url,
+                )
+                if mpl_result is not None:
+                    mpl_svg, mpl_narration = mpl_result
+                    _log(f"matplotlib fast-path: svg={len(mpl_svg)} "
+                         f"chars narration={len(mpl_narration)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(mpl_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": mpl_svg,
+                        "narration": mpl_narration,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "matplotlib",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"matplotlib route errored: {type(exc).__name__}: {exc}")
+
     # Try the prompt → template classifier before the full LLM-SVG
     # loop.  If the prompt is asking for a matrix operation the
     # template library can render deterministically, skip the 30-90s
@@ -2026,6 +2066,7 @@ async def express_figure(
     # narrative" failure mode: the retry's 1-phrase narration plays
     # for 5 seconds and is gone before the learner registered audio.
     last_narration = result.get("narration") or []
+    salvaged = False
     if prev_fail is not None and len(last_narration) < 3:
         _, prev_narration, _ = prev_fail
         if len(prev_narration) >= 3 and len(prev_narration) > len(last_narration):
@@ -2035,8 +2076,19 @@ async def express_figure(
                 f"previous attempt's {len(prev_narration)}-phrase narration"
             )
             last_narration = prev_narration
+            salvaged = True
+    final_svg = result.get("svg", "")
+    if salvaged:
+        # The salvaged narration was bound to an EARLIER attempt's SVG;
+        # re-bind it to the final SVG so its highlight ids resolve to
+        # real elements instead of a previous attempt's id namespace.
+        try:
+            final_svg, last_narration, _ = bind_narration_to_svg(
+                final_svg, last_narration)
+        except Exception:  # noqa: BLE001
+            pass
     return {
-        "svg": result.get("svg", ""),
+        "svg": final_svg,
         "narration": last_narration,
         "title": result.get("title") or "",
         "review_history": review_history,
