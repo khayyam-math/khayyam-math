@@ -349,3 +349,136 @@ async def generate_graphviz_svg(
     if not svg:
         return None
     return svg, dot
+
+
+# --------------------------------------------------------------------
+# Narration for the Graphviz route
+# --------------------------------------------------------------------
+#
+# Graphviz emits a stable `id="nodeN"` / `id="edgeN"` on every node and
+# edge group, and the viewer's highlighter matches `[id="..."]`.  So a
+# narration script that references those ids gives graph-shaped figures
+# (DFAs, Turing machines, trees, commutative diagrams) the same
+# phrase-synced highlighting the LLM-SVG and template paths already
+# have.  Without this, every Graphviz figure rendered silently with
+# nothing flashing while the audio played.
+
+_NARRATE_GRAPHVIZ_SYSTEM = """\
+You are a math teacher narrating a graph-shaped diagram (state \
+machine, automaton, Turing machine, tree, dependency graph, \
+commutative diagram, etc.) to a student.
+
+You are given the diagram request and the list of its elements, each \
+with an id (nodeN / edgeN) and a label.  Write a spoken walkthrough.
+
+Rules:
+  1. Write 5 to 9 phrases.  Each phrase is 1-2 short sentences.
+  2. SPOKEN WORDS ONLY — no symbols, no markdown, no LaTeX.  Read \
+labels naturally (say "state q one", "the edge labelled a", etc.).
+  3. Every phrase MUST include a "highlight" array of 1-3 element ids \
+copied VERBATIM from the provided list.  Never invent an id.
+  4. Phrase 1: what the whole diagram represents.
+  5. Middle phrases: walk through the key nodes and the transitions / \
+edges between them in a logical reading order.
+  6. Final phrase: the takeaway / what the student should remember.
+  7. Highlight the element you are actually talking about in each \
+phrase.
+
+Respond with ONLY a JSON object, no prose:
+  {"phrases": [{"speak": "...", "highlight": ["node1"]}, ...]}
+"""
+
+
+def _parse_graphviz_elements(svg: str) -> list[tuple[str, str, str]]:
+    """Pull (id, kind, label) for every Graphviz node/edge group."""
+    import html
+    elems: list[tuple[str, str, str]] = []
+    for m in re.finditer(
+        r'<g id="(node\d+)" class="node">\s*<title>(.*?)</title>',
+        svg, re.S,
+    ):
+        elems.append(("node", m.group(1),
+                       html.unescape(m.group(2)).strip()))
+    for m in re.finditer(
+        r'<g id="(edge\d+)" class="edge">\s*<title>(.*?)</title>',
+        svg, re.S,
+    ):
+        elems.append(("edge", m.group(1),
+                      html.unescape(m.group(2)).strip()))
+    # node ids first, then edges — return as (id, kind, label).
+    return [(eid, kind, label) for kind, eid, label in elems]
+
+
+async def narrate_graphviz(
+    user_prompt: str,
+    svg: str,
+    *,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    model: str = "gpt-4o-mini",
+    timeout_s: float = 25.0,
+) -> list[dict]:
+    """Produce a phrase-timed narration script for a Graphviz SVG.
+
+    Each phrase highlights real `nodeN` / `edgeN` ids so the viewer
+    spotlights the element under discussion. Returns [] on any failure
+    (the figure still renders, just without narration)."""
+    import json
+
+    import httpx
+
+    elems = _parse_graphviz_elements(svg)
+    if not elems:
+        return []
+    valid_ids = {eid for eid, _, _ in elems}
+    listing = "\n".join(
+        f'  {eid} — {kind}' + (f' labelled "{label}"' if label else "")
+        for eid, kind, label in elems
+    )
+    user = (
+        f"Diagram request: {user_prompt}\n\n"
+        f"The rendered diagram contains these elements. Use the id "
+        f"values (left column) verbatim in every highlight array:\n"
+        f"{listing}\n\nWrite the spoken walkthrough now."
+    )
+    payload = {
+        "model": model,
+        "max_tokens": 1100,
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": _NARRATE_GRAPHVIZ_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+    }
+    headers = {"content-type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            r = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                json=payload, headers=headers,
+            )
+        if r.status_code != 200:
+            return []
+        content = r.json()["choices"][0]["message"]["content"] or ""
+        data = json.loads(content)
+    except Exception:  # noqa: BLE001
+        return []
+    phrases = data.get("phrases") if isinstance(data, dict) else None
+    if not isinstance(phrases, list):
+        return []
+    out: list[dict] = []
+    for ph in phrases:
+        if not isinstance(ph, dict):
+            continue
+        speak = (ph.get("speak") or "").strip()
+        if not speak:
+            continue
+        h = ph.get("highlight") or []
+        if isinstance(h, str):
+            h = [h]
+        h = [x for x in h if isinstance(x, str) and x in valid_ids]
+        out.append({"speak": speak, "highlight": h})
+    return out

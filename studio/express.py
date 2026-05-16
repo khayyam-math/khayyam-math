@@ -17,6 +17,7 @@ free layout, anything where determinism matters.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -455,6 +456,11 @@ _EXPRESS_SYSTEM = (
     "It is NOT enough to highlight the whole formula group when the "
     "narration is pointing at one term inside it — the learner needs "
     "the eye-tracking cue to land on the specific thing being said.\n"
+    "  • SELF-CHECK before finishing: EVERY id in EVERY highlight "
+    "array must appear verbatim as an id='...' attribute on an element "
+    "you actually drew in the SVG.  An id that is not in the SVG "
+    "highlights nothing and wastes the phrase.  Never reference an id "
+    "you did not draw; never let the id drift in spelling or case.\n"
     "\n"
     "SEMANTIC VALUES ≠ SVG COORDINATES — the numbers in the user's "
     "prompt (radius r = 5, base b = 8, side a = 3, angle θ = 30°) are "
@@ -1419,7 +1425,7 @@ async def express_figure(
         try:
             from studio.templates.graphviz_route import (
                 generate_graphviz_svg, is_graphviz_binary_available,
-                is_graphviz_prompt,
+                is_graphviz_prompt, narrate_graphviz,
             )
             if (is_graphviz_binary_available()
                     and is_graphviz_prompt(user_prompt)):
@@ -1437,9 +1443,18 @@ async def express_figure(
                             await on_svg_chunk(gv_svg)
                         except Exception:  # noqa: BLE001
                             pass
+                    # Synthesise phrase-synced narration that
+                    # highlights the Graphviz node/edge ids — without
+                    # this the figure renders with nothing spotlighted
+                    # while the audio plays.
+                    gv_narration = await narrate_graphviz(
+                        user_prompt, gv_svg,
+                        api_key=api_key or "", base_url=base_url,
+                    )
+                    _log(f"graphviz narration: {len(gv_narration)} phrases")
                     return {
                         "svg": gv_svg,
-                        "narration": [],
+                        "narration": gv_narration,
                         "title": "",
                         "review_history": [],
                         "retries_used": 0,
@@ -1555,6 +1570,18 @@ async def express_figure(
         _log(f"got content length={len(content)}")
         result = json.loads(content)
         _log(f"parsed: svg_len={len(result.get('svg',''))} phrases={len(result.get('narration',[]))}")
+        # Escape stray & / < the model left raw inside <text> content
+        # (LaTeX matrix `&` separators, inequalities like `|x| < d`).
+        # Must run FIRST — a malformed SVG breaks every XML-parsing
+        # pass below and renders as a blank canvas in the browser.
+        try:
+            fixed_svg = escape_bare_xml_in_svg(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(f"escape_bare_xml_in_svg: rewrote "
+                     f"{len(result['svg'])} -> {len(fixed_svg)} chars")
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"escape_bare_xml_in_svg FAILED: {type(exc).__name__}: {exc}")
         # Deterministic layout pass — auto-fit every <g>'s outer
         # rectangle to its child elements so a 3×3 matrix drawn with
         # a 200×200 rect but cells extending to (350, 340) gets the
@@ -1763,6 +1790,34 @@ async def express_figure(
                     _log(f"plan_layout: NO IMPROVEMENT, overlaps stayed at {pre}")
             except Exception as exc:  # noqa: BLE001
                 _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
+
+        # Bind the narration to the FINAL SVG.  The generator nearly
+        # always draws the figure WITHOUT id attributes, so narration
+        # highlight ids resolve to nothing and the viewer spotlights
+        # nothing while the audio plays.  This injects ids on every
+        # <text> and grounds each phrase to the element it describes —
+        # the deterministic guarantee that highlighting actually works.
+        try:
+            _narr = result.get("narration") or []
+            _bsvg, _bnarr, _n_ground = bind_narration_to_svg(
+                result["svg"], _narr)
+            result["svg"] = _bsvg
+            result["narration"] = _bnarr
+            if _n_ground:
+                _log(f"bind_narration_to_svg: grounded {_n_ground} "
+                     f"phrase(s) to figure text")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"bind_narration_to_svg FAILED: "
+                 f"{type(exc).__name__}: {exc}")
+
+        # Final XML-safety pass: an earlier post-processor may have
+        # re-introduced a stray & or <.  Re-run the escaper so a
+        # malformed SVG can never reach the browser — an invalid SVG
+        # renders as a fully blank canvas.
+        try:
+            result["svg"] = escape_bare_xml_in_svg(result["svg"])
+        except Exception:  # noqa: BLE001
+            pass
 
         # Inspection on streamed SVG: while the LLM was streaming, the
         # canvas iframe was painting the RAW model output into #stage
@@ -2077,7 +2132,7 @@ async def _vision_review(
         # only when the reviewer model supports image input (gpt-4o,
         # gpt-4o-mini, gpt-4-vision, etc.).
         try:
-            png = _svg_to_png(svg)
+            png = await asyncio.to_thread(_svg_to_png, svg)
             _log(f"rendered SVG ({len(svg)} chars) -> PNG ({len(png)} bytes)")
         except Exception as exc:  # noqa: BLE001
             _log(f"PNG render FAILED: {type(exc).__name__}: {exc} -- skipping review")
@@ -2153,7 +2208,108 @@ async def _vision_review(
     return "\n".join(lines)
 
 
+def _chrome_binary() -> str | None:
+    """Locate a headless-Chrome-capable binary, or None."""
+    import shutil
+    for name in ("google-chrome-stable", "google-chrome",
+                 "chromium", "chromium-browser"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for p in ("/usr/bin/chromium", "/usr/bin/chromium-browser",
+              "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"):
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _normalise_svg_root(svg: str) -> str:
+    """Rewrite the root <svg> tag so it fills its container exactly.
+
+    Drops any intrinsic width/height/style (template SVGs hard-code
+    900x650; graphviz SVGs use width:100%) and keeps the viewBox so the
+    figure scales cleanly into the screenshot window.
+    """
+    import re
+    m = re.search(r"<svg\b[^>]*>", svg)
+    if not m:
+        return svg
+    tag = m.group(0)
+    vb = re.search(r'viewBox="[^"]*"', tag)
+    xlink = ('xmlns:xlink="http://www.w3.org/1999/xlink" '
+             if "xmlns:xlink" in tag else "")
+    new = (f'<svg xmlns="http://www.w3.org/2000/svg" {xlink}'
+           + (vb.group(0) + " " if vb else "")
+           + 'width="100%" height="100%" '
+           'preserveAspectRatio="xMidYMid meet">')
+    return svg[:m.start()] + new + svg[m.end():]
+
+
+def _svg_to_png_chrome(svg: str, width: int) -> bytes | None:
+    """Rasterise via headless Chrome — the SAME engine as the canvas
+    viewer — so the reviewer sees pixel-for-pixel what the learner
+    sees. Returns None on any failure so the caller can fall back."""
+    binary = _chrome_binary()
+    if not binary:
+        return None
+    import re
+    import subprocess
+    import tempfile
+    height = width
+    m = re.search(r'viewBox="([-\d.eE\s]+)"', svg)
+    if m:
+        parts = m.group(1).split()
+        if len(parts) == 4:
+            try:
+                vw, vh = float(parts[2]), float(parts[3])
+                if vw > 0 and vh > 0:
+                    height = max(1, round(width * vh / vw))
+            except ValueError:
+                pass
+    html = (
+        '<!doctype html><html><head><meta charset="utf-8"><style>'
+        'html,body{margin:0;padding:0;background:#fff}'
+        f'#wrap{{width:{width}px;height:{height}px}}'
+        '#wrap>svg{display:block}</style></head><body>'
+        f'<div id="wrap">{_normalise_svg_root(svg)}</div></body></html>'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        page = os.path.join(td, "page.html")
+        out = os.path.join(td, "shot.png")
+        with open(page, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        cmd = [
+            binary, "--headless", "--disable-gpu", "--no-sandbox",
+            "--disable-dev-shm-usage", "--hide-scrollbars",
+            "--force-device-scale-factor=1",
+            "--default-background-color=FFFFFFFF",
+            f"--window-size={width},{height}",
+            f"--screenshot={out}", f"file://{page}",
+        ]
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=25,
+                           check=False)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if not os.path.exists(out):
+            return None
+        with open(out, "rb") as fh:
+            data = fh.read()
+        return data or None
+
+
 def _svg_to_png(svg: str, width: int = 1200) -> bytes:
+    """Rasterise an SVG to PNG for the vision reviewer.
+
+    Prefers headless Chrome (browser-grade, matches the canvas viewer
+    exactly — correct math glyphs, correct percentage tspan sizing).
+    Falls back to cairosvg only when no Chrome binary is available;
+    cairosvg mis-sizes percentage tspan font-sizes and lacks math
+    glyphs, so the reviewer would otherwise audit a garbled image.
+    """
+    png = _svg_to_png_chrome(svg, width)
+    if png:
+        return png
     import cairosvg
     return cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=width)
 
@@ -2301,6 +2457,206 @@ def _scrub_latex(s: str) -> str:
     # `$ ... $` MathJax inline delimiters — drop them.
     out = out.replace("$", "")
     return out
+
+
+def escape_bare_xml_in_svg(svg: str) -> str:
+    """Entity-escape stray ``&`` and ``<`` the model left raw inside
+    element content, which would otherwise make the SVG invalid XML.
+
+    The model frequently writes math straight into ``<text>`` — matrix
+    LaTeX with ``&`` column separators, inequalities like ``|x| < d`` —
+    emitting characters XML reserves.  We scan both element content AND
+    quoted attribute values and:
+
+      * ``&`` not already starting a valid entity  -> ``&amp;``
+      * ``<`` not starting a real tag (tag names begin with a letter,
+        ``/``, ``!`` or ``?``), or any ``<`` inside an attribute value
+                                                    -> ``&lt;``
+
+    ``>`` in element content is legal XML, so it is left alone.
+    Idempotent: already-escaped entities are recognised and passed
+    through.  Fails open — any error returns the input unchanged.
+    """
+    try:
+        entity = re.compile(
+            r"&(?:#\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);")
+        out: list[str] = []
+        i, n = 0, len(svg)
+        in_tag = False
+        quote = ""
+        while i < n:
+            c = svg[i]
+            if in_tag:
+                if quote:
+                    # Inside an attribute value — & and < are illegal.
+                    if c == quote:
+                        quote = ""
+                        out.append(c)
+                    elif c == "&":
+                        out.append(c if entity.match(svg, i)
+                                   else "&amp;")
+                    elif c == "<":
+                        out.append("&lt;")
+                    else:
+                        out.append(c)
+                else:
+                    out.append(c)
+                    if c in "\"'":
+                        quote = c
+                    elif c == ">":
+                        in_tag = False
+                i += 1
+                continue
+            if c == "<":
+                nxt = svg[i + 1] if i + 1 < n else ""
+                if nxt.isalpha() or nxt in "/!?":
+                    in_tag = True
+                    out.append(c)
+                else:
+                    out.append("&lt;")
+                i += 1
+                continue
+            if c == "&":
+                out.append(c if entity.match(svg, i) else "&amp;")
+                i += 1
+                continue
+            out.append(c)
+            i += 1
+        return "".join(out)
+    except Exception:  # noqa: BLE001
+        return svg
+
+
+_BIND_STOPWORDS = frozenset("""
+a an the this that these those it its is are was were be been being
+of to in on at for and or but with as by we us our you your they them
+their he she his her i me my here now then so if when which what how
+why where who whom each both also not no all any some one two three
+into from up down out over under again more most very can could will
+would shall should may might must do does did done has have had see
+look note show shows shown let lets gives give given get gets take
+takes use used using step phrase first second third next finally
+""".split())
+
+
+def _word_tokens(s: str) -> set[str]:
+    """Lowercased content-word tokens, stopwords removed."""
+    s = re.sub(r"[^\w ]+", " ", (s or "").lower(), flags=re.UNICODE)
+    return {w for w in s.split()
+            if w and w not in _BIND_STOPWORDS}
+
+
+def _assign_text_ids(svg: str) -> tuple[str, list[tuple[str, str]]]:
+    """Give every id-less <text> a stable ``auto_t{N}`` id.
+
+    Returns the rewritten SVG and a list of ``(id, plain_text)`` for
+    every <text> element (existing-id ones included).  The injected ids
+    are purely additive — no visual change — and give the narration a
+    real DOM target to highlight even though the model drew the figure
+    without ids.
+    """
+    import html
+    entries: list[tuple[str, str]] = []
+    counter = [0]
+
+    def repl(m: "re.Match[str]") -> str:
+        attrs, inner = m.group(1), m.group(2)
+        # Match id="..." OR id='...' — the model mixes quote styles,
+        # and missing a single-quoted id injects a DUPLICATE id
+        # attribute, which is invalid XML.
+        idm = re.search(r"""\bid\s*=\s*(['"])(.*?)\1""", attrs)
+        if idm:
+            tid = idm.group(2)
+            new = m.group(0)
+        else:
+            tid = f"auto_t{counter[0]}"
+            new = f'<text id="{tid}"{attrs}>{inner}</text>'
+        counter[0] += 1
+        plain = html.unescape(re.sub(r"<[^>]+>", "", inner)).strip()
+        entries.append((tid, plain))
+        return new
+
+    svg2 = re.sub(r"<text\b([^>]*)>(.*?)</text>", repl, svg, flags=re.S)
+    return svg2, entries
+
+
+def bind_narration_to_svg(
+    svg: str, narration: list,
+) -> tuple[str, list, int]:
+    """Guarantee every narration phrase highlights a real element.
+
+    The generator nearly always emits the SVG without ``id`` attributes
+    while the narration references logical ids — so the viewer
+    spotlights nothing.  This deterministic pass:
+
+      1. Injects a stable id on every id-less ``<text>`` element.
+      2. For each phrase, keeps any highlight id that already resolves
+         (exact / case-insensitive).
+      3. For phrases whose highlight resolves to nothing, GROUNDS the
+         phrase to the figure: it picks the ``<text>`` element whose
+         content best overlaps the spoken sentence and highlights that.
+
+    Returns ``(svg, narration, n_grounded)``.  Fails open.
+    """
+    try:
+        if not narration:
+            return svg, narration, 0
+        svg2, text_entries = _assign_text_ids(svg)
+        all_ids = set(re.findall(r"""\bid\s*=\s*['"]([^'"]+)['"]""", svg2))
+        all_ids |= set(re.findall(
+            r"""\bdata-nid\s*=\s*['"]([^'"]+)['"]""", svg2))
+        all_ids |= set(re.findall(
+            r"""\bdata-eid\s*=\s*['"]([^'"]+)['"]""", svg2))
+        lower_map: dict[str, str] = {}
+        for sid in all_ids:
+            lower_map.setdefault(sid.lower(), sid)
+        # Pre-tokenise each text element once.
+        scored = [(tid, plain, _word_tokens(plain))
+                  for tid, plain in text_entries if plain]
+        n_grounded = 0
+        out: list = []
+        for ph in narration:
+            if not isinstance(ph, dict):
+                out.append(ph)
+                continue
+            h = ph.get("highlight") or []
+            if isinstance(h, str):
+                h = [h]
+            keep: list[str] = []
+            for x in h:
+                if not isinstance(x, str) or not x.strip():
+                    continue
+                if x in all_ids:
+                    keep.append(x)
+                elif x.lower() in lower_map:
+                    keep.append(lower_map[x.lower()])
+            if not keep:
+                speak = ph.get("speak") or ""
+                sp = _word_tokens(speak)
+                speak_lc = speak.lower()
+                best_id = None
+                best_score = 0.0
+                for tid, plain, tt in scored:
+                    score = float(len(sp & tt))
+                    # Strong boost when the element's own text appears
+                    # verbatim in the spoken sentence.
+                    if len(plain) >= 3 and plain.lower() in speak_lc:
+                        score += 3.0
+                    if score > best_score:
+                        best_score = score
+                        best_id = tid
+                if best_id is not None and best_score >= 1.0:
+                    keep = [best_id]
+                    n_grounded += 1
+            seen: set[str] = set()
+            deduped = [x for x in keep
+                       if not (x in seen or seen.add(x))]
+            new_ph = dict(ph)
+            new_ph["highlight"] = deduped
+            out.append(new_ph)
+        return svg2, out, n_grounded
+    except Exception:  # noqa: BLE001
+        return svg, narration, 0
 
 
 def strip_latex_in_svg_text(svg: str) -> str:

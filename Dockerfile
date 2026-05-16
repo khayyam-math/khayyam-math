@@ -58,16 +58,20 @@ COPY mcp_server ./mcp_server
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 
-# Runtime shared libs (no -dev, no compilers).  fonts-noto-core is needed
-# for non-Latin glyphs that show up in math figures (Greek, set-theory
-# operators).  fonts-dejavu covers the default sans/mono.
+# Runtime shared libs (no -dev, no compilers).  fonts-dejavu (full) +
+# fonts-noto-core cover Greek, set-theory and math-operator glyphs that
+# show up in figures.  chromium is the vision-reviewer's rasteriser:
+# it renders SVG with the SAME engine as the canvas viewer, so the
+# reviewer audits exactly what the learner sees (cairosvg mis-sized
+# percentage tspans and lacked math glyphs).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
         libffi8 libxml2 \
-        fonts-dejavu-core fonts-noto-core \
+        fonts-dejavu fonts-noto-core \
         ca-certificates \
         graphviz \
+        chromium \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
  && useradd --system --create-home --home-dir /home/sevim --uid 1001 sevim \
  && mkdir -p /var/sevim/canvases /opt/sevim/voices \
