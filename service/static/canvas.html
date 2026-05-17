@@ -42,6 +42,13 @@
     border-bottom: 1px solid var(--border);
     font-size: 0.85em;
     flex-wrap: wrap;
+    /* Pin the header (and the Play-narration button it carries) so it
+       stays visible regardless of how the figure or the host page
+       scrolls. */
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg);
   }
   header .title { font-weight: 600; }
   header .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -155,6 +162,12 @@
      The inline-block #stage centres horizontally via `text-align`
      on `main` for the "fits comfortably" case. */
   main {
+    /* Block layout (overriding the earlier display:flex) so the
+       figure pins to the TOP of the canvas — flex align-items:center
+       was vertically centring a short figure and leaving a large
+       empty band above it. #stage is inline-block vertical-align:top,
+       centred horizontally by text-align. */
+    display: block;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
     text-align: center;
