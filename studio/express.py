@@ -1861,16 +1861,17 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"snap_edges_to_nodes FAILED: {type(exc).__name__}: {exc}")
 
-        # Grow the viewBox if content overflows the bottom/right edge
-        # so an overflowing caption or formula column becomes visible
-        # instead of being clipped off the canvas.
+        # Refit the viewBox tightly to the content — removes a big
+        # empty band at the top (the model often draws everything low)
+        # and includes anything that overflowed the original viewBox.
         try:
-            grown = autogrow_viewbox(result["svg"])
-            if grown != result["svg"]:
-                _log("autogrow_viewbox: expanded viewBox to fit content")
-                result["svg"] = grown
+            fitted = fit_viewbox_to_content(result["svg"])
+            if fitted != result["svg"]:
+                _log("fit_viewbox_to_content: refit viewBox to content")
+                result["svg"] = fitted
         except Exception as exc:  # noqa: BLE001
-            _log(f"autogrow_viewbox FAILED: {type(exc).__name__}: {exc}")
+            _log(f"fit_viewbox_to_content FAILED: "
+                 f"{type(exc).__name__}: {exc}")
 
         # Bind the narration to the FINAL SVG.  The generator nearly
         # always draws the figure WITHOUT id attributes, so narration
@@ -2799,69 +2800,96 @@ def raise_text_to_front(svg: str) -> str:
 
 
 def snap_edges_to_nodes(svg: str) -> str:
-    """Snap floating connector endpoints onto the nodes they reach for.
+    """Snap floating connector endpoints onto the nodes they connect.
 
-    LLM-drawn figures routinely place an edge's endpoint NEAR a node
-    circle but not on it, so the connector visibly floats with a gap.
-    For every straight connector — a ``<line>`` or a two-point
-    ``<path>`` — each endpoint whose nearest circle/ellipse centre is
-    within ~2.6 node radii is snapped onto that node's perimeter,
-    pointing along the connector.  An endpoint already on a perimeter,
-    or far from every node, is left untouched.  Idempotent; fails
-    open.
+    LLM-drawn graph figures routinely place an edge's endpoints near —
+    but not on — the node circles, so connectors visibly float.  Two
+    cases are repaired, for every ``<line>`` and every two-point
+    ``<path>``:
+
+      * **small gap** — an endpoint within ~2.6 node radii of a centre
+        is snapped onto that node's perimeter.
+      * **loose edge** — when a connector's two endpoints have
+        DIFFERENT nearest nodes and each endpoint is within a generous
+        range of its node, BOTH endpoints are snapped onto their
+        respective node perimeters.  This is what makes an edge meant
+        for nodes A and B actually run A-perimeter to B-perimeter even
+        when the model placed the raw coordinates 100+ px off — the
+        common "edges reference a node column that was never drawn"
+        failure.
+
+    Endpoints far from every node, or whose both ends resolve to the
+    SAME node, are left untouched.  Idempotent; fails open.
     """
     import math
     try:
-        def _af(attrs: str, name: str) -> float:
+        def _af(attrs: str, name: str):
             mm = re.search(rf'\b{name}\s*=\s*["\']([-\d.eE]+)', attrs)
             try:
-                return float(mm.group(1)) if mm else 0.0
+                return float(mm.group(1)) if mm else None
             except ValueError:
-                return 0.0
+                return None
 
         nodes: list[tuple[float, float, float]] = []
         for m in re.finditer(r"<circle\b([^>]*)>", svg):
-            r = _af(m.group(1), "r")
-            if r > 0:
-                nodes.append((_af(m.group(1), "cx"),
-                              _af(m.group(1), "cy"), r))
+            cx, cy, r = (_af(m.group(1), "cx"), _af(m.group(1), "cy"),
+                         _af(m.group(1), "r"))
+            if cx is not None and cy is not None and r and r > 0:
+                nodes.append((cx, cy, r))
         for m in re.finditer(r"<ellipse\b([^>]*)>", svg):
+            cx, cy = _af(m.group(1), "cx"), _af(m.group(1), "cy")
             rx, ry = _af(m.group(1), "rx"), _af(m.group(1), "ry")
-            r = (rx + ry) / 2.0
-            if r > 0:
-                nodes.append((_af(m.group(1), "cx"),
-                              _af(m.group(1), "cy"), r))
+            if (cx is not None and cy is not None and rx and ry):
+                nodes.append((cx, cy, (rx + ry) / 2.0))
         if not nodes:
             return svg
 
-        def _snap(px: float, py: float, qx: float, qy: float
-                  ) -> tuple[float, float]:
+        def nearest(px: float, py: float):
             best = None
             bd = 1e18
             for cx, cy, r in nodes:
                 d = math.hypot(px - cx, py - cy)
                 if d < bd:
                     bd, best = d, (cx, cy, r)
-            if best is None:
-                return px, py
-            cx, cy, r = best
-            if bd > r * 2.6 or abs(bd - r) <= 4.0:
-                return px, py  # not this node's, or already touching
-            dx, dy = qx - cx, qy - cy
+            return best, bd
+
+        def perim(node, tx: float, ty: float) -> tuple[float, float]:
+            cx, cy, r = node
+            dx, dy = tx - cx, ty - cy
             dl = math.hypot(dx, dy) or 1.0
             return cx + dx / dl * r, cy + dy / dl * r
 
+        def fix(x1, y1, x2, y2):
+            n1, d1 = nearest(x1, y1)
+            n2, d2 = nearest(x2, y2)
+            if n1 is None or n2 is None:
+                return x1, y1, x2, y2
+            gen1 = min(240.0, max(120.0, n1[2] * 4))
+            gen2 = min(240.0, max(120.0, n2[2] * 4))
+            # loose-edge: both ends near DISTINCT nodes -> snap both.
+            if n1 != n2 and d1 <= gen1 and d2 <= gen2:
+                p1 = perim(n1, x2, y2)
+                p2 = perim(n2, x1, y1)
+                return p1[0], p1[1], p2[0], p2[1]
+            # small-gap, per endpoint.
+            nx1, ny1, nx2, ny2 = x1, y1, x2, y2
+            if d1 <= n1[2] * 2.6 and abs(d1 - n1[2]) > 4.0:
+                nx1, ny1 = perim(n1, x2, y2)
+            if d2 <= n2[2] * 2.6 and abs(d2 - n2[2]) > 4.0:
+                nx2, ny2 = perim(n2, x1, y1)
+            return nx1, ny1, nx2, ny2
+
         def _line_repl(m: "re.Match[str]") -> str:
             a = m.group(1)
-            x1, y1 = _af(a, "x1"), _af(a, "y1")
-            x2, y2 = _af(a, "x2"), _af(a, "y2")
-            nx1, ny1 = _snap(x1, y1, x2, y2)
-            nx2, ny2 = _snap(x2, y2, x1, y1)
-            if (nx1, ny1, nx2, ny2) == (x1, y1, x2, y2):
+            vals = [_af(a, k) for k in ("x1", "y1", "x2", "y2")]
+            if any(v is None for v in vals):
+                return m.group(0)
+            x1, y1, x2, y2 = vals
+            nv = fix(x1, y1, x2, y2)
+            if nv == (x1, y1, x2, y2):
                 return m.group(0)
             out = m.group(0)
-            for attr, val in (("x1", nx1), ("y1", ny1),
-                              ("x2", nx2), ("y2", ny2)):
+            for attr, val in zip(("x1", "y1", "x2", "y2"), nv):
                 out = re.sub(rf'(\b{attr}\s*=\s*["\'])[-\d.eE]+',
                              lambda mm, v=val: f"{mm.group(1)}{v:.1f}",
                              out, count=1)
@@ -2870,19 +2898,17 @@ def snap_edges_to_nodes(svg: str) -> str:
         svg = re.sub(r"<line\b([^>]*)>", _line_repl, svg)
 
         def _path_repl(m: "re.Match[str]") -> str:
-            d = m.group(2)
             pm = re.match(
                 r"\s*M\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*"
-                r"L\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*$", d)
+                r"L\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*$", m.group(2))
             if not pm:
                 return m.group(0)
             x1, y1, x2, y2 = (float(g) for g in pm.groups())
-            nx1, ny1 = _snap(x1, y1, x2, y2)
-            nx2, ny2 = _snap(x2, y2, x1, y1)
-            if (nx1, ny1, nx2, ny2) == (x1, y1, x2, y2):
+            nv = fix(x1, y1, x2, y2)
+            if nv == (x1, y1, x2, y2):
                 return m.group(0)
-            return (f'{m.group(1)}M {nx1:.1f} {ny1:.1f} '
-                    f'L {nx2:.1f} {ny2:.1f}{m.group(3)}')
+            return (f'{m.group(1)}M {nv[0]:.1f} {nv[1]:.1f} '
+                    f'L {nv[2]:.1f} {nv[3]:.1f}{m.group(3)}')
 
         svg = re.sub(r'(<path\b[^>]*\bd\s*=\s*["\'])([^"\']*)(["\'])',
                      _path_repl, svg)
@@ -2891,82 +2917,119 @@ def snap_edges_to_nodes(svg: str) -> str:
         return svg
 
 
-def autogrow_viewbox(svg: str) -> str:
-    """Grow the viewBox bottom/right edge so content that overflows the
-    canvas becomes visible instead of being clipped.
+def fit_viewbox_to_content(svg: str) -> str:
+    """Recompute the viewBox to tightly bound the figure's content.
 
-    Only grows (never shrinks), only the bottom and right edges, and
-    only when the overflow is moderate (< 2.5x the original dimension
-    — a larger excess is a junk coordinate that clamp_text_to_viewbox
-    handles instead).  When it grows the viewBox it also rewrites the
-    root width/height so the aspect ratio stays correct.  Idempotent.
+    Removes large empty margins — the model often draws everything in
+    the lower part of the canvas, leaving a big empty band at the top —
+    AND includes content that overflowed the original viewBox so it is
+    not clipped.  The root width/height are rewritten to match so the
+    aspect ratio stays correct.  Quote-agnostic, inclusive over every
+    visible element type, generous 24-px margin.  Idempotent; fails
+    open.
     """
     try:
         root = re.search(r"<svg\b[^>]*>", svg)
         if not root:
             return svg
         tag = root.group(0)
-        vbm = re.search(r'viewBox\s*=\s*"([-\d.\s]+)"', tag)
+        vbm = re.search(r'viewBox\s*=\s*["\']([-\d.\seE]+)["\']', tag)
         if not vbm:
             return svg
         parts = vbm.group(1).split()
         if len(parts) != 4:
             return svg
-        x0, y0, w, h = (float(p) for p in parts)
-        if w <= 0 or h <= 0:
+        ox, oy, ow, oh = (float(p) for p in parts)
+        if ow <= 0 or oh <= 0:
             return svg
-        max_x, max_y = x0 + w, y0 + h
 
-        def _g(attrs: str, name: str, default: str = "") -> str:
-            mm = re.search(rf'\b{name}\s*=\s*["\']([^"\']*)["\']', attrs)
-            return mm.group(1) if mm else default
-
-        def _f(s: str, default: float = 0.0) -> float:
+        def af(attrs: str, name: str):
+            mm = re.search(rf'\b{name}\s*=\s*["\']([-\d.eE]+)', attrs)
             try:
-                return float(s.rstrip("pxptem% "))
-            except (ValueError, AttributeError):
-                return default
+                return float(mm.group(1)) if mm else None
+            except ValueError:
+                return None
 
-        for tm in re.finditer(r"<text\b([^>]*)>([^<]*)", svg):
-            attrs = tm.group(1)
-            xs, ys = _g(attrs, "x"), _g(attrs, "y")
-            if not xs or not ys:
+        xs: list[float] = []
+        ys: list[float] = []
+        for m in re.finditer(r"<text\b([^>]*)>([^<]*)", svg):
+            a = m.group(1)
+            x, y = af(a, "x"), af(a, "y")
+            if x is None or y is None:
                 continue
-            tx, ty = _f(xs), _f(ys)
-            fs = _f(_g(attrs, "font-size", "16"), 16.0) or 16.0
-            est_w = len(tm.group(2).strip()) * fs * 0.6
-            anchor = (_g(attrs, "text-anchor") or "start").lower()
-            x_right = (tx + est_w if anchor == "start"
-                       else tx + est_w / 2 if anchor == "middle"
-                       else tx)
-            max_x = max(max_x, x_right)
-            max_y = max(max_y, ty + fs * 0.35)
-        for rm in re.finditer(r"<rect\b([^>]*)>", svg):
-            attrs = rm.group(1)
-            max_x = max(max_x, _f(_g(attrs, "x", "0"))
-                        + _f(_g(attrs, "width", "0")))
-            max_y = max(max_y, _f(_g(attrs, "y", "0"))
-                        + _f(_g(attrs, "height", "0")))
-        for cm in re.finditer(r"<circle\b([^>]*)>", svg):
-            attrs = cm.group(1)
-            cx, cy = _f(_g(attrs, "cx", "0")), _f(_g(attrs, "cy", "0"))
-            cr = _f(_g(attrs, "r", "0"))
-            max_x = max(max_x, cx + cr)
-            max_y = max(max_y, cy + cr)
-        new_w, new_h = w, h
-        if x0 + w + 2 < max_x < x0 + w * 2.5:
-            new_w = max_x - x0 + 16
-        if y0 + h + 2 < max_y < y0 + h * 2.5:
-            new_h = max_y - y0 + 24
-        if new_w == w and new_h == h:
+            fs = af(a, "font-size") or 16.0
+            am = re.search(r'text-anchor\s*=\s*["\'](\w+)', a)
+            anchor = (am.group(1) if am else "start").lower()
+            w = len(m.group(2).strip()) * fs * 0.62
+            xl = (x - w / 2 if anchor == "middle"
+                  else x - w if anchor == "end" else x)
+            xs += [xl, xl + w]
+            ys += [y - fs, y + fs * 0.4]
+        for m in re.finditer(r"<rect\b([^>]*)>", svg):
+            a = m.group(1)
+            x, y, w, h = (af(a, "x"), af(a, "y"),
+                          af(a, "width"), af(a, "height"))
+            if None not in (x, y, w, h):
+                xs += [x, x + w]
+                ys += [y, y + h]
+        for m in re.finditer(r"<circle\b([^>]*)>", svg):
+            a = m.group(1)
+            cx, cy, r = af(a, "cx"), af(a, "cy"), af(a, "r")
+            if None not in (cx, cy, r):
+                xs += [cx - r, cx + r]
+                ys += [cy - r, cy + r]
+        for m in re.finditer(r"<ellipse\b([^>]*)>", svg):
+            a = m.group(1)
+            cx, cy = af(a, "cx"), af(a, "cy")
+            rx, ry = af(a, "rx"), af(a, "ry")
+            if None not in (cx, cy, rx, ry):
+                xs += [cx - rx, cx + rx]
+                ys += [cy - ry, cy + ry]
+        for m in re.finditer(r"<line\b([^>]*)>", svg):
+            a = m.group(1)
+            for xn, yn in (("x1", "y1"), ("x2", "y2")):
+                x, y = af(a, xn), af(a, yn)
+                if x is not None:
+                    xs.append(x)
+                if y is not None:
+                    ys.append(y)
+        for m in re.finditer(
+                r'<(?:polygon|polyline)\b[^>]*\bpoints\s*=\s*["\']'
+                r'([^"\']*)', svg):
+            nums = re.findall(r"-?\d[\d.eE]*", m.group(1))
+            for i in range(0, len(nums) - 1, 2):
+                try:
+                    xs.append(float(nums[i]))
+                    ys.append(float(nums[i + 1]))
+                except ValueError:
+                    pass
+        for m in re.finditer(
+                r'<path\b[^>]*\bd\s*=\s*["\']([^"\']*)', svg):
+            nums = re.findall(r"-?\d[\d.eE]*", m.group(1))
+            for i in range(0, len(nums) - 1, 2):
+                try:
+                    xs.append(float(nums[i]))
+                    ys.append(float(nums[i + 1]))
+                except ValueError:
+                    pass
+        if len(xs) < 2 or len(ys) < 2:
             return svg
-        tag2 = re.sub(r'viewBox\s*=\s*"[^"]*"',
-                      f'viewBox="{x0:.0f} {y0:.0f} '
-                      f'{new_w:.0f} {new_h:.0f}"', tag)
-        tag2 = re.sub(r'\bwidth\s*=\s*"\d[^"]*"',
-                      f'width="{new_w:.0f}"', tag2)
-        tag2 = re.sub(r'\bheight\s*=\s*"\d[^"]*"',
-                      f'height="{new_h:.0f}"', tag2)
+        margin = 24.0
+        minx, maxx = min(xs), max(xs)
+        miny, maxy = min(ys), max(ys)
+        nx, ny = minx - margin, miny - margin
+        nw = max(maxx - minx + 2 * margin, 200.0)
+        nh = max(maxy - miny + 2 * margin, 150.0)
+        if (abs(nx - ox) < 8 and abs(ny - oy) < 8
+                and abs(nw - ow) < 8 and abs(nh - oh) < 8):
+            return svg
+        tag2 = re.sub(r'viewBox\s*=\s*["\'][^"\']*["\']',
+                      f'viewBox="{nx:.0f} {ny:.0f} '
+                      f'{nw:.0f} {nh:.0f}"', tag)
+        tag2 = re.sub(r'\bwidth\s*=\s*["\']\d[^"\']*["\']',
+                      f'width="{nw:.0f}"', tag2)
+        tag2 = re.sub(r'\bheight\s*=\s*["\']\d[^"\']*["\']',
+                      f'height="{nh:.0f}"', tag2)
         return svg[:root.start()] + tag2 + svg[root.end():]
     except Exception:  # noqa: BLE001
         return svg
