@@ -1841,6 +1841,15 @@ async def express_figure(
             except Exception as exc:  # noqa: BLE001
                 _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
 
+        # Cap oversized <marker> arrowheads.
+        try:
+            shrunk = shrink_arrowheads(result["svg"])
+            if shrunk != result["svg"]:
+                _log("shrink_arrowheads: capped oversized markers")
+                result["svg"] = shrunk
+        except Exception as exc:  # noqa: BLE001
+            _log(f"shrink_arrowheads FAILED: {type(exc).__name__}: {exc}")
+
         # Raise label text above the shapes/lines so it is not covered.
         try:
             fronted = raise_text_to_front(result["svg"])
@@ -2751,6 +2760,55 @@ def bind_narration_to_svg(
         return svg2, out, n_grounded
     except Exception:  # noqa: BLE001
         return svg, narration, 0
+
+
+def shrink_arrowheads(svg: str) -> str:
+    """Cap oversized ``<marker>`` arrowheads.
+
+    The model sometimes defines an arrowhead marker with
+    ``markerWidth`` / ``markerHeight`` large enough that the rendered
+    arrowhead rivals the node circles and buries them.  We cap the
+    larger dimension at ``MAX``, scale both to preserve the aspect
+    ratio, and --- when the marker carries no ``viewBox`` --- add one
+    equal to the original dimensions so the content scales into the
+    smaller viewport instead of being clipped.  Only ``<marker>``
+    elements are touched, so genuine figure geometry (a clause-gadget
+    triangle, an arrowhead drawn as a deliberate polygon) is never
+    affected.  Idempotent; fails open.
+    """
+    max_dim = 10.0
+    try:
+        def repl(m: "re.Match[str]") -> str:
+            tag = m.group(0)
+            wm = re.search(
+                r'\bmarkerWidth\s*=\s*["\']([-\d.eE]+)', tag)
+            hm = re.search(
+                r'\bmarkerHeight\s*=\s*["\']([-\d.eE]+)', tag)
+            if not wm or not hm:
+                return tag
+            try:
+                mw, mh = float(wm.group(1)), float(hm.group(1))
+            except ValueError:
+                return tag
+            big = max(mw, mh)
+            if big <= max_dim or big <= 0:
+                return tag
+            f = max_dim / big
+            out = tag
+            if "viewBox" not in tag:
+                out = out.replace(
+                    "<marker",
+                    f'<marker viewBox="0 0 {mw:.2f} {mh:.2f}"', 1)
+            out = re.sub(
+                r'(\bmarkerWidth\s*=\s*["\'])[-\d.eE]+',
+                lambda x: f"{x.group(1)}{mw * f:.2f}", out, count=1)
+            out = re.sub(
+                r'(\bmarkerHeight\s*=\s*["\'])[-\d.eE]+',
+                lambda x: f"{x.group(1)}{mh * f:.2f}", out, count=1)
+            return out
+        return re.sub(r"<marker\b[^>]*>", repl, svg)
+    except Exception:  # noqa: BLE001
+        return svg
 
 
 def raise_text_to_front(svg: str) -> str:
