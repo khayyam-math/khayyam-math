@@ -390,23 +390,60 @@ Respond with ONLY a JSON object, no prose:
 
 
 def _parse_graphviz_elements(svg: str) -> list[tuple[str, str, str]]:
-    """Pull (id, kind, label) for every Graphviz node/edge group."""
+    """Pull (id, kind, label) for every Graphviz node/edge group.
+
+    Crucially, the label is the VISIBLE rendered text (the ``<text>``
+    inside the group), NOT the Graphviz ``<title>`` — the ``<title>``
+    is the internal node identifier (``H``, ``Q``), which often
+    differs from what the learner actually sees on the canvas (``im
+    φ``, ``G / ker φ``).  Narrating the identifier instead of the
+    label made the audio say "Q" while the figure showed "G / ker φ".
+    """
     import html
-    elems: list[tuple[str, str, str]] = []
+
+    def _texts(body: str) -> str:
+        out = [
+            html.unescape(re.sub(r"<[^>]+>", "", t)).strip()
+            for t in re.findall(r"<text\b[^>]*>(.*?)</text>", body, re.S)
+        ]
+        return " ".join(t for t in out if t)
+
+    def _title(body: str) -> str:
+        tm = re.search(r"<title>(.*?)</title>", body, re.S)
+        return html.unescape(tm.group(1)).strip() if tm else ""
+
+    nodes: list[tuple[str, str]] = []
+    id_to_label: dict[str, str] = {}
     for m in re.finditer(
-        r'<g id="(node\d+)" class="node">\s*<title>(.*?)</title>',
-        svg, re.S,
+        r'<g id="(node\d+)" class="node">(.*?)</g>', svg, re.S,
     ):
-        elems.append(("node", m.group(1),
-                       html.unescape(m.group(2)).strip()))
+        gid, body = m.group(1), m.group(2)
+        title = _title(body)
+        label = _texts(body) or title
+        nodes.append((gid, label))
+        if title:
+            id_to_label[title] = label
+
+    edges: list[tuple[str, str]] = []
     for m in re.finditer(
-        r'<g id="(edge\d+)" class="edge">\s*<title>(.*?)</title>',
-        svg, re.S,
+        r'<g id="(edge\d+)" class="edge">(.*?)</g>', svg, re.S,
     ):
-        elems.append(("edge", m.group(1),
-                      html.unescape(m.group(2)).strip()))
-    # node ids first, then edges — return as (id, kind, label).
-    return [(eid, kind, label) for kind, eid, label in elems]
+        gid, body = m.group(1), m.group(2)
+        elabel = _texts(body)
+        endpoints = re.split(r"-[->]", _title(body), maxsplit=1)
+        parts: list[str] = []
+        if elabel:
+            parts.append(f'labelled "{elabel}"')
+        if len(endpoints) == 2:
+            a = id_to_label.get(endpoints[0].strip(),
+                                endpoints[0].strip())
+            b = id_to_label.get(endpoints[1].strip(),
+                                endpoints[1].strip())
+            parts.append(f"from {a} to {b}")
+        edges.append((gid, "; ".join(parts)))
+
+    return ([(gid, "node", label) for gid, label in nodes]
+            + [(gid, "edge", desc) for gid, desc in edges])
 
 
 async def narrate_graphviz(
