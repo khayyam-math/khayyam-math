@@ -445,19 +445,41 @@
   // turn's audio while a new figure is being drawn produces a narration
   // that doesn't match the figure on screen.
   let playBtnReady = false;
+  // narrationActive is true once the user has started playback and
+  // stays true until the narration finishes (audio 'ended') or a new
+  // figure begins emerging.  It distinguishes the idle "Play" state
+  // from the mid-playback "Resume" state while audio is paused.
+  let narrationActive = false;
+  function anyNarrationPlaying() {
+    return !intro.paused || !audio.paused;
+  }
+  // Drive the play-button label off the live playback state:
+  //   playing -> "Pause", paused mid-narration -> "Resume",
+  //   otherwise -> "Play".
+  function refreshPlayBtn() {
+    if (!playBtnReady) return;
+    if (anyNarrationPlaying()) {
+      playBtn.textContent = '⏸ Pause narration';
+    } else if (narrationActive) {
+      playBtn.textContent = '▶ Resume narration';
+    } else {
+      playBtn.textContent = '▶ Play narration';
+    }
+  }
   function showPlayEmerging() {
     playBtn.classList.remove('hidden');
     playBtn.style.display = '';
     playBtn.disabled = true;
     playBtn.textContent = 'Emerging…';
     playBtnReady = false;
+    narrationActive = false;
   }
   function showPlayReady() {
     playBtn.classList.remove('hidden');
     playBtn.style.display = '';
     playBtn.disabled = false;
-    playBtn.textContent = '▶ Play narration';
     playBtnReady = true;
+    refreshPlayBtn();
   }
   // Only flip to READY once BOTH the narration manifest arrived AND
   // the <audio>'s data is loaded; otherwise a click would 404 on the
@@ -987,9 +1009,38 @@
     }
     audio.play().catch(err => console.error('audio play failed', err));
   }
-  playBtn.addEventListener('click', userStart);
+  // The header button is a Play / Pause / Resume toggle.  When
+  // narration is playing a click pauses it; otherwise userStart()
+  // both first-plays and resumes (the media elements continue from
+  // their current position).
+  function onPlayBtnClick() {
+    if (!playBtnReady) return;
+    if (anyNarrationPlaying()) {
+      if (!intro.paused) intro.pause();
+      if (!audio.paused) audio.pause();
+    } else {
+      userStart();
+    }
+  }
+  playBtn.addEventListener('click', onPlayBtnClick);
   overlayPlay.addEventListener('click', userStart);
   overlay.addEventListener('click', userStart);
+  // Keep the button label in sync with actual playback state.
+  ['play', 'pause', 'ended'].forEach(evt => {
+    intro.addEventListener(evt, () => {
+      if (evt === 'play') narrationActive = true;
+      // The pause that fires when the intro ends (handing off to the
+      // narration audio) is not a user pause — ignore it.
+      if (evt === 'pause' && intro.ended) return;
+      refreshPlayBtn();
+    });
+    audio.addEventListener(evt, () => {
+      if (evt === 'play') narrationActive = true;
+      if (evt === 'ended') narrationActive = false;
+      if (evt === 'pause' && audio.ended) return;
+      refreshPlayBtn();
+    });
+  });
 
   // Initial state load + SSE stream
   async function loadInitial() {
