@@ -1566,7 +1566,12 @@ async def express_figure(
         # 1. Ask LLM for {svg, narration, title} in structured form.
         payload = {
             "model": model,
-            "max_tokens": 8192,
+            # 16k output: a complex figure (dense reduction diagram,
+            # bifurcation plot) can exceed an 8k SVG and truncate the
+            # JSON response mid-string.  You only pay for tokens
+            # actually generated, so the higher ceiling is free for
+            # normal figures and prevents the truncation crash.
+            "max_tokens": 16384,
             "temperature": 0.2,
             "response_format": {
                 "type": "json_schema",
@@ -1618,7 +1623,20 @@ async def express_figure(
                 r.raise_for_status()
                 content = r.json()["choices"][0]["message"]["content"]
         _log(f"got content length={len(content)}")
-        result = json.loads(content)
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError as exc:
+            # A truncated response (the model hit max_tokens mid-SVG on
+            # a very large figure) yields unterminated JSON.  Never let
+            # that crash the turn: log it and retry, or fall through to
+            # the exhausted-return path on the last attempt.
+            _log(f"JSON parse failed ({exc}); content was likely "
+                 f"truncated — {'retrying' if attempt < max_retries else 'giving up'}")
+            continue
+        if not isinstance(result, dict) or "svg" not in result:
+            _log(f"parsed JSON missing 'svg' field; "
+                 f"{'retrying' if attempt < max_retries else 'giving up'}")
+            continue
         _log(f"parsed: svg_len={len(result.get('svg',''))} phrases={len(result.get('narration',[]))}")
         # Escape stray & / < the model left raw inside <text> content
         # (LaTeX matrix `&` separators, inequalities like `|x| < d`).
