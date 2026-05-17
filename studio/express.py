@@ -1841,6 +1841,15 @@ async def express_figure(
             except Exception as exc:  # noqa: BLE001
                 _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
 
+        # Raise label text above the shapes/lines so it is not covered.
+        try:
+            fronted = raise_text_to_front(result["svg"])
+            if fronted != result["svg"]:
+                _log("raise_text_to_front: moved labels above shapes")
+                result["svg"] = fronted
+        except Exception as exc:  # noqa: BLE001
+            _log(f"raise_text_to_front FAILED: {type(exc).__name__}: {exc}")
+
         # Snap floating connector endpoints onto the nodes they reach
         # for, so edges between circles actually touch instead of
         # ending in mid-air with a visible gap.
@@ -2741,6 +2750,52 @@ def bind_narration_to_svg(
         return svg2, out, n_grounded
     except Exception:  # noqa: BLE001
         return svg, narration, 0
+
+
+def raise_text_to_front(svg: str) -> str:
+    """Move top-level <text> elements to the end of the SVG so labels
+    render ON TOP of shapes and connector lines instead of behind them.
+
+    SVG z-order is document order; the LLM frequently emits label text
+    BEFORE the circles and lines, so the labels end up covered and
+    unreadable.  Only ``<text>`` elements that are direct children of
+    the root <svg> are moved — text nested inside a <g> (which may
+    carry a transform) or inside <defs> is left in place so its
+    coordinates and visibility are not disturbed.  Idempotent.
+    """
+    import bisect
+    try:
+        g_open = [m.start() for m in re.finditer(r"<g[\s>]", svg)]
+        g_close = [m.start() for m in re.finditer(r"</g\s*>", svg)]
+        d_open = [m.start() for m in re.finditer(r"<defs[\s>]", svg)]
+        d_close = [m.start() for m in re.finditer(r"</defs\s*>", svg)]
+        spans: list[tuple[int, int]] = []
+        for tm in re.finditer(r"<text\b.*?</text>", svg, re.S):
+            s = tm.start()
+            g_depth = (bisect.bisect_right(g_open, s)
+                       - bisect.bisect_right(g_close, s))
+            d_depth = (bisect.bisect_right(d_open, s)
+                       - bisect.bisect_right(d_close, s))
+            if g_depth == 0 and d_depth == 0:
+                spans.append((tm.start(), tm.end()))
+        if not spans:
+            return svg
+        close = svg.rfind("</svg>")
+        if close == -1:
+            return svg
+        # Already all contiguous at the very end → nothing to do.
+        if spans[-1][1] == close and all(
+                spans[i][1] == spans[i + 1][0]
+                for i in range(len(spans) - 1)):
+            return svg
+        blocks = [svg[s:e] for s, e in spans]
+        new = svg
+        for s, e in reversed(spans):
+            new = new[:s] + new[e:]
+        close = new.rfind("</svg>")
+        return new[:close] + "".join(blocks) + new[close:]
+    except Exception:  # noqa: BLE001
+        return svg
 
 
 def snap_edges_to_nodes(svg: str) -> str:
