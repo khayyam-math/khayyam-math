@@ -241,6 +241,19 @@
   .chat-header button, .chat-header [type=button] {
     min-height: 32px; min-width: 32px;
   }
+  /* Desktop (side-by-side): a fixed-viewport layout.  The chat panel
+     scrolls INTERNALLY beside a fixed-height canvas, instead of the
+     whole page growing into one long column.  This keeps the active
+     turn in view next to the canvas and makes the chat history
+     reachable by scrolling the left panel on its own.  The canvas
+     iframe scrolls internally (overflow:auto on its <main>) for tall
+     figures, so nothing is clipped.  Mobile (<=900px) keeps its own
+     page-scroll + sticky-canvas design below. */
+  @media (min-width: 901px) {
+    html, body { height: 100dvh; overflow: hidden; }
+    .layout { height: 100dvh; }
+  }
+
   /* Stack into a single column on phones AND iPad-portrait.  The
      canvas-pane gets the top ~38vh, the chat takes the rest with the
      input pinned to the bottom.  900px lets us cover iPad Mini portrait
