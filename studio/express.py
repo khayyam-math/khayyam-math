@@ -1841,6 +1841,17 @@ async def express_figure(
             except Exception as exc:  # noqa: BLE001
                 _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
 
+        # Snap floating connector endpoints onto the nodes they reach
+        # for, so edges between circles actually touch instead of
+        # ending in mid-air with a visible gap.
+        try:
+            snapped = snap_edges_to_nodes(result["svg"])
+            if snapped != result["svg"]:
+                _log("snap_edges_to_nodes: snapped connector endpoints")
+                result["svg"] = snapped
+        except Exception as exc:  # noqa: BLE001
+            _log(f"snap_edges_to_nodes FAILED: {type(exc).__name__}: {exc}")
+
         # Grow the viewBox if content overflows the bottom/right edge
         # so an overflowing caption or formula column becomes visible
         # instead of being clipped off the canvas.
@@ -2730,6 +2741,99 @@ def bind_narration_to_svg(
         return svg2, out, n_grounded
     except Exception:  # noqa: BLE001
         return svg, narration, 0
+
+
+def snap_edges_to_nodes(svg: str) -> str:
+    """Snap floating connector endpoints onto the nodes they reach for.
+
+    LLM-drawn figures routinely place an edge's endpoint NEAR a node
+    circle but not on it, so the connector visibly floats with a gap.
+    For every straight connector — a ``<line>`` or a two-point
+    ``<path>`` — each endpoint whose nearest circle/ellipse centre is
+    within ~2.6 node radii is snapped onto that node's perimeter,
+    pointing along the connector.  An endpoint already on a perimeter,
+    or far from every node, is left untouched.  Idempotent; fails
+    open.
+    """
+    import math
+    try:
+        def _af(attrs: str, name: str) -> float:
+            mm = re.search(rf'\b{name}\s*=\s*["\']([-\d.eE]+)', attrs)
+            try:
+                return float(mm.group(1)) if mm else 0.0
+            except ValueError:
+                return 0.0
+
+        nodes: list[tuple[float, float, float]] = []
+        for m in re.finditer(r"<circle\b([^>]*)>", svg):
+            r = _af(m.group(1), "r")
+            if r > 0:
+                nodes.append((_af(m.group(1), "cx"),
+                              _af(m.group(1), "cy"), r))
+        for m in re.finditer(r"<ellipse\b([^>]*)>", svg):
+            rx, ry = _af(m.group(1), "rx"), _af(m.group(1), "ry")
+            r = (rx + ry) / 2.0
+            if r > 0:
+                nodes.append((_af(m.group(1), "cx"),
+                              _af(m.group(1), "cy"), r))
+        if not nodes:
+            return svg
+
+        def _snap(px: float, py: float, qx: float, qy: float
+                  ) -> tuple[float, float]:
+            best = None
+            bd = 1e18
+            for cx, cy, r in nodes:
+                d = math.hypot(px - cx, py - cy)
+                if d < bd:
+                    bd, best = d, (cx, cy, r)
+            if best is None:
+                return px, py
+            cx, cy, r = best
+            if bd > r * 2.6 or abs(bd - r) <= 4.0:
+                return px, py  # not this node's, or already touching
+            dx, dy = qx - cx, qy - cy
+            dl = math.hypot(dx, dy) or 1.0
+            return cx + dx / dl * r, cy + dy / dl * r
+
+        def _line_repl(m: "re.Match[str]") -> str:
+            a = m.group(1)
+            x1, y1 = _af(a, "x1"), _af(a, "y1")
+            x2, y2 = _af(a, "x2"), _af(a, "y2")
+            nx1, ny1 = _snap(x1, y1, x2, y2)
+            nx2, ny2 = _snap(x2, y2, x1, y1)
+            if (nx1, ny1, nx2, ny2) == (x1, y1, x2, y2):
+                return m.group(0)
+            out = m.group(0)
+            for attr, val in (("x1", nx1), ("y1", ny1),
+                              ("x2", nx2), ("y2", ny2)):
+                out = re.sub(rf'(\b{attr}\s*=\s*["\'])[-\d.eE]+',
+                             lambda mm, v=val: f"{mm.group(1)}{v:.1f}",
+                             out, count=1)
+            return out
+
+        svg = re.sub(r"<line\b([^>]*)>", _line_repl, svg)
+
+        def _path_repl(m: "re.Match[str]") -> str:
+            d = m.group(2)
+            pm = re.match(
+                r"\s*M\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*"
+                r"L\s*([-\d.eE]+)[ ,]+([-\d.eE]+)\s*$", d)
+            if not pm:
+                return m.group(0)
+            x1, y1, x2, y2 = (float(g) for g in pm.groups())
+            nx1, ny1 = _snap(x1, y1, x2, y2)
+            nx2, ny2 = _snap(x2, y2, x1, y1)
+            if (nx1, ny1, nx2, ny2) == (x1, y1, x2, y2):
+                return m.group(0)
+            return (f'{m.group(1)}M {nx1:.1f} {ny1:.1f} '
+                    f'L {nx2:.1f} {ny2:.1f}{m.group(3)}')
+
+        svg = re.sub(r'(<path\b[^>]*\bd\s*=\s*["\'])([^"\']*)(["\'])',
+                     _path_repl, svg)
+        return svg
+    except Exception:  # noqa: BLE001
+        return svg
 
 
 def autogrow_viewbox(svg: str) -> str:
