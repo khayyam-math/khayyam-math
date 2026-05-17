@@ -2864,8 +2864,14 @@ def snap_edges_to_nodes(svg: str) -> str:
             n2, d2 = nearest(x2, y2)
             if n1 is None or n2 is None:
                 return x1, y1, x2, y2
-            gen1 = min(240.0, max(120.0, n1[2] * 4))
-            gen2 = min(240.0, max(120.0, n2[2] * 4))
+            # "Generous" range: an endpoint within this of a node is
+            # treated as meant for it.  Scales with node size and the
+            # connector's own length (a long edge with sloppy ends
+            # gets more slack), capped so a short stray line cannot
+            # reach across the figure and grab an unrelated node.
+            length = math.hypot(x2 - x1, y2 - y1)
+            gen1 = min(320.0, max(160.0, n1[2] * 5, length * 0.55))
+            gen2 = min(320.0, max(160.0, n2[2] * 5, length * 0.55))
             # loose-edge: both ends near DISTINCT nodes -> snap both.
             if n1 != n2 and d1 <= gen1 and d2 <= gen2:
                 p1 = perim(n1, x2, y2)
