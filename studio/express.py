@@ -1381,6 +1381,7 @@ async def express_figure(
     context_canvases: list[dict[str, Any]] | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
     allow_panels: bool = True,
+    allow_sequential: bool = True,
 ) -> dict[str, Any]:
     """Run the SVG-direct + vision-review loop.
 
@@ -1456,8 +1457,8 @@ async def express_figure(
                 async def _gen_panel(sub: str) -> dict[str, Any]:
                     return await express_figure(
                         sub, base_url=base_url, model=model,
-                        api_key=api_key, max_retries=0,
-                        allow_panels=False)
+                        api_key=api_key, max_retries=1,
+                        allow_panels=False, allow_sequential=False)
                 pan = await generate_panels_svg(
                     user_prompt, api_key=api_key or "",
                     base_url=base_url, model=model,
@@ -1482,6 +1483,50 @@ async def express_figure(
                     }
         except Exception as exc:  # noqa: BLE001
             _log(f"panels route errored: {type(exc).__name__}: {exc}")
+
+    # ── Sequential step-frame route ───────────────────────────────
+    # For "show X step by step" prompts, decompose into ordered steps
+    # and stack a clean per-step figure vertically — instead of the
+    # LLM cramming every step into one overlapping canvas.  Recurses
+    # with allow_sequential=False / allow_panels=False.
+    if (api_key and allow_sequential
+            and os.environ.get("SEVIM_SEQUENTIAL_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.sequential_route import (
+                generate_sequential_svg, is_sequential_prompt,
+            )
+            if is_sequential_prompt(user_prompt):
+                async def _gen_step(sub: str) -> dict[str, Any]:
+                    return await express_figure(
+                        sub, base_url=base_url, model=model,
+                        api_key=api_key, max_retries=1,
+                        allow_panels=False, allow_sequential=False)
+                seq = await generate_sequential_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url, model=model,
+                    gen_step=_gen_step)
+                if seq is not None:
+                    seq_svg, seq_narr = seq
+                    _log(f"sequential fast-path: svg={len(seq_svg)} "
+                         f"chars narration={len(seq_narr)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(seq_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": seq_svg,
+                        "narration": seq_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "sequential",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"sequential route errored: "
+                 f"{type(exc).__name__}: {exc}")
 
     # ── Template fast-path ────────────────────────────────────────
     # Graphviz fast-path: for prompts that look graph-shaped (state

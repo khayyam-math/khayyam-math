@@ -150,7 +150,8 @@ def _embed(svg: str, x: float, y: float, w: float, h: float) -> str:
              if "xmlns:xlink" in m.group(0) else "")
     new = (f'<svg xmlns="http://www.w3.org/2000/svg" {xlink}'
            f'x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
-           f'viewBox="{vbs}" preserveAspectRatio="xMidYMid meet">')
+           f'viewBox="{vbs}" preserveAspectRatio="xMidYMid meet" '
+           f'overflow="hidden">')
     return svg[:m.start()] + new + svg[m.end():]
 
 
