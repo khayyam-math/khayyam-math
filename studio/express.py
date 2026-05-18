@@ -1380,6 +1380,7 @@ async def express_figure(
     max_retries: int = 2,
     context_canvases: list[dict[str, Any]] | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
+    allow_panels: bool = True,
 ) -> dict[str, Any]:
     """Run the SVG-direct + vision-review loop.
 
@@ -1437,6 +1438,50 @@ async def express_figure(
         print(f"[express] {msg}", flush=True, file=_sys.stderr)
 
     _log(f"start prompt={user_prompt[:60]!r} model={model}")
+
+    # ── Multi-panel route ─────────────────────────────────────────
+    # For "compare X and Y side by side" / cross-referenced-panel
+    # prompts, decompose into sub-figures and composite them into a
+    # deterministic grid.  Runs FIRST — before the single-figure
+    # routes — and recurses into express_figure per panel with
+    # allow_panels=False so a sub-prompt cannot re-enter this route.
+    if (api_key and allow_panels
+            and os.environ.get("SEVIM_PANELS_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.panels_route import (
+                generate_panels_svg, is_panels_prompt,
+            )
+            if is_panels_prompt(user_prompt):
+                async def _gen_panel(sub: str) -> dict[str, Any]:
+                    return await express_figure(
+                        sub, base_url=base_url, model=model,
+                        api_key=api_key, max_retries=0,
+                        allow_panels=False)
+                pan = await generate_panels_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url, model=model,
+                    gen_panel=_gen_panel)
+                if pan is not None:
+                    pan_svg, pan_narr = pan
+                    _log(f"panels fast-path: svg={len(pan_svg)} chars "
+                         f"narration={len(pan_narr)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(pan_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": pan_svg,
+                        "narration": pan_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "panels",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"panels route errored: {type(exc).__name__}: {exc}")
 
     # ── Template fast-path ────────────────────────────────────────
     # Graphviz fast-path: for prompts that look graph-shaped (state
