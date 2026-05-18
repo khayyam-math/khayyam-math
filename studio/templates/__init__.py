@@ -22,6 +22,7 @@ from studio.templates.matrix import (
 )
 from studio.templates.graph import state_diagram
 from studio.templates.geometry import pythagoras, number_line
+from studio.templates.table import data_table
 
 __all__ = [
     "matrix_multiplication",
@@ -32,4 +33,5 @@ __all__ = [
     "state_diagram",
     "pythagoras",
     "number_line",
+    "data_table",
 ]

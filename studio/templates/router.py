@@ -73,6 +73,30 @@ Supported templates:
     prompt — a number line is the right minimal figure, far better
     than a box-and-arrow flowchart.
 
+  data_table — any TABULAR figure: a truth table, a Cayley/group
+    table, a modular-arithmetic (multiplication/addition mod n)
+    table, a Karnaugh map, a comparison table.
+    args: {
+      "title": "<short title>",
+      "headers": ["<col 1>", "<col 2>", ...],
+      "rows": [["<cell>", "<cell>", ...], ...],
+      "row_header": true|false
+    }
+    YOU compute every cell value.  Rules:
+      * Truth table: headers = the variables then the expression
+        (e.g. ["A","B","C","D","(A∧B)∨(¬C∧D)"]); enumerate ALL 2^n
+        assignment rows and compute the result column for each.
+        row_header = false.
+      * Cayley / group table, or a multiplication/addition table
+        mod n: headers = [the operator symbol, then every element];
+        each row starts with its element label then the results;
+        row_header = true.
+      * Karnaugh map: headers = the gray-code column labels
+        ("00","01","11","10"); each row starts with its gray-code
+        label; row_header = true.
+    Always fill every cell with the correct computed value — never
+    leave a cell blank.
+
 Rules:
 1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b), a finite-state machine / DFA / NFA, the Pythagorean theorem, or elementary addition/subtraction, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
 2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
@@ -153,7 +177,7 @@ def _build_dispatch() -> None:
     from studio.templates import (
         matrix_multiplication, matrix_transpose,
         matrix_determinant, matrix_inverse, system_of_equations,
-        state_diagram, pythagoras, number_line,
+        state_diagram, pythagoras, number_line, data_table,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -164,6 +188,7 @@ def _build_dispatch() -> None:
         "state_diagram": state_diagram,
         "pythagoras": pythagoras,
         "number_line": number_line,
+        "data_table": data_table,
     }
 
 
