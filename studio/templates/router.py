@@ -123,6 +123,22 @@ Supported templates:
     "equal groups for a multiplication"
     args: {"a": <1..12>, "b": <1..12>}
 
+  fraction — REPRESENTING or COMPARING fractions: "what is a
+    fraction", "show the fraction 3/4", "represent two thirds",
+    "compare 2/3 and 3/5", "show equivalent fractions 1/2 and 2/4",
+    "fraction representation of three fifths"
+    args: {
+      "parts": [[numerator, denominator], ...],
+      "model": "bar" | "pie",
+      "title": "<short title>"
+    }
+    List EVERY fraction named in the prompt as a [numerator,
+    denominator] pair (e.g. "two thirds" -> [2, 3]).  Use "bar" model
+    by default; use "pie" only when the prompt explicitly asks for a
+    pie or circle.  Use this for showing/comparing fractions ONLY ---
+    NOT for fraction arithmetic (add / subtract / multiply / divide),
+    which must return null so the step-by-step path handles it.
+
   venn_diagram — "Venn diagram", "overlapping sets diagram"
     args: {
       "labels": ["<set 1>", "<set 2>", "<set 3 optional>"],
@@ -217,7 +233,7 @@ def _build_dispatch() -> None:
         matrix_determinant, matrix_inverse, system_of_equations,
         state_diagram, pythagoras, number_line, data_table,
         adjacency_matrix, place_value, multiplication_array,
-        venn_diagram,
+        venn_diagram, fraction,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -233,6 +249,7 @@ def _build_dispatch() -> None:
         "place_value": place_value,
         "multiplication_array": multiplication_array,
         "venn_diagram": venn_diagram,
+        "fraction": fraction,
     }
 
 
