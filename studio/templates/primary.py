@@ -38,7 +38,7 @@ def place_value(number: object) -> Tuple[str, List[dict]]:
     hh, dh, vh = 44.0, 86.0, 48.0
     title_h = 56.0
     W = 2 * m + L * cw
-    H = title_h + hh + dh + vh + 84.0
+    H = title_h + hh + dh + vh + 108.0
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {W:.0f} {H:.0f}" width="{W:.0f}" '
@@ -115,7 +115,7 @@ def multiplication_array(a: object, b: object) -> Tuple[str, List[dict]]:
     title_h = 54.0
     grid_w, grid_h = b * sp, a * sp
     W = max(380.0, leftpad + grid_w + m)
-    H = title_h + grid_h + 96.0
+    H = title_h + grid_h + 124.0
     gx = leftpad
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" '
