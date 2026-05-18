@@ -121,6 +121,10 @@ def _curve_form(name: str, params: dict, xs):
         return np.maximum(0.0, xs)
     if name == "tanh":
         return np.tanh(xs)
+    if name == "uniform":
+        a, b = g("a", -1.0), g("b", 1.0)
+        h = 1.0 / (b - a) if b != a else 1.0
+        return np.where((xs >= a) & (xs <= b), h, 0.0)
     return None
 
 
@@ -198,7 +202,9 @@ For "plot2d" — "series": a list of curves.  Each curve is either
 or
   {"label","note","form":"<form>","params":{...},"xrange":[lo,hi]}
 where <form> is one of: sigmoid, gaussian, line, polynomial, exp,
-relu, tanh.  Optional "lines": straight reference lines
+relu, tanh, uniform.  For a uniform distribution use
+{"form":"uniform","params":{"a":<lo>,"b":<hi>}} — it draws the flat
+rectangular density automatically.  Optional "lines": reference lines
   {"label","note","p1":[x,y],"p2":[x,y]}.
 Optional "bars": vertical bars — use for Riemann-sum rectangles, a
 histogram, or a bar chart:

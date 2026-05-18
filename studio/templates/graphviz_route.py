@@ -87,6 +87,15 @@ def _make_svg_responsive(svg: str) -> str:
     if not m:
         return svg
     tag = m.group(0)
+    # Derive explicit pixel dimensions from the viewBox.  Keeping a
+    # concrete width/height (instead of width="100%") means the SVG
+    # has an intrinsic size, so headless rasterisation renders the
+    # WHOLE diagram instead of clipping it to an ambiguous container
+    # width.  The browser canvas still scales it down via the CSS
+    # max-width below.
+    vb = re.search(r'viewBox="[\s-]*[\d.eE-]+\s+[\d.eE-]+\s+'
+                   r'([\d.eE]+)\s+([\d.eE]+)"', tag)
+    px_w, px_h = (vb.group(1), vb.group(2)) if vb else (None, None)
     # Strip fixed width="..." and height="..." attrs.
     new_tag = re.sub(r'\swidth="[^"]*"', "", tag)
     new_tag = re.sub(r'\sheight="[^"]*"', "", new_tag)
@@ -95,10 +104,11 @@ def _make_svg_responsive(svg: str) -> str:
         new_tag = new_tag.replace(
             "<svg", '<svg preserveAspectRatio="xMidYMid meet"', 1,
         )
-    # Insert responsive width + style.
+    size = (f'width="{px_w}" height="{px_h}" ' if px_w and px_h
+            else 'width="100%" ')
     new_tag = new_tag.replace(
         "<svg",
-        ('<svg width="100%" '
+        (f'<svg {size}'
          'style="max-width:100%; max-height:90vh; height:auto; '
          'display:block; margin:0 auto;"'),
         1,
