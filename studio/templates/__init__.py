@@ -26,6 +26,7 @@ from studio.templates.table import data_table
 from studio.templates.primary import place_value, multiplication_array
 from studio.templates.venn import venn_diagram
 from studio.templates.fraction import fraction
+from studio.templates.trig import unit_circle, triangle
 
 __all__ = [
     "matrix_multiplication",
@@ -42,4 +43,6 @@ __all__ = [
     "multiplication_array",
     "venn_diagram",
     "fraction",
+    "unit_circle",
+    "triangle",
 ]

@@ -139,6 +139,21 @@ Supported templates:
     NOT for fraction arithmetic (add / subtract / multiply / divide),
     which must return null so the step-by-step path handles it.
 
+  unit_circle — "the unit circle", "sine and cosine on the unit
+    circle", "special angles", "radians and degrees"
+    args: {"angles": [0, 30, 45, 60, 90], "show_triangle": false,
+           "title": "<short title>"}
+    "angles" are degrees; pick the angles the prompt is about (use
+    the standard set 0,30,45,60,90 for a general unit-circle figure).
+    Set "show_triangle": true to draw the cosine/sine right triangle
+    for the first angle.
+
+  triangle — "a triangle with sides ...", "law of sines", "law of
+    cosines", "solve the triangle"
+    args: {"a": <side>, "b": <side>, "c": <side>, "title": "..."}
+    Three side lengths; the angles are computed for you.  Invent a
+    valid triangle (e.g. 7, 8, 9) if the prompt gives no numbers.
+
   venn_diagram — "Venn diagram", "overlapping sets diagram"
     args: {
       "labels": ["<set 1>", "<set 2>", "<set 3 optional>"],
@@ -233,7 +248,7 @@ def _build_dispatch() -> None:
         matrix_determinant, matrix_inverse, system_of_equations,
         state_diagram, pythagoras, number_line, data_table,
         adjacency_matrix, place_value, multiplication_array,
-        venn_diagram, fraction,
+        venn_diagram, fraction, unit_circle, triangle,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -250,6 +265,8 @@ def _build_dispatch() -> None:
         "multiplication_array": multiplication_array,
         "venn_diagram": venn_diagram,
         "fraction": fraction,
+        "unit_circle": unit_circle,
+        "triangle": triangle,
     }
 
 
