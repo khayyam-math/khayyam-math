@@ -121,6 +121,10 @@ def _curve_form(name: str, params: dict, xs):
         return np.maximum(0.0, xs)
     if name == "tanh":
         return np.tanh(xs)
+    if name in ("sin", "sine", "sinusoid"):
+        return g("a", 1.0) * np.sin(g("k", 1.0) * xs + g("phi", 0.0))
+    if name in ("cos", "cosine"):
+        return g("a", 1.0) * np.cos(g("k", 1.0) * xs + g("phi", 0.0))
     if name == "uniform":
         a, b = g("a", -1.0), g("b", 1.0)
         h = 1.0 / (b - a) if b != a else 1.0
@@ -202,7 +206,9 @@ For "plot2d" — "series": a list of curves.  Each curve is either
 or
   {"label","note","form":"<form>","params":{...},"xrange":[lo,hi]}
 where <form> is one of: sigmoid, gaussian, line, polynomial, exp,
-relu, tanh, uniform.  For a uniform distribution use
+relu, tanh, sin, cos, uniform.  Use form "sin"/"cos" for sine and
+cosine waves (params a=amplitude, k=frequency, phi=phase).  For a
+uniform distribution use
 {"form":"uniform","params":{"a":<lo>,"b":<hi>}} — it draws the flat
 rectangular density automatically.  Optional "lines": reference lines
   {"label","note","p1":[x,y],"p2":[x,y]}.
