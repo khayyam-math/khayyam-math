@@ -113,6 +113,28 @@ Supported templates:
     specific graph use it; otherwise invent a small connected graph
     (4-6 vertices, 5-8 edges).  Each edge is a [from, to] pair.
 
+  place_value — "place value of a number", "expanded form of",
+    "break down the number ... by place value"
+    args: {"number": <integer 0..99999999>}
+    Use the number in the prompt, or invent a friendly 3-5 digit one.
+
+  multiplication_array — "multiplication as an array", "array model
+    of multiplication", "show 6 times 7 with dots / as an array",
+    "equal groups for a multiplication"
+    args: {"a": <1..12>, "b": <1..12>}
+
+  venn_diagram — "Venn diagram", "overlapping sets diagram"
+    args: {
+      "labels": ["<set 1>", "<set 2>", "<set 3 optional>"],
+      "regions": {"a": "...", "b": "...", "c": "...",
+                  "ab": "...", "ac": "...", "bc": "...",
+                  "abc": "..."}
+    }
+    2 or 3 set labels.  "regions" is optional — fill it with a short
+    example item (or count) for each distinct region when the prompt
+    asks for the regions / intersections to be labelled; for 2 sets
+    use only keys a, b, ab.
+
 Rules:
 1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b), a finite-state machine / DFA / NFA, the Pythagorean theorem, or elementary addition/subtraction, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
 2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
@@ -194,7 +216,8 @@ def _build_dispatch() -> None:
         matrix_multiplication, matrix_transpose,
         matrix_determinant, matrix_inverse, system_of_equations,
         state_diagram, pythagoras, number_line, data_table,
-        adjacency_matrix,
+        adjacency_matrix, place_value, multiplication_array,
+        venn_diagram,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -207,6 +230,9 @@ def _build_dispatch() -> None:
         "number_line": number_line,
         "data_table": data_table,
         "adjacency_matrix": adjacency_matrix,
+        "place_value": place_value,
+        "multiplication_array": multiplication_array,
+        "venn_diagram": venn_diagram,
     }
 
 

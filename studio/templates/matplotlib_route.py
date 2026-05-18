@@ -251,6 +251,10 @@ histogram, or a bar chart:
   {"label","note","x":[x0,x1,...],"heights":[h0,h1,...],"width":<w>}.
 For a Riemann sum, give a curve in "series" AND the rectangles in
 "bars" (left edges in x, function values in heights).
+For a normal distribution / bell curve / "68-95-99.7" / empirical-
+rule figure, set "sigma_bands": {"mu": <mean>, "sigma": <stddev>}
+and leave "series" empty — the bell curve and the three shaded
+standard-deviation bands are drawn for you.
 
 For "scatter" — "classes": list of
   {"label","note","color","points":[[x,y],...]}.
@@ -596,6 +600,35 @@ def render_plot_spec(spec: dict) -> Optional[tuple[str, list[dict]]]:
                         patch.set_gid("bars")
                     if bars.get("note"):
                         notes.append(("bars", str(bars["note"])))
+            # Normal-distribution empirical-rule shading: draw the
+            # bell curve and the 68-95-99.7 sigma bands.
+            sb = spec.get("sigma_bands")
+            if isinstance(sb, dict):
+                try:
+                    mu = float(sb.get("mu", 0.0))
+                    sg = abs(float(sb.get("sigma", 1.0))) or 1.0
+                except (TypeError, ValueError):
+                    mu, sg = 0.0, 1.0
+                xs = np.linspace(mu - 4 * sg, mu + 4 * sg, 400)
+                ys = (np.exp(-((xs - mu) ** 2) / (2 * sg * sg))
+                      / (sg * np.sqrt(2 * np.pi)))
+                for k, col, pct in ((3, "#c4d8ec", "99.7%"),
+                                    (2, "#7da6d0", "95%"),
+                                    (1, "#3d6fb4", "68%")):
+                    msk = (xs >= mu - k * sg) & (xs <= mu + k * sg)
+                    fb = ax.fill_between(xs[msk], ys[msk], color=col,
+                                         alpha=0.85)
+                    fb.set_gid(f"band_{k}")
+                    plural = "s" if k > 1 else ""
+                    notes.append((f"band_{k}", (
+                        f"About {pct} of the data lies within {k} "
+                        f"standard deviation{plural} of the mean.")))
+                cv, = ax.plot(xs, ys, color="#1a3a5c", linewidth=2)
+                cv.set_gid("curve")
+                for k in (1, 2, 3):
+                    for s in (-1, 1):
+                        ax.axvline(mu + s * k * sg, color="#777",
+                                   linewidth=0.8, linestyle="--")
 
         if title:
             t = ax.set_title(title, fontsize=15)

@@ -23,6 +23,8 @@ from studio.templates.matrix import (
 from studio.templates.graph import state_diagram, adjacency_matrix
 from studio.templates.geometry import pythagoras, number_line
 from studio.templates.table import data_table
+from studio.templates.primary import place_value, multiplication_array
+from studio.templates.venn import venn_diagram
 
 __all__ = [
     "matrix_multiplication",
@@ -35,4 +37,7 @@ __all__ = [
     "pythagoras",
     "number_line",
     "data_table",
+    "place_value",
+    "multiplication_array",
+    "venn_diagram",
 ]
