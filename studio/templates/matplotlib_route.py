@@ -59,6 +59,16 @@ _MATPLOTLIB_KEYWORDS: tuple[str, ...] = (
     "gradient descent", "loss landscape", "loss surface",
     "error surface", "optimization landscape",
     "optimisation landscape", "manifold",
+    # time series
+    "time series", "time-series", "autocorrelation",
+    "auto-correlation", "periodogram", "arima", "moving average",
+    "seasonal decomposition", "trend and seasonality",
+    "spectral density", "power spectrum", "forecast",
+    # dynamical systems / distributions / histograms
+    "phase portrait", "phase plane", "vector field",
+    "direction field", "bifurcation diagram", "bifurcation plot",
+    "histogram", "box plot", "violin plot",
+    "riemann sum", "riemann sums", "area under the curve",
 )
 
 
@@ -160,6 +170,11 @@ or
 where <form> is one of: sigmoid, gaussian, line, polynomial, exp,
 relu, tanh.  Optional "lines": straight reference lines
   {"label","note","p1":[x,y],"p2":[x,y]}.
+Optional "bars": vertical bars — use for Riemann-sum rectangles, a
+histogram, or a bar chart:
+  {"label","note","x":[x0,x1,...],"heights":[h0,h1,...],"width":<w>}.
+For a Riemann sum, give a curve in "series" AND the rectangles in
+"bars" (left edges in x, function values in heights).
 
 For "scatter" — "classes": list of
   {"label","note","color","points":[[x,y],...]}.
@@ -425,6 +440,27 @@ def render_plot_spec(spec: dict) -> Optional[tuple[str, list[dict]]]:
                         notes.append((gid, str(ln_spec["note"])))
                 except (TypeError, ValueError, IndexError):
                     pass
+            bars = spec.get("bars")
+            if isinstance(bars, dict):
+                bx = bars.get("x") or []
+                bh = bars.get("heights") or []
+                try:
+                    bx = [float(v) for v in bx]
+                    bh = [float(v) for v in bh]
+                    bw = float(bars.get("width")
+                               or (bx[1] - bx[0] if len(bx) > 1 else 1.0))
+                except (TypeError, ValueError, IndexError):
+                    bx, bh = [], []
+                if bx and bh:
+                    n = min(len(bx), len(bh))
+                    cont = ax.bar(bx[:n], bh[:n], width=bw,
+                                  align="edge", alpha=0.45,
+                                  color="#6aa84f", edgecolor="#333",
+                                  label=str(bars.get("label") or "bars"))
+                    for patch in cont.patches:
+                        patch.set_gid("bars")
+                    if bars.get("note"):
+                        notes.append(("bars", str(bars["note"])))
 
         if title:
             t = ax.set_title(title, fontsize=15)

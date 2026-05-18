@@ -781,15 +781,31 @@ _REVIEW_SYSTEM = (
     "  • main content missing entirely (e.g. 'matrix multiplication' "
     "with no matrices visible at all)\n"
     "  • TEXT OVERLAP — any text element whose bounding box visibly "
-    "overlaps another text element, a shape interior, a stroke, or an "
-    "axis tick label, such that one of the strings is partially or "
-    "fully hidden.  Look carefully at the rendered PNG: if a learner "
-    "would have to mentally separate two collided strings to read "
-    "them, that's a FAIL.  Common forms: caption overlapping a label "
-    "INSIDE a polygon; two labels stacked at the same y; a long "
-    "formula crossing an axis or arrow; tick labels of different "
-    "series sharing pixel space.  Be strict — overlapping text is "
-    "the #1 reason learners give up on a figure.\n"
+    "overlaps another text element, a shape interior, a stroke, a "
+    "drawn CURVE, or an axis tick label, such that one of the strings "
+    "is partially or fully hidden.  Look carefully at the rendered "
+    "PNG: if a learner would have to mentally separate two collided "
+    "strings to read them, that's a FAIL.  Common forms: caption "
+    "overlapping a label INSIDE a polygon; two labels stacked at the "
+    "same y; a paragraph of body text with a function curve drawn "
+    "straight THROUGH it; a long formula crossing an axis or arrow; "
+    "tick labels of different series sharing pixel space.  Be strict "
+    "— overlapping text is the #1 reason learners give up on a "
+    "figure.\n"
+    "  • EMPTY PLACEHOLDER SHAPES — a rectangle, box or region that is "
+    "drawn but left blank when it was clearly meant to contain "
+    "something (a labelled box with no label inside, three empty "
+    "coloured rectangles standing in for content).  An empty box "
+    "teaches nothing — FAIL.\n"
+    "  • MISSING DEFINING CONTENT — the figure omits the element that "
+    "IS the concept: a 'Riemann sum' with no rectangles, a 'histogram' "
+    "with no bars, a 'bifurcation diagram' with no branching, a "
+    "'phase portrait' with no trajectories.  The caption naming the "
+    "concept is not enough; the defining visual must actually be "
+    "drawn.\n"
+    "  • NEAR-EMPTY FIGURE — the canvas is mostly blank, or carries "
+    "only a title and a couple of stray strokes.  If a learner opening "
+    "this would see almost nothing, FAIL.\n"
     "  • wrong topology (3SAT-clique drawn as a tree, etc.)\n"
     "  • the figure is clearly the WRONG TOPIC compared to the user's "
     "prompt (e.g. user asked for an integral, the figure shows a "
@@ -4816,6 +4832,38 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
                 ", or right column x>" + str(int(vb_w * 0.7)) + ") so "
                 "the diagram region stays readable."
             )
+
+        # 5a. Curve-through-text-block: a path/polyline whose bounding
+        # box covers a BLOCK of text (>= 4 distinct text elements) —
+        # the "decorative parabola drawn straight through the
+        # explanation" failure.  The >=4 threshold keeps a normal
+        # plotted curve with a couple of nearby labels from tripping
+        # this; only a genuine text block being crossed is flagged.
+        curve_boxes: list[tuple[float, float, float, float]] = []
+        for m in re.finditer(
+                r'<(?:path|polyline)\b[^>]*?'
+                r'\b(?:d|points)\s*=\s*["\']([^"\']*)', svg):
+            nums = re.findall(r"-?\d[\d.]*", m.group(1))
+            xs = [float(nums[i]) for i in range(0, len(nums) - 1, 2)]
+            ys = [float(nums[i]) for i in range(1, len(nums), 2)]
+            if len(xs) >= 2 and len(ys) >= 2:
+                curve_boxes.append((min(xs), min(ys),
+                                    max(xs) - min(xs),
+                                    max(ys) - min(ys)))
+        for cbx in curve_boxes:
+            hit = sum(
+                1 for tb in text_boxes
+                if _overlap_area((tb[0], tb[1], tb[2], tb[3]), cbx)
+                >= 0.25 * max(1.0, tb[2] * tb[3]))
+            if hit >= 4:
+                issues.append(
+                    "text_block_over_curve: a curve/path is drawn "
+                    f"across a block of {hit} text elements, so the "
+                    "explanation text and the curve overlap and are "
+                    "both hard to read.  Put the prose in a clear "
+                    "margin column clear of the curve, or drop the "
+                    "curve if it is decorative.")
+                break
 
         # 5b. Text-text overlap.  Pairwise check of every <text>'s
         # estimated bbox against every other's — flag the pair when
