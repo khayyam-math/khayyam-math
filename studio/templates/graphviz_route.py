@@ -93,9 +93,24 @@ def _make_svg_responsive(svg: str) -> str:
     # WHOLE diagram instead of clipping it to an ambiguous container
     # width.  The browser canvas still scales it down via the CSS
     # max-width below.
-    vb = re.search(r'viewBox="[\s-]*[\d.eE-]+\s+[\d.eE-]+\s+'
-                   r'([\d.eE]+)\s+([\d.eE]+)"', tag)
-    px_w, px_h = (vb.group(1), vb.group(2)) if vb else (None, None)
+    # Pad the viewBox ~4% on every side so edge labels and curved
+    # skip-edges that graphviz occasionally lets bleed past the
+    # nominal bounding box are never clipped on render.
+    vbm = re.search(r'viewBox="\s*(-?[\d.eE]+)\s+(-?[\d.eE]+)\s+'
+                    r'([\d.eE]+)\s+([\d.eE]+)\s*"', tag)
+    px_w = px_h = None
+    if vbm:
+        try:
+            x0, y0, w0, h0 = (float(vbm.group(i)) for i in range(1, 5))
+            padx, pady = w0 * 0.04 + 6, h0 * 0.04 + 6
+            nx, ny = x0 - padx, y0 - pady
+            nw, nh = w0 + 2 * padx, h0 + 2 * pady
+            tag = tag.replace(
+                vbm.group(0),
+                f'viewBox="{nx:.2f} {ny:.2f} {nw:.2f} {nh:.2f}"')
+            px_w, px_h = f"{nw:.2f}", f"{nh:.2f}"
+        except ValueError:
+            pass
     # Strip fixed width="..." and height="..." attrs.
     new_tag = re.sub(r'\swidth="[^"]*"', "", tag)
     new_tag = re.sub(r'\sheight="[^"]*"', "", new_tag)

@@ -31,6 +31,8 @@ _PANELS_KEYWORDS: tuple[str, ...] = (
     "two panels", "three panels", "four panels", "multi-panel",
     "cross-referenc", "next to each other", "in two panels",
     "in three panels", "panel comparison",
+    "each of the", "a diagram for each", "diagram for each",
+    "one for each", "for each of the", "with a diagram for each",
 )
 
 

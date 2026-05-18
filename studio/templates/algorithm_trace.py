@@ -22,7 +22,7 @@ from fractions import Fraction
 from typing import Optional
 
 _ALWAYS = ("insertion sort", "bubble sort", "selection sort",
-           "binary search", "long division")
+           "merge sort", "binary search", "long division")
 _STEP_GATED = ("gaussian elimination", "row reduction", "row echelon",
                "determinant", "linear system", "system of equations",
                "solve the system")
@@ -30,8 +30,19 @@ _STEP_CUES = ("step by step", "step-by-step", "steps of", "trace",
               "walk through", "each step", "show the steps")
 
 
+_COMPARE_CUES = (" compare ", " versus ", " vs ", "side by side",
+                 "side-by-side", "difference between", " contrast ")
+
+
 def is_algorithm_trace_prompt(prompt: str) -> bool:
     p = f" {(prompt or '').lower()} "
+    # Never hijack a comparison prompt — "compare bubble sort, merge
+    # sort and quicksort" must reach the panels route, not trace one.
+    if any(c in p for c in _COMPARE_CUES):
+        return False
+    # "binary search tree" is a data structure, not the search algo.
+    p = p.replace("binary search tree", "  ").replace(
+        "binary search trees", "  ")
     if any(k in p for k in _ALWAYS):
         return True
     if any(c in p for c in _STEP_CUES) and any(k in p for k in _STEP_GATED):
@@ -43,8 +54,9 @@ ALGO_SYSTEM = """\
 You extract the input data for an algorithm-trace figure.  Return
 ONLY a JSON object:
 
-  {"algo": "<insertion_sort|bubble_sort|selection_sort|binary_search|
-             gaussian_elimination|determinant|long_division>",
+  {"algo": "<insertion_sort|bubble_sort|selection_sort|merge_sort|
+             binary_search|gaussian_elimination|determinant|
+             long_division>",
    "array": [int, ...],
    "target": <int>,
    "matrix": [[num,...], ...],
@@ -194,6 +206,42 @@ def _trace_selection_sort(a: list[int]) -> list[dict]:
     steps.append(_arr_step("Sorted", a,
                            {k: _DONE for k in range(n)},
                            "The list is fully sorted."))
+    return steps
+
+
+def _trace_merge_sort(a: list[int]) -> list[dict]:
+    """Bottom-up merge sort: capture the array after each pass that
+    doubles the sorted-run width — gives clean array snapshots."""
+    a = list(a)
+    n = len(a)
+    steps = [_arr_step("Initial list", a, {},
+                       "The unsorted input list.")]
+    width = 1
+    while width < n:
+        out: list[int] = []
+        i = 0
+        while i < n:
+            left = a[i:i + width]
+            right = a[i + width:i + 2 * width]
+            li = ri = 0
+            while li < len(left) and ri < len(right):
+                if left[li] <= right[ri]:
+                    out.append(left[li]); li += 1
+                else:
+                    out.append(right[ri]); ri += 1
+            out.extend(left[li:])
+            out.extend(right[ri:])
+            i += 2 * width
+        a = out
+        run = min(2 * width, n)
+        steps.append(_arr_step(
+            f"Merge runs of size {width}", a, {},
+            f"Merge each adjacent pair of size-{width} runs into "
+            f"sorted runs of up to {run}."))
+        width *= 2
+    steps[-1] = _arr_step("Sorted", a,
+                          {k: _DONE for k in range(n)},
+                          "The list is fully sorted.")
     return steps
 
 
@@ -544,6 +592,7 @@ _TITLES = {
     "insertion_sort": "Insertion Sort",
     "bubble_sort": "Bubble Sort",
     "selection_sort": "Selection Sort",
+    "merge_sort": "Merge Sort",
     "binary_search": "Binary Search",
     "gaussian_elimination": "Gaussian Elimination",
     "determinant": "Determinant by Cofactor Expansion",
@@ -559,7 +608,8 @@ async def generate_algorithm_trace_svg(
         return None
     algo = str(spec.get("algo") or "").strip().lower()
     try:
-        if algo in ("insertion_sort", "bubble_sort", "selection_sort"):
+        if algo in ("insertion_sort", "bubble_sort", "selection_sort",
+                    "merge_sort"):
             arr = [int(v) for v in (spec.get("array") or [])]
             if not (3 <= len(arr) <= 16):
                 return None
@@ -567,6 +617,7 @@ async def generate_algorithm_trace_svg(
                 "insertion_sort": _trace_insertion_sort,
                 "bubble_sort": _trace_bubble_sort,
                 "selection_sort": _trace_selection_sort,
+                "merge_sort": _trace_merge_sort,
             }[algo](arr)
         elif algo == "binary_search":
             arr = [int(v) for v in (spec.get("array") or [])]
