@@ -325,3 +325,61 @@ def state_diagram(
             "highlight": [f"edge_{norm_trans.index(t)}"],
         })
     return svg, narration
+
+
+def adjacency_matrix(
+    vertices: List[object],
+    edges: List[List[object]],
+    *,
+    directed: bool = False,
+    title: str = "",
+) -> Tuple[str, List[dict]]:
+    """Build the adjacency matrix of a graph and render it as a
+    deterministic labelled grid.
+
+    ``vertices``  ordered vertex labels.
+    ``edges``     list of [u, v] or [u, v, weight] pairs.
+    ``directed``  when False each edge fills both M[u][v] and M[v][u].
+    """
+    from studio.templates.table import data_table
+
+    V = [str(v) for v in (vertices or [])]
+    if not (1 <= len(V) <= 14):
+        raise ValueError("vertex count out of range")
+    idx = {v: i for i, v in enumerate(V)}
+    n = len(V)
+    M = [[0 for _ in range(n)] for _ in range(n)]
+    for e in edges or []:
+        if not isinstance(e, (list, tuple)) or len(e) < 2:
+            continue
+        a, b = str(e[0]), str(e[1])
+        if a not in idx or b not in idx:
+            continue
+        w = e[2] if len(e) > 2 else 1
+        try:
+            w = int(w)
+        except (TypeError, ValueError):
+            w = 1
+        M[idx[a]][idx[b]] = w
+        if not directed:
+            M[idx[b]][idx[a]] = w
+    headers = [""] + V
+    rows = [[V[i]] + [str(M[i][j]) for j in range(n)] for i in range(n)]
+    deg = sum(sum(1 for x in r if x) for r in M)
+    svg, _ = data_table(
+        headers, rows,
+        title=title or ("Adjacency Matrix"
+                        + (" (directed)" if directed else "")),
+        row_header=True)
+    narration = [
+        {"speak": (f"This is the adjacency matrix of a graph on "
+                   f"{n} vertices."), "highlight": ["title"]},
+        {"speak": ("Each cell holds a one when an edge joins the "
+                   "row vertex to the column vertex, and a zero "
+                   "otherwise."), "highlight": []},
+        {"speak": (f"The matrix is {'asymmetric' if directed else 'symmetric'}"
+                   f" because the graph is "
+                   f"{'directed' if directed else 'undirected'}."),
+         "highlight": []},
+    ]
+    return svg, narration

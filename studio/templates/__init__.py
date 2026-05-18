@@ -20,7 +20,7 @@ from studio.templates.matrix import (
     matrix_inverse,
     system_of_equations,
 )
-from studio.templates.graph import state_diagram
+from studio.templates.graph import state_diagram, adjacency_matrix
 from studio.templates.geometry import pythagoras, number_line
 from studio.templates.table import data_table
 
@@ -31,6 +31,7 @@ __all__ = [
     "matrix_inverse",
     "system_of_equations",
     "state_diagram",
+    "adjacency_matrix",
     "pythagoras",
     "number_line",
     "data_table",

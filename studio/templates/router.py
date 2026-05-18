@@ -97,6 +97,18 @@ Supported templates:
     Always fill every cell with the correct computed value — never
     leave a cell blank.
 
+  adjacency_matrix — "adjacency matrix of a graph", "show the
+    adjacency matrix", "represent the graph as a matrix", "the
+    matrix of this graph"
+    args: {
+      "vertices": ["A", "B", "C", ...],
+      "edges": [["A","B"], ["B","C"], ...],
+      "directed": true|false
+    }
+    List the graph's vertices and its edges.  If the prompt names a
+    specific graph use it; otherwise invent a small connected graph
+    (4-6 vertices, 5-8 edges).  Each edge is a [from, to] pair.
+
 Rules:
 1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b), a finite-state machine / DFA / NFA, the Pythagorean theorem, or elementary addition/subtraction, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
 2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
@@ -178,6 +190,7 @@ def _build_dispatch() -> None:
         matrix_multiplication, matrix_transpose,
         matrix_determinant, matrix_inverse, system_of_equations,
         state_diagram, pythagoras, number_line, data_table,
+        adjacency_matrix,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -189,6 +202,7 @@ def _build_dispatch() -> None:
         "pythagoras": pythagoras,
         "number_line": number_line,
         "data_table": data_table,
+        "adjacency_matrix": adjacency_matrix,
     }
 
 

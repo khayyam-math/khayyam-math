@@ -1480,6 +1480,44 @@ async def express_figure(
             _log(f"algorithm-trace route errored: "
                  f"{type(exc).__name__}: {exc}")
 
+    # ── Deterministic process / cycle route ───────────────────────
+    # "<X> cycle" / "scientific method" — extract the ordered stages
+    # and render a deterministic ring (cyclic) or vertical flow
+    # (linear).  Runs before the sequential route so a process prompt
+    # never gets stacked as LLM-drawn sub-figures.
+    if (api_key and allow_sequential
+            and os.environ.get("SEVIM_PROCESS_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.process_route import (
+                generate_process_svg, is_process_prompt,
+            )
+            if is_process_prompt(user_prompt):
+                proc = await generate_process_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url, model=model)
+                if proc is not None:
+                    pr_svg, pr_narr = proc
+                    _log(f"process route fast-path: svg={len(pr_svg)} "
+                         f"chars narration={len(pr_narr)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(pr_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": pr_svg,
+                        "narration": pr_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "process",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"process route errored: "
+                 f"{type(exc).__name__}: {exc}")
+
     # ── Multi-panel route ─────────────────────────────────────────
     # For "compare X and Y side by side" / cross-referenced-panel
     # prompts, decompose into sub-figures and composite them into a
