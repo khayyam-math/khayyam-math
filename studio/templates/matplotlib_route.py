@@ -135,13 +135,35 @@ def _surface_form(name: str, params: dict, X, Y):
             return d
 
     name = (name or "").lower()
+    if name == "expr":
+        # Evaluate an explicit z = f(X, Y) numpy expression in a
+        # locked-down namespace (no builtins, no imports, no attribute
+        # access).  This lets the route render ANY surface the user
+        # names instead of snapping to one of five canned shapes.
+        expr = str(p.get("expr") or "").strip()
+        if expr and "__" not in expr and "import" not in expr:
+            ns = {
+                "X": X, "Y": Y, "x": X, "y": Y, "pi": np.pi, "e": np.e,
+                "sin": np.sin, "cos": np.cos, "tan": np.tan,
+                "exp": np.exp, "sqrt": np.sqrt, "log": np.log,
+                "abs": np.abs, "tanh": np.tanh, "sinh": np.sinh,
+                "cosh": np.cosh, "arctan": np.arctan,
+                "sign": np.sign, "maximum": np.maximum,
+                "minimum": np.minimum, "power": np.power,
+            }
+            try:
+                z = eval(expr, {"__builtins__": {}}, ns)  # noqa: S307
+                return np.asarray(z, dtype=float) + np.zeros_like(X)
+            except Exception:  # noqa: BLE001
+                pass
     if name == "paraboloid":
         return g("a", 1.0) * X ** 2 + g("b", 1.0) * Y ** 2
     if name == "saddle":
         return g("a", 1.0) * X ** 2 - g("b", 1.0) * Y ** 2
     if name in ("gaussian_bump", "gaussian", "bump"):
         s = g("s", 4.0) or 4.0
-        return -g("a", 1.0) * np.exp(-(X ** 2 + Y ** 2) / s)
+        # Bivariate Gaussian / bell — POSITIVE bump (peak up).
+        return g("a", 1.0) * np.exp(-(X ** 2 + Y ** 2) / s)
     if name == "ripple":
         r = np.sqrt(X ** 2 + Y ** 2)
         return g("a", 1.0) * np.sin(r)
@@ -190,9 +212,20 @@ Optional "boundary": {"label","note","p1":[x,y],"p2":[x,y]}.
 
 For "surface3d" / "contour" — "surface":
   {"form":"<sform>","params":{...},"xrange":[lo,hi],"yrange":[lo,hi]}
-where <sform> is one of: paraboloid, saddle, gaussian_bump, ripple,
-plane.  Optional "path": {"label","note","points":[[x,y],...]} (e.g.
-a gradient-descent trajectory — z is computed for you).  Optional
+where <sform> is one of: expr, paraboloid, saddle, gaussian_bump,
+ripple, plane.
+  * PREFER form "expr" whenever the prompt names or implies a concrete
+    formula z = f(x,y).  Put the formula in params, e.g.
+    {"form":"expr","params":{"expr":"sin(X)*cos(Y)"}}.  Write it as a
+    Python/numpy expression in the variables X and Y using sin, cos,
+    tan, exp, sqrt, log, abs, tanh, pi (e.g. a bivariate gaussian is
+    "exp(-(X**2+Y**2)/2)", a monkey saddle is "X**3-3*X*Y**2").
+  * Use paraboloid / saddle / gaussian_bump / ripple / plane only for
+    a generic unnamed landscape (e.g. a plain "loss surface").
+  * Pick an xrange/yrange that shows the interesting feature — for
+    trig surfaces use about [-3.14, 3.14], not [-10, 10].
+Optional "path": {"label","note","points":[[x,y],...]} (e.g. a
+gradient-descent trajectory — z is computed for you).  Optional
 "markers": list of {"label","note","x","y","color"}.
 
 Rules:

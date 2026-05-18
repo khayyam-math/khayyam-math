@@ -1440,6 +1440,46 @@ async def express_figure(
 
     _log(f"start prompt={user_prompt[:60]!r} model={model}")
 
+    # ── Deterministic algorithm-trace route ───────────────────────
+    # "Show <sorting / search / Gaussian elimination / determinant>
+    # step by step" — compute every intermediate state in Python and
+    # render it as a deterministic stack of grids.  Runs FIRST so a
+    # step-by-step algorithm prompt never reaches the sequential
+    # route (which used to let the LLM redraw — and mis-number —
+    # every step independently).
+    if (api_key and allow_sequential
+            and os.environ.get("SEVIM_ALGO_TRACE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.algorithm_trace import (
+                generate_algorithm_trace_svg, is_algorithm_trace_prompt,
+            )
+            if is_algorithm_trace_prompt(user_prompt):
+                trace = await generate_algorithm_trace_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url, model=model)
+                if trace is not None:
+                    tr_svg, tr_narr = trace
+                    _log(f"algorithm-trace fast-path: svg={len(tr_svg)} "
+                         f"chars narration={len(tr_narr)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(tr_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": tr_svg,
+                        "narration": tr_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "algorithm_trace",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"algorithm-trace route errored: "
+                 f"{type(exc).__name__}: {exc}")
+
     # ── Multi-panel route ─────────────────────────────────────────
     # For "compare X and Y side by side" / cross-referenced-panel
     # prompts, decompose into sub-figures and composite them into a
