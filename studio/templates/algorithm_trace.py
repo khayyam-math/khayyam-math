@@ -22,7 +22,7 @@ from fractions import Fraction
 from typing import Optional
 
 _ALWAYS = ("insertion sort", "bubble sort", "selection sort",
-           "binary search")
+           "binary search", "long division")
 _STEP_GATED = ("gaussian elimination", "row reduction", "row echelon",
                "determinant", "linear system", "system of equations",
                "solve the system")
@@ -44,17 +44,19 @@ You extract the input data for an algorithm-trace figure.  Return
 ONLY a JSON object:
 
   {"algo": "<insertion_sort|bubble_sort|selection_sort|binary_search|
-             gaussian_elimination|determinant>",
+             gaussian_elimination|determinant|long_division>",
    "array": [int, ...],
    "target": <int>,
    "matrix": [[num,...], ...],
-   "rhs": [num, ...]}
+   "rhs": [num, ...],
+   "dividend": <int>, "divisor": <int>}
 
 Rules:
   1. "algo" is the algorithm named in the prompt.
   2. sorts + binary_search use "array"; binary_search also needs
      "target".  gaussian_elimination + determinant use "matrix";
      gaussian_elimination also needs "rhs" (the right-hand side).
+     long_division uses "dividend" and "divisor".
   3. If the prompt gives explicit numbers, use them exactly.
      Otherwise invent small friendly textbook numbers:
        - array: 6 to 8 single/double-digit positive integers,
@@ -62,6 +64,8 @@ Rules:
        - target: for binary_search, a value that IS in the array.
        - matrix: a 3x3 integer matrix with a non-zero determinant.
        - rhs: 3 small integers.
+       - dividend: a 3-4 digit positive integer; divisor: a small
+         integer from 2 to 12.
   4. Include only the fields the chosen algo needs.
 
 Respond with ONLY the JSON object.
@@ -426,6 +430,116 @@ def _render(title: str, steps: list[dict]) -> tuple[str, list]:
     return "".join(out), narration
 
 
+def _render_long_division(dividend: int, divisor: int
+                          ) -> tuple[str, list]:
+    """Classic long-division 'house': quotient on top, the divisor and
+    dividend under the bracket, and the subtraction staircase below."""
+    D = str(int(dividend))
+    v = int(divisor)
+    L = len(D)
+    CW, LH = 46.0, 32.0
+    X0 = 210.0
+    cx = [X0 + j * CW + CW / 2 for j in range(L)]
+    body: list[str] = []
+
+    def put(x, y, ch, weight="normal", fill="#111", size=23):
+        body.append(
+            f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" '
+            f'text-anchor="middle" font-family="monospace" '
+            f'fill="{fill}" font-weight="{weight}">{_esc(ch)}</text>')
+
+    def put_num(s, end_col, y, **kw):
+        for k, ch in enumerate(reversed(str(s))):
+            j = end_col - k
+            if 0 <= j < L:
+                put(cx[j], y, ch, **kw)
+
+    # quotient digits
+    carry = 0
+    q = ["" for _ in range(L)]
+    start = None
+    for j in range(L):
+        cur = carry * 10 + int(D[j])
+        qd = cur // v
+        carry = cur - qd * v
+        if qd > 0 and start is None:
+            start = j
+        if start is not None:
+            q[j] = str(qd)
+    if start is None:
+        start = L - 1
+
+    quot_y, bar_y = 58.0, 70.0
+    div_y = bar_y + 32.0
+    for j in range(L):
+        if q[j]:
+            put(cx[j], quot_y, q[j], weight="bold", fill="#1a3a5c")
+    body.append(f'<line x1="{X0 - 8:.1f}" y1="{bar_y:.1f}" '
+                f'x2="{X0 + L * CW:.1f}" y2="{bar_y:.1f}" '
+                f'stroke="#333" stroke-width="2"/>')
+    body.append(f'<path d="M {X0 - 8:.1f} {bar_y:.1f} '
+                f'Q {X0 - 34:.1f} {(bar_y + div_y) / 2:.1f} '
+                f'{X0 - 8:.1f} {div_y + 9:.1f}" fill="none" '
+                f'stroke="#333" stroke-width="2"/>')
+    put(X0 - 52, div_y, str(v), weight="bold", fill="#1a3a5c")
+    for j in range(L):
+        put(cx[j], div_y, D[j])
+
+    carry = 0
+    cur_y = div_y
+    narration: list = [{
+        "speak": f"Long division of {D} by {v}, digit by digit.",
+        "highlight": ["title"]}]
+    for j in range(L):
+        cur = carry * 10 + int(D[j])
+        qd = cur // v
+        prod = qd * v
+        rem = cur - prod
+        if j >= start:
+            prod_y = cur_y + LH
+            put_num(prod, j, prod_y, fill="#b03030")
+            plen = len(str(prod))
+            sub_y = prod_y + 9
+            body.append(
+                f'<line x1="{cx[j - plen + 1] - CW / 2 + 5:.1f}" '
+                f'y1="{sub_y:.1f}" x2="{cx[j] + CW / 2 - 5:.1f}" '
+                f'y2="{sub_y:.1f}" stroke="#333" stroke-width="1.5"/>')
+            nxt_y = sub_y + LH
+            if j < L - 1:
+                put_num(rem * 10 + int(D[j + 1]), j + 1, nxt_y)
+            else:
+                put_num(rem, j, nxt_y, weight="bold", fill="#1a7a1a")
+            narration.append({
+                "speak": (f"{cur} divided by {v} is {qd}; "
+                          f"{qd} times {v} is {prod}, remainder {rem}."),
+                "highlight": []})
+            cur_y = nxt_y
+        carry = rem
+
+    quotient, remainder = divmod(int(D), v)
+    W = X0 + L * CW + 70.0
+    H = cur_y + 104.0
+    cap = (f"{D} divided by {v} equals {quotient}"
+           + (f" remainder {remainder}." if remainder else
+              " exactly."))
+    body.append(f'<text x="{W / 2:.1f}" y="{cur_y + 56:.1f}" '
+                f'font-size="16" text-anchor="middle" '
+                f'font-family="serif" fill="#333">{_esc(cap)}</text>')
+    narration.append({"speak": cap, "highlight": []})
+    out = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {W:.0f} {H:.0f}" width="{W:.0f}" '
+        f'height="{H:.0f}">',
+        f'<rect width="{W:.0f}" height="{H:.0f}" fill="white"/>',
+        f'<text id="title" x="{W / 2:.1f}" y="32" font-size="20" '
+        f'text-anchor="middle" font-family="serif" font-weight="bold" '
+        f'fill="#111">Long Division: {D} ÷ {v}</text>',
+    ]
+    out.extend(body)
+    out.append("</svg>")
+    return "".join(out), narration
+
+
 _TITLES = {
     "insertion_sort": "Insertion Sort",
     "bubble_sort": "Bubble Sort",
@@ -474,6 +588,12 @@ async def generate_algorithm_trace_svg(
             if n not in (2, 3) or any(len(r) != n for r in mat):
                 return None
             steps = _trace_determinant(mat)
+        elif algo == "long_division":
+            dividend = int(spec.get("dividend", 0))
+            divisor = int(spec.get("divisor", 0))
+            if divisor < 2 or not (1 <= dividend <= 10 ** 9):
+                return None
+            return _render_long_division(dividend, divisor)
         else:
             return None
     except (TypeError, ValueError, ZeroDivisionError, KeyError):
