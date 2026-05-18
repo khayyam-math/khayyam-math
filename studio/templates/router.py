@@ -72,6 +72,10 @@ Supported templates:
     (e.g. a=23, b=15).  Use this for any plain add/subtract concept
     prompt — a number line is the right minimal figure, far better
     than a box-and-arrow flowchart.
+    DO NOT use number_line when the prompt is about multi-digit
+    COLUMN addition, regrouping, carrying, or borrowing — a number
+    line cannot show place-value regrouping.  Return null for those
+    so they reach the general figure path.
 
   data_table — any TABULAR figure: a truth table, a Cayley/group
     table, a modular-arithmetic (multiplication/addition mod n)

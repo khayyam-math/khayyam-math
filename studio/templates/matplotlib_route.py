@@ -53,6 +53,14 @@ _MATPLOTLIB_KEYWORDS: tuple[str, ...] = (
     "radial basis function", "function plot", "plot of the function",
     "plot the function", "graph of y", "graph the function",
     "plot y =", "plot of y", "sine wave", "sigmoid curve",
+    # basic function graphing — primary/middle/high-school staple
+    "parabola", "graph the line", "graph the linear",
+    "graph the quadratic", "graph the equation", "graph the curve",
+    "plot the line", "plot the parabola", "plot the curve",
+    "plot the equation", "linear equation", "quadratic equation",
+    "cubic function", "find the slope", "slope between",
+    "plot the points", "plot two points", "y-intercept",
+    "graph y =", "graph the parabola",
     # 3-D / surfaces / optimisation landscapes
     "3d surface", "3-d surface", "surface plot", "surface z",
     "z = f(x", "saddle point", "paraboloid", "contour plot",
@@ -74,7 +82,8 @@ _MATPLOTLIB_KEYWORDS: tuple[str, ...] = (
     "spectral density", "power spectrum", "forecast",
     # dynamical systems / distributions / histograms
     "phase portrait", "phase plane", "vector field",
-    "direction field", "bifurcation diagram", "bifurcation plot",
+    "direction field", "slope field", "gradient field",
+    "bifurcation diagram", "bifurcation plot",
     "histogram", "box plot", "violin plot",
     "riemann sum", "riemann sums", "area under the curve",
 )
@@ -181,6 +190,29 @@ def _surface_form(name: str, params: dict, X, Y):
     return X ** 2 + Y ** 2
 
 
+def _safe_eval(expr, X, Y):
+    """Evaluate a numpy expression in X, Y inside a locked-down
+    namespace (no builtins / imports / attribute access).  Returns an
+    array broadcast to X's shape, or None on any failure."""
+    import numpy as np
+    expr = str(expr or "").strip()
+    if not expr or "__" in expr or "import" in expr:
+        return None
+    ns = {
+        "X": X, "Y": Y, "x": X, "y": Y, "pi": np.pi, "e": np.e,
+        "sin": np.sin, "cos": np.cos, "tan": np.tan, "exp": np.exp,
+        "sqrt": np.sqrt, "log": np.log, "abs": np.abs, "tanh": np.tanh,
+        "sinh": np.sinh, "cosh": np.cosh, "arctan": np.arctan,
+        "sign": np.sign, "maximum": np.maximum, "minimum": np.minimum,
+        "power": np.power,
+    }
+    try:
+        z = eval(expr, {"__builtins__": {}}, ns)  # noqa: S307
+        return np.asarray(z, dtype=float) + np.zeros_like(X)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # --------------------------------------------------------------------
 # LLM spec emission
 # --------------------------------------------------------------------
@@ -196,6 +228,8 @@ Choose one "kind":
   "scatter" — labelled point clouds, optionally a decision boundary.
   "surface3d" — a 3-D surface z = f(x,y).
   "contour" — a 2-D contour map of z = f(x,y).
+  "vectorfield" — a 2-D field of arrows: phase portraits, slope /
+    direction fields, vector fields, gradient fields.
 
 Common fields: "title", "xlabel", "ylabel" (and "zlabel" for 3-D),
 "intro" (one spoken sentence introducing the figure) and "takeaway"
@@ -239,6 +273,15 @@ ripple, plane.
 Optional "path": {"label","note","points":[[x,y],...]} (e.g. a
 gradient-descent trajectory — z is computed for you).  Optional
 "markers": list of {"label","note","x","y","color"}.
+
+For "vectorfield" — "field":
+  {"u":"<dx expr in X,Y>","v":"<dy expr in X,Y>","note":"...",
+   "xrange":[lo,hi],"yrange":[lo,hi]}
+  u and v are numpy expressions in X and Y giving the arrow
+  components.  For a slope field dy/dx = f(x,y) set u to "1" and v
+  to f.  For a phase portrait of an ODE system x'=f, y'=g set u=f,
+  v=g (e.g. u="X", v="-Y").  Optional "trajectories": list of
+  {"label","note","points":[[x,y],...]} solution curves to overlay.
 
 Rules:
   1. Give EVERY series / class / line / marker / path a short "note":
@@ -422,6 +465,45 @@ def render_plot_spec(spec: dict) -> Optional[tuple[str, list[dict]]]:
                 sc.set_gid(gid)
                 if mk.get("note"):
                     notes.append((gid, str(mk["note"])))
+
+        elif kind == "vectorfield":
+            fld = spec.get("field") or {}
+            xr = fld.get("xrange") or [-3, 3]
+            yr = fld.get("yrange") or [-3, 3]
+            try:
+                x0, x1 = float(xr[0]), float(xr[1])
+                y0, y1 = float(yr[0]), float(yr[1])
+            except (TypeError, ValueError, IndexError):
+                x0, x1, y0, y1 = -3, 3, -3, 3
+            gx = np.linspace(x0, x1, 19)
+            gy = np.linspace(y0, y1, 19)
+            X, Y = np.meshgrid(gx, gy)
+            U = _safe_eval(fld.get("u"), X, Y)
+            V = _safe_eval(fld.get("v"), X, Y)
+            if U is None or V is None:
+                return None
+            mag = np.hypot(U, V)
+            norm = np.where(mag == 0, 1.0, mag)
+            q = ax.quiver(X, Y, U / norm, V / norm, mag,
+                          cmap="viridis", pivot="mid", scale=32,
+                          width=0.004)
+            q.set_gid("field")
+            notes.append(("field", str(
+                fld.get("note")
+                or "Each arrow shows the direction of the field at "
+                   "that point.")))
+            for i, tr in enumerate(spec.get("trajectories") or []):
+                tx, ty = _pts(tr.get("points"))
+                if not tx:
+                    continue
+                gid = f"traj_{i}"
+                ln, = ax.plot(tx, ty, "-", color="#cc4125",
+                              linewidth=2.2)
+                ln.set_gid(gid)
+                if tr.get("note"):
+                    notes.append((gid, str(tr["note"])))
+            ax.set_xlim(x0, x1)
+            ax.set_ylim(y0, y1)
 
         elif kind == "scatter":
             for i, cls in enumerate(spec.get("classes") or []):
