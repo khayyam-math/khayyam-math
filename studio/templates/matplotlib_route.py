@@ -46,7 +46,8 @@ _MATPLOTLIB_KEYWORDS: tuple[str, ...] = (
     "classifier", "roc curve", "roc and",
     # curves / functions
     "logistic regression", "sigmoid", "activation function",
-    "relu", "tanh", "gaussian", "normal distribution", "bell curve",
+    "relu", "tanh", "gaussian distribution", "gaussian curve",
+    "gaussian density", "normal distribution", "bell curve",
     "bell-shaped", "bell shaped", "probability density",
     "exponential decay", "exponential growth", "decay curve",
     "radial basis function", "function plot", "plot of the function",
