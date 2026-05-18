@@ -63,6 +63,15 @@ PROMPTS: list[tuple[str, str]] = [
     ("3d", "show gradient descent on a 3D error surface"),
     ("3d", "show a saddle point on a 3D surface"),
     ("elementary", "explain addition of numbers"),
+    # Classes added once routing was widened (#1) — these used to fall
+    # to the weak LLM-SVG path; the benchmark must include them so the
+    # routing win is actually measured.
+    ("timeseries", "explain the autocorrelation function of a time series"),
+    ("timeseries", "decompose a time series into trend, seasonality and residual"),
+    ("graph", "draw a recursion tree for the merge sort recurrence"),
+    ("graph", "explain Dijkstra's algorithm on a 6-node weighted graph"),
+    ("curve", "show a Riemann sum converging to a definite integral"),
+    ("dense", "draw a phase portrait of a 2D linear dynamical system"),
 ]
 
 _LATEX = re.compile(
