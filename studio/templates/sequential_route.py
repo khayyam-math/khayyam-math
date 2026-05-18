@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from typing import Awaitable, Callable, Optional
 
-from studio.templates.panels_route import _embed, _namespace
+from studio.templates.panels_route import _embed, _namespace, _viewbox
 
 _SEQ_KEYWORDS: tuple[str, ...] = (
     "step by step", "step-by-step", "steps of", "step by step",
@@ -50,8 +50,14 @@ Rules:
      result of that step (e.g. the array after that pass, the matrix
      after that row operation, the equation after that rearrangement).
   3. Use concrete numbers; carry them consistently across steps.
+     Double-check every arithmetic result is correct.
   4. The "label" is a few words ("Pass 1", "Eliminate column 1",
      "Substitute back").
+  5. Each "prompt" MUST ask for a DRAWN figure — a labelled grid,
+     boxes, arrows, a plotted curve, a number line — never a bulleted
+     text list.  Begin every prompt with a concrete visual verb
+     ("Draw the array as labelled boxes …", "Draw the matrix as a
+     grid …").
 
 Respond with ONLY the JSON object.
 """
@@ -137,13 +143,20 @@ async def generate_sequential_svg(
     if len(frames) < 2:
         return None
 
-    cell_w, cell_h = 820.0, 420.0
+    cell_w = 820.0
     hdr_h = 34.0
     gap = 18.0
     top = 58.0
     margin = 24.0
+    # Size each cell to its sub-figure's own aspect ratio so a short
+    # figure does not sit in a tall box of dead whitespace.
+    cell_hs: list[float] = []
+    for _, ssvg, _ in frames:
+        vb_w, vb_h = _viewbox(ssvg)
+        ch = cell_w * (vb_h / vb_w) if vb_w > 0 else 360.0
+        cell_hs.append(min(560.0, max(160.0, ch)))
     W = cell_w + 2 * margin
-    H = top + len(frames) * (hdr_h + cell_h + gap) + margin
+    H = top + sum(hdr_h + ch + gap for ch in cell_hs) + margin
 
     title = str(spec.get("title") or "")
     out: list[str] = [
@@ -163,8 +176,9 @@ async def generate_sequential_svg(
         "speak": (f"Let's work through this step by step"
                   + (f": {title}." if title else ".")),
         "highlight": ["title"] if title else []}]
+    fy = top
     for i, (label, ssvg, snar) in enumerate(frames):
-        fy = top + i * (hdr_h + cell_h + gap)
+        cell_h = cell_hs[i]
         out.append(
             f'<rect x="{margin:.1f}" y="{fy:.1f}" width="{cell_w:.1f}" '
             f'height="{hdr_h}" fill="#eef2f8" stroke="#bbb" '
@@ -184,6 +198,7 @@ async def generate_sequential_svg(
             "highlight": [f"step_{i}"]})
         for ph in snar[:1]:
             narration.append(ph)
+        fy += hdr_h + cell_h + gap
     narration.append({
         "speak": "Those are all the steps, in order.",
         "highlight": [f"step_{len(frames)-1}"]})

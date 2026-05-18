@@ -4435,6 +4435,57 @@ def reflow_overlapping_text(svg: str) -> str:
     return out
 
 
+def _verify_arithmetic(svg: str, narration: list[dict[str, Any]]
+                       ) -> list[str]:
+    """Scan figure text + narration for fully-numeric arithmetic
+    claims ``a op b = c`` and flag any that are wrong.
+
+    Deliberately conservative — it only checks claims where BOTH
+    operands and the result are plain numbers, skips division (long
+    division / remainders look like wrong claims) and skips anything
+    near the word "mod" (modular arithmetic is correct-but-different).
+    This means it never false-positives on symbolic algebra; it only
+    catches the concrete "2 + 3 = 6" class of mistake the vision judge
+    keeps reporting.
+    """
+    import re
+
+    texts: list[str] = re.findall(r'<text\b[^>]*>([^<]*)</text>', svg or "")
+    for ph in narration or []:
+        if isinstance(ph, dict) and isinstance(ph.get("speak"), str):
+            texts.append(ph["speak"])
+    blob = " ; ".join(texts)
+    blob = (blob.replace("×", "*").replace("·", "*")
+                .replace("−", "-").replace("∗", "*"))
+
+    pat = re.compile(
+        r'(-?\d+(?:\.\d+)?)\s*([+\-*])\s*'
+        r'(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)')
+    bad: list[str] = []
+    for m in pat.finditer(blob):
+        lo, hi = max(0, m.start() - 24), m.end() + 24
+        if "mod" in blob[lo:hi].lower():
+            continue
+        try:
+            a, b, c = (float(m.group(1)), float(m.group(3)),
+                       float(m.group(4)))
+        except ValueError:
+            continue
+        op = m.group(2)
+        r = a + b if op == "+" else (a - b if op == "-" else a * b)
+        if abs(r - c) > 1e-6 * max(1.0, abs(r)):
+            bad.append(f"'{m.group(0).strip()}' (correct: {r:g})")
+    if not bad:
+        return []
+    return [
+        "arithmetic_error: the figure/narration states "
+        f"{len(bad)} incorrect numeric result(s): "
+        + "; ".join(bad[:6])
+        + ". Recompute and correct BOTH the figure text and the "
+        "narration so every stated number is true."
+    ]
+
+
 def _structural_review(svg: str, narration: list[dict[str, Any]],
                         user_prompt: str = "") -> list[str]:
     """Return a list of structural issues with the (svg, narration) pair.
@@ -4989,6 +5040,22 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
             sample = "; ".join(tt_overlaps[:6])
             more = (f" (and {len(tt_overlaps) - 6} more)"
                     if len(tt_overlaps) > 6 else "")
+            dense = ""
+            if len(tt_overlaps) >= 5:
+                # Many simultaneous collisions mean the figure is
+                # genuinely over-packed: re-stacking inside the same
+                # box cannot fix it.  Tell the model to enlarge the
+                # canvas and spread elements out.
+                dense = (
+                    "  This figure is OVER-PACKED — there are too many "
+                    "elements for the canvas.  Do NOT just nudge "
+                    "labels: ENLARGE the viewBox to at least "
+                    + str(int(vb_w * 1.6)) + "×"
+                    + str(int(vb_h * 1.6)) +
+                    ", give every element its own clear region, and "
+                    "increase spacing everywhere.  Prefer a clean grid "
+                    "or column layout over free placement."
+                )
             issues.append(
                 "text_text_overlap: " + str(len(tt_overlaps)) +
                 " pair(s) of <text> elements overlap in pixel space: "
@@ -5002,7 +5069,7 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
                 "), OR by removing a redundant duplicate.  Long "
                 "formulas must be BROKEN into multiple <text> rows "
                 "on stacked y values, not laid out side-by-side at "
-                "the same y."
+                "the same y." + dense
             )
 
     # 4z. Micro-figure check — when the viewBox is normal-sized (>= 400
@@ -5401,6 +5468,8 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
                 "thing on the figure; without it the learner sees a "
                 "page that does not match what the narration says."
             )
+
+    issues.extend(_verify_arithmetic(svg, narration))
 
     return issues
 

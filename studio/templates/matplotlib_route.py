@@ -60,6 +60,13 @@ _MATPLOTLIB_KEYWORDS: tuple[str, ...] = (
     "gradient descent", "loss landscape", "loss surface",
     "error surface", "optimization landscape",
     "optimisation landscape", "manifold",
+    "3d plot", "3-d plot", "plot in 3d", "plot in 3-d",
+    "three-dimensional", "three dimensional", "3d graph",
+    "wireframe", "mesh plot", "surface of", "in three dimensions",
+    "function of two variables", "two-variable function",
+    "elliptic paraboloid", "hyperbolic paraboloid", "monkey saddle",
+    "sombrero function", "ripple surface", "bivariate gaussian",
+    "bivariate normal",
     # time series
     "time series", "time-series", "autocorrelation",
     "auto-correlation", "periodogram", "arima", "moving average",

@@ -56,6 +56,10 @@ Rules:
      concept at different settings, a thing and its dual
      representation, before/after, etc.
   4. The overall "title" names what the comparison shows.
+  5. Each panel "prompt" MUST ask for a DRAWN figure — a plotted
+     curve, a labelled diagram, a grid, a graph — never a bulleted
+     text list.  Begin every prompt with a concrete visual verb
+     ("Plot …", "Draw …", "Diagram …").
 
 Respond with ONLY the JSON object.
 """
@@ -199,12 +203,24 @@ async def generate_panels_svg(
     n = len(cells)
     cols = n if n <= 3 else 2
     rows = (n + cols - 1) // cols
-    cell_w, cell_h = 540.0, 460.0
+    cell_w = 540.0
     ptitle_h = 30.0
     gap = 16.0
     top = 56.0
+    # Per-cell height from each sub-figure's aspect; each grid row
+    # takes the tallest cell in it so no panel is clipped or floats
+    # in dead whitespace.
+    cell_hs: list[float] = []
+    for _, psvg, _ in cells:
+        vb_w, vb_h = _viewbox(psvg)
+        ch = cell_w * (vb_h / vb_w) if vb_w > 0 else 460.0
+        cell_hs.append(min(560.0, max(240.0, ch)))
+    row_h = [max(cell_hs[r * cols:(r + 1) * cols] or [460.0])
+             for r in range(rows)]
+    row_y = [top + sum(row_h[k] + ptitle_h + gap for k in range(r))
+             for r in range(rows)]
     W = cols * cell_w + (cols + 1) * gap
-    H = top + rows * (cell_h + ptitle_h + gap) + gap
+    H = top + sum(rh + ptitle_h + gap for rh in row_h) + gap
 
     title = str(spec.get("title") or "")
     out: list[str] = [
@@ -227,7 +243,8 @@ async def generate_panels_svg(
     for i, (ptitle, psvg, pnar) in enumerate(cells):
         r, c = divmod(i, cols)
         px = gap + c * (cell_w + gap)
-        py = top + r * (cell_h + ptitle_h + gap)
+        py = row_y[r]
+        cell_h = row_h[r]
         out.append(
             f'<text id="ptitle_{i}" x="{px + cell_w/2:.1f}" '
             f'y="{py + 20:.1f}" font-size="16" text-anchor="middle" '
