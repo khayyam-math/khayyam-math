@@ -130,42 +130,53 @@ async def _generate_one(
     'as it appears in <citation>', without an image attached.
     """
     data_url: str | None = None
-    fname = _commons_filename(entry["image_url"])
-    image_url = entry["image_url"]
-    # Try the API to get a fresh URL — handles cases where the static
-    # thumb URL we hard-coded has rotated to a different MD5 path.
-    if fname:
-        resolved = await _resolve_commons_url(fname, client)
-        if resolved:
-            image_url = resolved
-    try:
-        img_resp = await client.get(
-            image_url, timeout=30.0,
-            follow_redirects=True, headers=_UA,
-        )
-        if img_resp.status_code == 200:
-            content_type = img_resp.headers.get("content-type", "image/png")
-            if "svg" in content_type:
-                try:
-                    import cairosvg
-                    png = cairosvg.svg2png(bytestring=img_resp.content,
-                                           output_width=900)
-                    content_type = "image/png"
-                except Exception as exc:  # noqa: BLE001
-                    print(f"  ! SVG→PNG: {exc}", flush=True)
-                    png = None
-            else:
-                png = img_resp.content
-            if png:
-                b64 = base64.b64encode(png).decode("ascii")
-                data_url = f"data:{content_type};base64,{b64}"
-        else:
-            print(f"  ! image fetch {img_resp.status_code} for "
-                  f"{entry['domain']:18}: {fname or image_url}",
+    # Two source types: a local file path (textbook figure crop) or
+    # a remote URL (Wikimedia Commons).  Locals come straight off
+    # disk; URLs go through the Commons API resolver.
+    local_path = entry.get("image_path")
+    if local_path:
+        try:
+            png = Path(local_path).read_bytes()
+            b64 = base64.b64encode(png).decode("ascii")
+            data_url = f"data:image/png;base64,{b64}"
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! local read {local_path}: {type(exc).__name__}: {exc}",
                   flush=True)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  ! image fetch error: {type(exc).__name__}: {exc}",
-              flush=True)
+    else:
+        fname = _commons_filename(entry["image_url"])
+        image_url = entry["image_url"]
+        if fname:
+            resolved = await _resolve_commons_url(fname, client)
+            if resolved:
+                image_url = resolved
+        try:
+            img_resp = await client.get(
+                image_url, timeout=30.0,
+                follow_redirects=True, headers=_UA,
+            )
+            if img_resp.status_code == 200:
+                content_type = img_resp.headers.get("content-type", "image/png")
+                if "svg" in content_type:
+                    try:
+                        import cairosvg
+                        png = cairosvg.svg2png(bytestring=img_resp.content,
+                                               output_width=900)
+                        content_type = "image/png"
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"  ! SVG→PNG: {exc}", flush=True)
+                        png = None
+                else:
+                    png = img_resp.content
+                if png:
+                    b64 = base64.b64encode(png).decode("ascii")
+                    data_url = f"data:{content_type};base64,{b64}"
+            else:
+                print(f"  ! image fetch {img_resp.status_code} for "
+                      f"{entry['domain']:18}: {fname or image_url}",
+                      flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ! image fetch error: {type(exc).__name__}: {exc}",
+                  flush=True)
 
     # Build the chat-completion payload.  When the image fetch
     # succeeded, attach it; otherwise fall through to text-only mode
@@ -212,6 +223,21 @@ async def _generate_one(
 def _build_row(entry: dict, result: dict) -> dict:
     """Pack a reference result into the same chat-format the synthetic
     generator uses, plus a meta.source field for traceability."""
+    meta = {
+        "mode": "reference",
+        "prompt": entry["prompt"],
+        "source": entry.get("citation", ""),
+        "domain": entry.get("domain", "math"),
+        "n_phrases": len(result.get("narration") or []),
+    }
+    if entry.get("image_url"):
+        meta["image_url"] = entry["image_url"]
+    if entry.get("image_path"):
+        meta["image_path"] = entry["image_path"]
+    if entry.get("source_book"):
+        meta["source_book"] = entry["source_book"]
+    if entry.get("source_page"):
+        meta["source_page"] = entry["source_page"]
     return {
         "messages": [
             {"role": "system", "content": _EXPRESS_SYSTEM},
@@ -222,14 +248,7 @@ def _build_row(entry: dict, result: dict) -> dict:
                 "title": result.get("title") or "",
             }, ensure_ascii=False)},
         ],
-        "meta": {
-            "mode": "reference",
-            "prompt": entry["prompt"],
-            "source": entry["citation"],
-            "domain": entry["domain"],
-            "image_url": entry["image_url"],
-            "n_phrases": len(result.get("narration") or []),
-        },
+        "meta": meta,
     }
 
 
@@ -238,6 +257,10 @@ async def main(argv=None) -> int:
     ap.add_argument("--model", default="gpt-4o-mini",
                     help="Vision-capable teacher (default gpt-4o-mini; "
                          "use gpt-4o for higher fidelity)")
+    ap.add_argument("--manifest", type=Path, default=None,
+                    help="Optional JSONL of textbook-extracted figures "
+                         "(rows with image_path, prompt, citation, domain). "
+                         "When set, replaces the in-tree REFERENCES list.")
     ap.add_argument("--base-url",
                     default=os.environ.get("SEVIM_VLLM_URL",
                                            "https://api.openai.com/v1"))
@@ -253,7 +276,20 @@ async def main(argv=None) -> int:
         print("ERROR: OPENAI_API_KEY not set", file=sys.stderr)
         return 1
 
-    from scripts.reference_figures import REFERENCES
+    if args.manifest:
+        # Load entries from a JSONL manifest (textbook extractor output).
+        entries = []
+        for line in args.manifest.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        print(f"  loaded {len(entries)} entries from {args.manifest}")
+    else:
+        from scripts.reference_figures import REFERENCES
+        entries = REFERENCES
 
     # Resume: skip prompts already present in --out.
     seen: set[str] = set()
@@ -267,14 +303,14 @@ async def main(argv=None) -> int:
                 continue
             seen.add((row.get("meta") or {}).get("prompt", ""))
 
-    pending = [r for r in REFERENCES if r["prompt"] not in seen]
+    pending = [r for r in entries if r["prompt"] not in seen]
     if args.limit:
         pending = pending[: args.limit]
 
     print(f"=== reference-grounded corpus generation ===")
     print(f"  model:          {args.model}")
     print(f"  output:         {args.out}")
-    print(f"  references:     {len(REFERENCES)}")
+    print(f"  references:     {len(entries)}")
     print(f"  already done:   {len(seen)}")
     print(f"  pending:        {len(pending)}")
 
