@@ -821,6 +821,9 @@ async def chat(
             session_id=session_id,
             user_agent=request.headers.get("user-agent"),
             ip_hash=ip_hash_value,
+            # The signed-in email — lets distinct people be counted.
+            # "anonymous" when auth is disabled.
+            user_email=user,
         )
 
     # 2. Content filter.
@@ -1449,14 +1452,31 @@ def admin_page(request: Request, _user: str = Depends(require_admin)):
 
 @router.get("/admin/stats")
 def admin_stats(_user: str = Depends(require_admin)) -> dict[str, Any]:
-    """Per-model usage roll-ups for the operator dashboard."""
+    """Per-model usage roll-ups + audience size for the operator dashboard."""
     from sevim.telemetry import get_telemetry
     tel = get_telemetry()
     if tel is None:
         return {"available": False, "reason": "telemetry disabled"}
+    # Distinct people: count distinct signed-in emails.  ip_hash and
+    # raw session counts are kept as secondary, coarser proxies.
+    people: dict[str, Any] = {}
+    try:
+        row = tel.query(
+            "SELECT COUNT(DISTINCT user_email), COUNT(DISTINCT ip_hash), "
+            "COUNT(*) FROM sessions"
+        )
+        if row:
+            people = {
+                "distinct_users": row[0][0] or 0,
+                "distinct_ips": row[0][1] or 0,
+                "sessions": row[0][2] or 0,
+            }
+    except Exception:  # noqa: BLE001
+        people = {"error": "unavailable"}
     return {
         "available": True,
         "active_model": get_active_model(),
+        "people": people,
         "windows": {
             "24h":  tel.usage_by_model(since_s=86_400),
             "7d":   tel.usage_by_model(since_s=7 * 86_400),

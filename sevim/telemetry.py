@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen_at REAL NOT NULL,
     user_agent   TEXT,
     ip_hash      TEXT,
+    user_email   TEXT,
     request_count INTEGER NOT NULL DEFAULT 0,
     cost_usd_estimate REAL NOT NULL DEFAULT 0.0,
     note TEXT
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen_at DOUBLE PRECISION NOT NULL,
     user_agent   TEXT,
     ip_hash      TEXT,
+    user_email   TEXT,
     request_count INTEGER NOT NULL DEFAULT 0,
     cost_usd_estimate DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     note TEXT
@@ -180,6 +182,9 @@ CREATE TABLE IF NOT EXISTS settings (
 ALTER TABLE turns    ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
 ALTER TABLE canvases ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
 ALTER TABLE repairs  ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
+-- user_email: the signed-in user's address, so distinct people can
+-- be counted (sessions/ip_hash alone are not a person).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_email TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
@@ -363,20 +368,22 @@ class Telemetry:
         user_agent: str | None = None,
         ip_hash: str | None = None,
         note: str | None = None,
+        user_email: str | None = None,
     ) -> None:
         now = time.time()
         # ON CONFLICT … DO UPDATE — supported by SQLite ≥3.24 and Postgres.
         self._exec(
             """
             INSERT INTO sessions (session_id, created_at, last_seen_at,
-                                  user_agent, ip_hash, note)
-            VALUES (?, ?, ?, ?, ?, ?)
+                                  user_agent, ip_hash, note, user_email)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 last_seen_at = EXCLUDED.last_seen_at,
                 user_agent   = COALESCE(sessions.user_agent, EXCLUDED.user_agent),
-                ip_hash      = COALESCE(sessions.ip_hash,    EXCLUDED.ip_hash)
+                ip_hash      = COALESCE(sessions.ip_hash,    EXCLUDED.ip_hash),
+                user_email   = COALESCE(sessions.user_email, EXCLUDED.user_email)
             """,
-            (session_id, now, now, user_agent, ip_hash, note),
+            (session_id, now, now, user_agent, ip_hash, note, user_email),
         )
 
     def record_turn(
