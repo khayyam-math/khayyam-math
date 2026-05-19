@@ -125,4 +125,5 @@ sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3).s
 
 CMD ["uvicorn", "service.app:app", \
      "--host", "0.0.0.0", "--port", "8080", \
-     "--log-level", "info", "--access-log"]
+     "--log-level", "info", "--access-log", \
+     "--no-server-header"]
