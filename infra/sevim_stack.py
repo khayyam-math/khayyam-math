@@ -210,7 +210,11 @@ class SevimStack(Stack):
             "SEVIM_CONTACT_TO": "gradersystem@gmail.com",
             "SEVIM_CONTENT_FILTER": "1",
             "SEVIM_TRUST_PROXY": "1",
-            "SEVIM_AUTH_REQUIRED": "1",
+            # Sign-in is OFF for now — the app is open to anyone.  The
+            # rate limiter + $10/day cost guard above are the only
+            # abuse protection while auth is disabled.  Flip back to
+            # "1" to require magic-link login again.
+            "SEVIM_AUTH_REQUIRED": "0",
             "SEVIM_VLLM_URL": "https://api.openai.com/v1",
             "SEVIM_VLLM_MODEL": "gpt-4o",
             # Deploy-time override of the admin's active-model choice.
