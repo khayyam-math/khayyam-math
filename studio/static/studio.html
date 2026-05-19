@@ -407,6 +407,12 @@
   }
   #fix-btn:hover { background: #fff; border-color: #b3306a; }
   body:not(.has-canvas) #fix-btn { display: none; }
+  /* Hide while the "Preparing your visualization…" overlay is up — a
+     report-problem button next to a loading spinner reads as an alarm
+     ("something went wrong!") rather than as the user-action it is.
+     The overlay is `#canvas-loading`; fix-btn is its DOM sibling, so
+     the general-sibling combinator picks it up. */
+  #canvas-loading:not([hidden]) ~ #fix-btn { display: none !important; }
 </style>
 </head>
 <body>
@@ -476,8 +482,8 @@
       <div class="cl-sub">This usually takes a few seconds.</div>
     </div>
     <button id="fix-btn" type="button"
-            title="Report a problem with this figure and have it fixed">
-      ⚠ Something's wrong</button>
+            title="Tell me what to change — I'll redraw it">
+      Not quite right?</button>
   </main>
 </div>
 <script>
