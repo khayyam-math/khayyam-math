@@ -253,12 +253,104 @@ EXPRESS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "Short title for the figure (3-6 words).",
         },
+        "problem_statement": {
+            "type": "string",
+            "description": (
+                "Brief restatement, in math terms, of what is being "
+                "shown — e.g. \"compute f'(x) where f(x)=x^3\".  Empty "
+                "string ONLY if the request has no specific math "
+                "problem (e.g. \"show me a labelled triangle\")."
+            ),
+        },
+        "solution": {
+            "type": "string",
+            "description": (
+                "Worked-out solution to the problem (1-4 sentences).  "
+                "The figure must DEPICT this solution — they cannot "
+                "disagree.  Solve before drawing.  Empty string only "
+                "for non-problem figures."
+            ),
+        },
+        "math_claims": {
+            "type": "array",
+            "description": (
+                "Symbolically verifiable claims the figure depends on.  "
+                "A CAS (SymPy) checks every claim before the figure is "
+                "allowed to ship.  Empty array is acceptable when no "
+                "symbolic claim is involved — but if your figure "
+                "asserts a derivative, an integral, an identity, a "
+                "Hessian, a sum, an equality, LIST IT here.  Wrong "
+                "claims block the figure."
+            ),
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {
+                        "type": "string", "enum": ["identity", "value"],
+                        "description": (
+                            "\"identity\": a == b as algebraic objects "
+                            "(SymPy simplify(a-b)==0).  \"value\": a "
+                            "evaluates to the numeric value b."
+                        ),
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "Short human-readable claim, used in "
+                            "error feedback if verification fails."
+                        ),
+                    },
+                    "a": {
+                        "type": "string",
+                        "description": (
+                            "Left side, Python/SymPy syntax.  You may "
+                            "use diff(expr, var, order), "
+                            "integrate(expr, var), hessian(expr, "
+                            "(x,y)), Matrix([[...]]), sin/cos/exp/log/"
+                            "sqrt, pi.  e.g. diff(x**3, x) — never "
+                            "compute the result yourself."
+                        ),
+                    },
+                    "b": {
+                        "type": "string",
+                        "description": (
+                            "Right side, same syntax.  e.g. \"3*x**2\"."
+                        ),
+                    },
+                },
+                "required": ["kind", "description", "a", "b"],
+            },
+        },
     },
-    "required": ["svg", "narration", "title"],
+    "required": ["svg", "narration", "title", "problem_statement",
+                 "solution", "math_claims"],
 }
 
 
 _EXPRESS_SYSTEM = (
+    "MATH CORRECTNESS IS NON-NEGOTIABLE.  Before any figure, you must "
+    "(1) state the problem in `problem_statement`, (2) work out the "
+    "answer in `solution`, and (3) list every symbolically verifiable "
+    "fact the figure depends on as a `math_claims` entry.  A CAS "
+    "(SymPy) checks every claim before the figure ships; any false "
+    "claim BLOCKS the figure and you will be asked to fix it.  A "
+    "figure that displays a false claim — a wrong derivative, an "
+    "incorrect identity, a tangle of arrows mislabelled as a "
+    "homomorphism — is WORSE than no figure, because it teaches "
+    "something false.  If you cannot be sure the math is right, say "
+    "so in `solution` and emit only what you can verify.  Solve, "
+    "THEN draw.\n"
+    "\n"
+    "Claims must be CONCRETE and UNCONDITIONAL identities or values, "
+    "not theorems-with-context.  Bad: a='exterior_angle', "
+    "b='alpha+beta' (the verifier doesn't know your triangle).  Good: "
+    "instantiate it — a='pi - pi/2', b='pi/4 + pi/4' for a specific "
+    "case the figure draws.  When the figure makes a general claim, "
+    "either (a) instantiate one or two concrete examples and verify "
+    "those, or (b) leave math_claims empty and rely on the solution "
+    "field for the general statement.\n"
+    "\n"
     "You are a math TEACHER illustrating a concept.  The figure must "
     "TEACH the operation, not merely label it.  A reader who has never "
     "seen this concept should be able to learn it from the figure + "
@@ -2171,6 +2263,31 @@ async def express_figure(
                     f"{type(cb_exc).__name__}: {cb_exc}"
                 )
 
+        # 2a-pre. Math-correctness verifier (Tier 2 — symbolic, exact).
+        # The LLM declared verifiable claims alongside the figure; we
+        # check every one with SymPy BEFORE anything else.  A wrong
+        # derivative / identity / Hessian / value blocks the figure;
+        # the verifier's reasons become the retry critique so the
+        # LLM knows exactly what to fix.
+        math_review_lines: list[str] = []
+        try:
+            from studio.templates.math_verifier import (
+                verify_claims, failures_critique,
+            )
+            _math_results = verify_claims(result.get("math_claims") or [])
+            _math_critique = failures_critique(_math_results)
+            if _math_critique:
+                math_review_lines.append(_math_critique)
+                _log(f"math-correctness verifier: "
+                     f"{sum(1 for r in _math_results if not r.get('ok',True))}"
+                     f" of {len(_math_results)} claim(s) FAILED")
+            elif _math_results:
+                _log(f"math-correctness verifier: all "
+                     f"{len(_math_results)} claim(s) verified")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"math-correctness verifier errored "
+                 f"(skipping): {type(exc).__name__}: {exc}")
+
         # 2a. Cheap deterministic structural review BEFORE the vision
         # call.  Catches failures the vision LLM can't reliably detect
         # from a rendered PNG alone — most importantly, narration
@@ -2181,6 +2298,11 @@ async def express_figure(
             result.get("svg", ""), result.get("narration") or [],
             user_prompt=user_prompt,
         )
+        # Math-claim failures are stop-the-line: prepend them to the
+        # structural-issues list so the existing retry path picks them
+        # up as critique input.
+        if math_review_lines:
+            structural_issues = math_review_lines + list(structural_issues)
         if structural_issues:
             # Log the actual issues (truncated) so a slow-retry session
             # can be diagnosed from CloudWatch without code changes.
