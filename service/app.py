@@ -43,7 +43,7 @@ _bootstrap_secrets()
 
 from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
-    FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+    FileResponse, HTMLResponse, RedirectResponse, Response,
 )
 from sse_starlette.sse import EventSourceResponse  # noqa: E402
 
@@ -78,8 +78,16 @@ app = FastAPI(
 
 
 # ---------------------------------------------------------------------------
-# Security middleware: response hardening headers + a catch-all that keeps
-# unhandled exceptions (stack traces, internal paths) off the wire.
+# Security headers — added by a PURE ASGI middleware.
+#
+# This must NOT use Starlette's BaseHTTPMiddleware (the @app.middleware("http")
+# decorator): BaseHTTPMiddleware buffers the entire response body before
+# passing it on, which breaks streaming responses — the figure-generation
+# Server-Sent Events stream and the /canvas/*/events stream would be held
+# back until the whole 1-2 minute generation finished, so the load balancer
+# saw no bytes and returned 504.  A pure ASGI middleware only rewrites the
+# `http.response.start` message and lets every body chunk pass straight
+# through, so streaming is untouched.
 # ---------------------------------------------------------------------------
 
 _CSP = (
@@ -94,29 +102,43 @@ _CSP = (
     "object-src 'none'"
 )
 
+_SECURITY_HEADERS = [
+    (b"content-security-policy", _CSP.encode()),
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"SAMEORIGIN"),
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+    (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
+    (b"permissions-policy", b"geolocation=(), microphone=(self), camera=()"),
+    (b"server", b"Khayyam Math"),
+]
+_MANAGED_HEADER_NAMES = {name for name, _ in _SECURITY_HEADERS}
 
-@app.middleware("http")
-async def _security_headers(request: Request, call_next):
-    try:
-        response = await call_next(request)
-    except Exception:  # noqa: BLE001
-        # Never surface a stack trace or internal path to the client.
-        import sys
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        response = JSONResponse(
-            {"detail": "Internal server error"}, status_code=500)
-    response.headers["Content-Security-Policy"] = _CSP
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains")
-    response.headers["Permissions-Policy"] = (
-        "geolocation=(), microphone=(self), camera=()")
-    # Don't advertise the server software / framework / version.
-    response.headers["Server"] = "Khayyam Math"
-    return response
+
+class _SecurityHeadersMiddleware:
+    """Append hardening headers without buffering the response body."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (k, v) for (k, v) in message.get("headers", [])
+                    if k.lower() not in _MANAGED_HEADER_NAMES
+                ]
+                headers.extend(_SECURITY_HEADERS)
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app.add_middleware(_SecurityHeadersMiddleware)
 
 
 if _STUDIO_AVAILABLE:
