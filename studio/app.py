@@ -1530,6 +1530,122 @@ def admin_set_active_model(
     return {"ok": True, "active_model": req.model_id, "updated_by": user}
 
 
+@router.get("/admin/problems", include_in_schema=False)
+def admin_problems(_user: str = Depends(require_admin)) -> dict[str, Any]:
+    """Recurring user-facing problems, mined from telemetry — so the
+    operator sees collective issues without users emailing them.
+
+    Three buckets over the last 30 days: turns the user explicitly
+    flagged ("Something's wrong"), turns that errored, and turns that
+    needed multiple repair retries.
+    """
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"available": False, "reason": "telemetry disabled"}
+    import time as _t
+    since = _t.time() - 30 * 86400.0
+
+    def _q(sql: str) -> list:
+        try:
+            return tel.query(sql)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _rows(rows, keys):
+        out = []
+        for r in rows:
+            d = dict(zip(keys, r))
+            if "prompt" in d and d["prompt"]:
+                d["prompt"] = str(d["prompt"])[:240]
+            if "error" in d and d["error"]:
+                d["error"] = str(d["error"])[:200]
+            out.append(d)
+        return out
+
+    flagged = _q(
+        "SELECT user_prompt, timestamp, canvas_id FROM turns "
+        f"WHERE intent = 'flagged' AND timestamp > {since} "
+        "ORDER BY timestamp DESC LIMIT 40")
+    errored = _q(
+        "SELECT user_prompt, error, timestamp FROM turns "
+        f"WHERE error IS NOT NULL AND error <> '' AND timestamp > {since} "
+        "ORDER BY timestamp DESC LIMIT 40")
+    high_retry = _q(
+        "SELECT user_prompt, retries_used, timestamp FROM turns "
+        f"WHERE retries_used >= 2 AND timestamp > {since} "
+        "ORDER BY timestamp DESC LIMIT 40")
+    return {
+        "available": True,
+        "window_days": 30,
+        "flagged": _rows(flagged, ("prompt", "ts", "canvas_id")),
+        "errored": _rows(errored, ("prompt", "error", "ts")),
+        "high_retry": _rows(high_retry, ("prompt", "retries", "ts")),
+    }
+
+
+@router.post("/admin/diagnose", include_in_schema=False)
+async def admin_diagnose(
+    _user: str = Depends(require_admin),
+) -> dict[str, Any]:
+    """Have the LLM read the recent problem reports and draft a
+    diagnosis + suggested fixes for the operator to review.
+
+    It proposes TEXT only — a written analysis.  It never changes
+    code or configuration; the operator decides what to act on.
+    """
+    payload = admin_problems(_user=_user)
+    if not payload.get("available"):
+        return {"available": False, "reason": "telemetry disabled"}
+    lines: list[str] = []
+    for p in payload.get("flagged", [])[:25]:
+        lines.append(f"[user-flagged] {p.get('prompt', '')}")
+    for p in payload.get("errored", [])[:25]:
+        lines.append(f"[errored: {p.get('error', '')}] {p.get('prompt', '')}")
+    for p in payload.get("high_retry", [])[:15]:
+        lines.append(f"[needed {p.get('retries', '?')} retries] "
+                     f"{p.get('prompt', '')}")
+    if not lines:
+        return {"available": True,
+                "diagnosis": "No problem reports in the last 30 days."}
+    sys_prompt = (
+        "You are the engineering lead of Khayyam Math, a math-figure "
+        "tutoring app (it turns prompts into SVG/3-D figures with voice "
+        "narration). Below are recent problem reports — figures users "
+        "flagged as wrong, turns that errored, and turns that needed "
+        "many repair retries. Group them into a few RECURRING patterns. "
+        "For each pattern give: (1) what is going wrong, (2) the likely "
+        "cause, (3) a concrete, specific suggested fix. Be brief and "
+        "practical. Plain text, use short headings. Do not invent "
+        "problems not supported by the reports.")
+    body = "\n".join(lines)[:6000]
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            headers = {"content-type": "application/json"}
+            api_key = os.environ.get("OPENAI_API_KEY")
+            url = _vllm_url()
+            if api_key and "openai.com" in url:
+                headers["Authorization"] = f"Bearer {api_key}"
+            r = await client.post(
+                f"{url.rstrip('/')}/chat/completions",
+                json={"model": _vllm_model(), "max_tokens": 1100,
+                      "temperature": 0.3,
+                      "messages": [
+                          {"role": "system", "content": sys_prompt},
+                          {"role": "user", "content": body}]},
+                headers=headers)
+        if r.status_code != 200:
+            return {"available": True,
+                    "diagnosis": "Could not generate a diagnosis right "
+                                 "now — the model service did not respond."}
+        text = r.json()["choices"][0]["message"]["content"] or ""
+    except Exception:  # noqa: BLE001
+        return {"available": True,
+                "diagnosis": "Could not generate a diagnosis right now."}
+    return {"available": True, "diagnosis": text,
+            "report_count": len(lines)}
+
+
 @router.get("/health", include_in_schema=False)
 def health() -> dict[str, Any]:
     """Coarse liveness for the Studio status pill.

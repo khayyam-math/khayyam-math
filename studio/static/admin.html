@@ -137,6 +137,17 @@
   </div>
 </div>
 
+<div class="card" style="margin-top: 16px;">
+  <h2>Problem patterns
+    <span style="color:var(--muted);font-size:0.6em;font-weight:400;">
+      last 30 days</span></h2>
+  <div id="problems-body" style="color:var(--muted);">Loading…</div>
+  <button id="diagnose-btn" class="btn" style="margin-top:14px;">
+    Draft a diagnosis</button>
+  <div id="diagnosis" style="margin-top:12px;white-space:pre-wrap;
+       line-height:1.45;"></div>
+</div>
+
 <div class="footer">
   Admin access is gated by <code>SEVIM_ADMIN_EMAILS</code>.
   This page returns 404 to non-admin sessions, so its URL is not enumerable.
@@ -283,6 +294,70 @@ document.getElementById('save-btn').addEventListener('click', async () => {
   }
 });
 
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderProblems(p) {
+  const el = document.getElementById('problems-body');
+  if (!p || !p.available) {
+    el.textContent = 'Telemetry is not available.';
+    return;
+  }
+  const bucket = (title, rows, fmtRow) => {
+    let h = '<div style="margin-bottom:14px;">'
+      + '<strong>' + title + '</strong> '
+      + '<span style="color:var(--muted);">(' + rows.length + ')</span>';
+    if (rows.length) {
+      h += '<ul style="margin:6px 0 0 0;padding-left:20px;">'
+        + rows.slice(0, 12).map(fmtRow).join('') + '</ul>';
+    }
+    return h + '</div>';
+  };
+  el.style.color = '';
+  el.innerHTML =
+    bucket('Flagged by users', p.flagged || [],
+           r => '<li>' + esc(r.prompt) + '</li>')
+    + bucket('Errored turns', p.errored || [],
+             r => '<li>' + esc(r.prompt)
+               + ' <span style="color:#b3306a;">— ' + esc(r.error)
+               + '</span></li>')
+    + bucket('Needed multiple retries', p.high_retry || [],
+             r => '<li>' + esc(r.prompt)
+               + ' <span style="color:var(--muted);">('
+               + esc(r.retries) + ' retries)</span></li>');
+}
+
+async function loadProblems() {
+  try {
+    const p = await fetch('/studio/admin/problems').then(r => r.json());
+    renderProblems(p);
+  } catch (e) {
+    document.getElementById('problems-body').textContent =
+      'Failed to load problem patterns.';
+  }
+}
+
+document.getElementById('diagnose-btn').addEventListener('click',
+  async () => {
+    const btn = document.getElementById('diagnose-btn');
+    const out = document.getElementById('diagnosis');
+    btn.disabled = true;
+    out.textContent = 'Analysing the recent problem reports…';
+    try {
+      const j = await fetch('/studio/admin/diagnose',
+        {method: 'POST'}).then(r => r.json());
+      out.textContent = (j && j.diagnosis)
+        ? j.diagnosis : 'No diagnosis available.';
+    } catch (e) {
+      out.textContent = 'Diagnosis failed: ' + e;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+loadProblems();
 loadAll();
 // Auto-refresh stats every 30 seconds so the table stays warm.
 setInterval(async () => {
