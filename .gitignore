@@ -67,3 +67,8 @@ distill/
 # 990 MB combined; kept on the 5090 + S3, not in git.
 data/neural_layout/
 runs/
+
+# UAE IP-registration package — legal/business filing documents, not
+# app code.  Kept out of the (soon-public) code repo: it carries the
+# filing's contents and git history would make it permanent.
+uae_ip_registration/
