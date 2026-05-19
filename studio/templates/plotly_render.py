@@ -35,25 +35,29 @@ def _esc(s: str) -> str:
             .replace(">", "&gt;"))
 
 
-def _png_to_svg(png: bytes, w: int, h: int, title: str) -> str:
-    """Wrap a rendered PNG in an SVG, with an optional title bar."""
+def _png_to_svg(png: bytes, w: int, h: int,
+                plotly_json: Optional[str] = None) -> str:
+    """Wrap a rendered PNG in an SVG.
+
+    When ``plotly_json`` is given, the Plotly figure spec is embedded
+    (base64) in an SVG ``<metadata>`` element.  The canvas viewer
+    detects it and upgrades the static image to a live, interactive
+    Plotly widget (pan / zoom / rotate).  If the viewer can't (no
+    Plotly.js, parse error), the PNG stays — graceful fallback."""
     b64 = base64.b64encode(png).decode("ascii")
-    th = 56 if title else 0
-    total_h = h + th
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'xmlns:xlink="http://www.w3.org/1999/xlink" '
-        f'viewBox="0 0 {w} {total_h}" width="{w}" height="{total_h}">',
-        f'<rect width="{w}" height="{total_h}" fill="#ffffff"/>',
+        f'viewBox="0 0 {w} {h}" width="{w}" height="{h}">',
+        f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
+        f'<image x="0" y="0" width="{w}" height="{h}" '
+        f'xlink:href="data:image/png;base64,{b64}"/>',
     ]
-    if title:
+    if plotly_json:
+        spec_b64 = base64.b64encode(
+            plotly_json.encode("utf-8")).decode("ascii")
         parts.append(
-            f'<text x="{w / 2:.0f}" y="36" font-size="25" '
-            f'text-anchor="middle" font-family="Georgia, serif" '
-            f'font-weight="bold" fill="#1a3a5c">{_esc(title)}</text>')
-    parts.append(
-        f'<image x="0" y="{th}" width="{w}" height="{h}" '
-        f'xlink:href="data:image/png;base64,{b64}"/>')
+            f'<metadata id="plotly-spec">{spec_b64}</metadata>')
     parts.append('</svg>')
     return "".join(parts)
 
@@ -225,15 +229,21 @@ def render_plotly(spec: dict) -> Optional[tuple[str, list[dict]]]:
 
         fig.update_layout(
             width=_W, height=_H, showlegend=(kind == "plot2d"),
-            margin=dict(l=62, r=24, t=24, b=58),
+            margin=dict(l=62, r=24, t=58, b=58),
             paper_bgcolor="white", plot_bgcolor="white",
             font=dict(family="Georgia, serif", size=15, color="#222"),
             legend=dict(bgcolor="rgba(255,255,255,0.7)"))
+        if title:
+            fig.update_layout(title=dict(
+                text=title, x=0.5, xanchor="center",
+                font=dict(size=21, color="#1a3a5c")))
 
         png = fig.to_image(format="png", width=_W, height=_H, scale=2)
+        # Figure spec for the canvas viewer's interactive upgrade.
+        fig_json = fig.to_json()
     except Exception:  # noqa: BLE001
         return None
 
     if not png:
         return None
-    return _png_to_svg(png, _W, _H, title), _narration(spec, notes)
+    return _png_to_svg(png, _W, _H, fig_json), _narration(spec, notes)

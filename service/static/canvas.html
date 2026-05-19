@@ -693,10 +693,71 @@
     });
   }
 
+  // ── Interactive figure upgrade ───────────────────────────────────
+  // A Plotly figure arrives as a static PNG-in-SVG with the figure
+  // spec embedded (base64) in <metadata id="plotly-spec">.  When one
+  // is present we lazy-load Plotly.js and swap the static image for a
+  // live, interactive widget (pan / zoom / rotate).  The original SVG
+  // stays in the DOM but hidden, so the chat snapshot still works and
+  // any failure (Plotly fails to load, bad JSON) leaves the static
+  // figure exactly as it was — a pure, graceful enhancement.
+  let _plotlyLoading = null;
+  function _loadPlotly() {
+    if (window.Plotly) return Promise.resolve();
+    if (_plotlyLoading) return _plotlyLoading;
+    _plotlyLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/'
+            + 'plotly.min.js';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('plotly.js failed to load'));
+      document.head.appendChild(s);
+    });
+    return _plotlyLoading;
+  }
+  function maybeUpgradePlot() {
+    const meta = stage.querySelector('#plotly-spec');
+    if (!meta) return;
+    let fig;
+    try {
+      const b64 = (meta.textContent || '').trim();
+      const json = new TextDecoder().decode(
+        Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+      fig = JSON.parse(json);
+    } catch (e) {
+      console.warn('[viewer] plotly spec parse failed', e);
+      return;  // keep the static figure
+    }
+    _loadPlotly().then(() => {
+      if (!window.Plotly) return;
+      const svgEl = stage.querySelector('svg');
+      if (svgEl) svgEl.style.display = 'none';   // keep for snapshot
+      let host = stage.querySelector('#plotly-host');
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'plotly-host';
+        host.style.cssText =
+          'width:100%;max-width:920px;height:560px;margin:0 auto;';
+        stage.appendChild(host);
+      }
+      const layout = Object.assign({}, fig.layout || {});
+      delete layout.width;
+      delete layout.height;
+      layout.autosize = true;
+      window.Plotly.newPlot(host, fig.data || [], layout, {
+        responsive: true, displaylogo: false,
+        modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+      });
+    }).catch((e) => {
+      console.warn('[viewer] interactive upgrade skipped:', e.message);
+    });
+  }
+
   function applyState(state) {
     if (state.svg) {
       stage.innerHTML = state.svg;
       fitSvgToContent(stage.querySelector('svg'));
+      maybeUpgradePlot();
       stage.classList.remove('pulse');
       void stage.offsetWidth;
       stage.classList.add('pulse');
