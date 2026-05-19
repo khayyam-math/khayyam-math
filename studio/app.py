@@ -880,10 +880,10 @@ async def chat(
     # which raised asyncio.CancelledError in _execute_tool, which
     # surfaced as `{"error": ""}` in the tool_result.  Keeping the
     # socket warm prevents the cancellation entirely.
-    return EventSourceResponse(_stream_vllm_chat(req), ping=15)
+    return EventSourceResponse(_stream_vllm_chat(req, user), ping=15)
 
 
-async def _stream_vllm_chat(req: ChatReq):
+async def _stream_vllm_chat(req: ChatReq, user: str):
     """Stream the tool-calling loop against a local vLLM server.
 
     Mirrors the SSE event vocabulary the Anthropic streamer emits
