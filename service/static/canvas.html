@@ -51,7 +51,11 @@
     background: var(--bg);
   }
   header .title { font-weight: 600; }
-  header .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* Developer/debug fields — canvas id, revision, node/edge counts,
+     clock.  Useful while building, but they're internal detail (the
+     id especially) and clutter the header for a real user.  Hidden
+     on every viewport. */
+  header .meta { display: none; }
   header .dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     background: #ccc; transition: background 200ms;
