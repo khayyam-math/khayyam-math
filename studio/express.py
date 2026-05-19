@@ -1658,6 +1658,43 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"graphviz route errored: {type(exc).__name__}: {exc}")
 
+    # Symbolic-math route: derivatives, Hessians, gradients, integrals,
+    # limits.  The LLM only extracts the function + operation; SymPy
+    # computes the result EXACTLY and matplotlib typesets it.  Runs
+    # before the matplotlib/LLM-SVG paths so a "find the Hessian"
+    # prompt is never hand-drawn (which produced garbled, wrong math).
+    # Disabled via SEVIM_SYMBOLIC_ROUTE=off.
+    if (api_key
+            and os.environ.get("SEVIM_SYMBOLIC_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.symbolic_route import (
+                generate_symbolic_svg, is_symbolic_prompt,
+            )
+            if is_symbolic_prompt(user_prompt):
+                sym_result = await generate_symbolic_svg(
+                    user_prompt, api_key=api_key or "", base_url=base_url)
+                if sym_result is not None:
+                    sym_svg, sym_narration = sym_result
+                    _log(f"symbolic fast-path: svg={len(sym_svg)} chars "
+                         f"narration={len(sym_narration)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(sym_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": sym_svg,
+                        "narration": sym_narration,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "symbolic",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"symbolic route errored: {type(exc).__name__}: {exc}")
+
     # Matplotlib fast-path: for plot-shaped prompts (regression, SVM /
     # decision boundaries, function curves, 3-D surfaces, contour
     # plots) the LLM emits a structured plot spec and matplotlib
