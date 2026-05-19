@@ -22,6 +22,9 @@ _KEYWORDS = (
     "partial derivative", "partial derivatives", "gradient",
     "hessian", "jacobian", "integral", "integrate", "antiderivative",
     "limit of", "evaluate the limit",
+    "critical point", "critical points", "extrema",
+    "local maximum", "local minimum", "saddle point",
+    "maxima and minima",
 )
 
 
@@ -36,7 +39,8 @@ just identify the function and the operation.
 
 Return ONLY a JSON object:
 {
-  "operation": "derivative" | "gradient" | "hessian" | "integral" | "limit",
+  "operation": "derivative" | "gradient" | "hessian" | "integral"
+              | "limit" | "critical_points",
   "function": "<the function as a Python/SymPy expression>",
   "variables": ["x"] or ["x","y"] ... (all variables, in order),
   "order": 1,            // derivative order (1, 2, ...); omit otherwise
@@ -51,6 +55,10 @@ Return ONLY a JSON object:
 Rules:
 - Write the function in Python syntax: x**2, sin(x), exp(x), sqrt(x),
   log(x), pi.  Never use ^ for powers.
+- "find / classify critical points", "find the extrema / maxima /
+  minima / saddle points", "where is f maximised" -> operation
+  "critical_points" (this SOLVES the system and classifies — do not
+  use "gradient" for these).
 - "second derivative" / "all second derivatives" of a 2-variable
   function -> operation "hessian".
 - "gradient" or "all first partial derivatives" -> "gradient".
@@ -98,6 +106,89 @@ async def llm_emit_symbolic_spec(
 # --------------------------------------------------------------------
 # SymPy computation — exact, by construction
 # --------------------------------------------------------------------
+
+def _fmt_num(v) -> str:
+    """Format a numeric value: integer when it is one, else ~4 dp."""
+    try:
+        f = float(v)
+    except Exception:  # noqa: BLE001
+        return str(v)
+    if abs(f - round(f)) < 1e-9:
+        return str(int(round(f)))
+    return f"{f:.4f}"
+
+
+def _solve_critical(grad, vs, sp):
+    """Real solutions of grad == 0.  Symbolic solve first, then a
+    numeric grid search so transcendental systems are still solved."""
+    found: list[dict] = []
+
+    def _add(raw: dict) -> None:
+        try:
+            comps = [complex(raw[v]) for v in vs]
+        except Exception:  # noqa: BLE001
+            return
+        if any(abs(c.imag) > 1e-6 for c in comps):
+            return
+        real = {vs[i]: sp.Float(comps[i].real) for i in range(len(vs))}
+        for q in found:
+            if all(abs(float(real[v] - q[v])) < 1e-4 for v in vs):
+                return
+        found.append(real)
+
+    try:
+        for s in sp.solve(grad, vs, dict=True):
+            if all(v in s for v in vs):
+                _add({v: s[v] for v in vs})
+    except Exception:  # noqa: BLE001
+        pass
+    import itertools
+    grid = (-3.0, -1.5, -0.7, -0.2, 0.0, 0.2, 0.7, 1.5, 3.0)
+    for start in itertools.product(grid, repeat=len(vs)):
+        try:
+            root = sp.nsolve(grad, vs, start, prec=14)
+        except Exception:  # noqa: BLE001
+            continue
+        try:
+            _add({vs[i]: root[i] for i in range(len(vs))})
+        except Exception:  # noqa: BLE001
+            continue
+    return found
+
+
+def _classify(Hp, n: int, sp) -> tuple[str, str]:
+    """Second-derivative test.  Returns (classification, reasoning)."""
+    try:
+        if n == 1:
+            v = float(Hp[0, 0])
+            if v > 1e-9:
+                return "local minimum", f"f'' = {_fmt_num(v)} > 0"
+            if v < -1e-9:
+                return "local maximum", f"f'' = {_fmt_num(v)} < 0"
+            return "inconclusive", "f'' = 0"
+        if n == 2:
+            D = float(Hp.det())
+            fxx = float(Hp[0, 0])
+            if D < -1e-9:
+                return "saddle point", f"D = {_fmt_num(D)} < 0"
+            if D > 1e-9:
+                if fxx > 0:
+                    return ("local minimum",
+                            f"D = {_fmt_num(D)} > 0,  f_xx > 0")
+                return ("local maximum",
+                        f"D = {_fmt_num(D)} > 0,  f_xx < 0")
+            return "inconclusive", "D = 0"
+        eigs = [complex(e).real for e in Hp.eigenvals()]
+        if all(e > 1e-9 for e in eigs):
+            return "local minimum", "all eigenvalues > 0"
+        if all(e < -1e-9 for e in eigs):
+            return "local maximum", "all eigenvalues < 0"
+        if any(e > 1e-9 for e in eigs) and any(e < -1e-9 for e in eigs):
+            return "saddle point", "eigenvalues of mixed sign"
+        return "inconclusive", "a zero eigenvalue"
+    except Exception:  # noqa: BLE001
+        return "inconclusive", ""
+
 
 def _compute(spec: dict) -> Optional[dict]:
     """Run the operation with SymPy.  Returns a structured result:
@@ -201,6 +292,29 @@ def _compute(spec: dict) -> Optional[dict]:
             out["steps"] = [
                 (f"\\lim_{{{wrt} \\to {L(to_v)}}} f", L(lim))]
             out["caption"] = "Limit."
+        elif op == "critical_points":
+            vs = [syms[v] for v in var_names]
+            grad = [sp.simplify(sp.diff(expr, v)) for v in vs]
+            H = sp.hessian(expr, vs)
+            out["kind"] = "critical"
+            out["system"] = [
+                (f"f_{{{var_names[i]}}}", L(grad[i]))
+                for i in range(len(vs))]
+            out["hessian"] = [[L(sp.simplify(H[i, j]))
+                               for j in range(len(vs))]
+                              for i in range(len(vs))]
+            pts = []
+            for pt in _solve_critical(grad, vs, sp):
+                Hp = H.subs({v: pt[v] for v in vs})
+                kind, reason = _classify(Hp, len(vs), sp)
+                coords = ",\\ ".join(_fmt_num(pt[v]) for v in vs)
+                pts.append({"coords": coords, "kind": kind,
+                            "reason": reason})
+            out["points"] = pts
+            out["caption"] = (
+                "Solve grad f = 0 for the critical points, then the "
+                "second-derivative test classifies each one."
+                if pts else "No real critical points were found.")
         else:  # derivative (default)
             wrt = syms.get(str(spec.get("wrt") or var_names[0]),
                            syms[var_names[0]])
@@ -262,7 +376,8 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
     given_l, given_r = result.get("given") or ("f", "")
     kind = result.get("kind")
 
-    fig = plt.figure(figsize=(8.4, 6.4), dpi=100)
+    fig_h = 9.2 if kind == "critical" else 6.4
+    fig = plt.figure(figsize=(8.4, fig_h), dpi=100)
     try:
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
@@ -280,6 +395,45 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
             if not mat:
                 return None
             y = _draw_matrix(ax, mat, top=0.70) - 0.06
+        elif kind == "critical":
+            y = 0.74
+            ax.text(0.5, y, r"$\mathrm{Set}\ \nabla f = 0:$",
+                    ha="center", va="center", fontsize=13, color="#666",
+                    family="serif")
+            y -= 0.045
+            for lhs, rhs in result.get("system", []):
+                ax.text(0.5, y, fr"${lhs} = {rhs} = 0$", ha="center",
+                        va="center", fontsize=15, color="#1a3a5c")
+                y -= 0.045
+            hess = result.get("hessian") or []
+            if hess:
+                y -= 0.015
+                ax.text(0.5, y, r"$\mathrm{Hessian:}$", ha="center",
+                        va="center", fontsize=13, color="#666",
+                        family="serif")
+                y -= 0.03
+                y = _draw_matrix(ax, hess, top=y, fontsize=13,
+                                 cell_w=0.27, row_h=0.06) - 0.03
+            pts = result.get("points") or []
+            ax.text(0.5, y, r"$\mathrm{Critical\ points:}$", ha="center",
+                    va="center", fontsize=13, color="#666",
+                    family="serif")
+            y -= 0.05
+            _cmap = {"saddle point": "#cc4125",
+                     "local minimum": "#2e7d32",
+                     "local maximum": "#e69138",
+                     "inconclusive": "#888888"}
+            for p in pts:
+                col = _cmap.get(p.get("kind"), "#222")
+                ax.text(0.5, y, fr"$({p['coords']})$ :  {p['kind']}",
+                        ha="center", va="center", fontsize=15, color=col)
+                y -= 0.034
+                if p.get("reason"):
+                    ax.text(0.5, y, p["reason"], ha="center", va="center",
+                            fontsize=10.5, color="#999", family="serif")
+                    y -= 0.045
+                else:
+                    y -= 0.012
         else:  # steps
             steps = result.get("steps") or []
             if not steps:
