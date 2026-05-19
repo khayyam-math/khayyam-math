@@ -850,6 +850,24 @@ _EXPRESS_SYSTEM = (
 # ── Vision review (used between retries) ─────────────────────────────────
 
 _REVIEW_SYSTEM = (
+    "MATH CORRECTNESS COMES FIRST — IT IS NOT OPTIONAL.  Before any "
+    "layout judgement, check whether the math in the figure is "
+    "actually correct.  If the user is given the FIGURE'S OWN stated "
+    "solution and `math_claims`, cross-check the rendered figure "
+    "against them: does what is drawn agree?  Specifically FAIL on:\n"
+    "  • a wrong derivative / integral / Hessian / value rendered\n"
+    "  • an algebraic identity that doesn't hold (e.g. "
+    "(a+b)^2 = a^2 + b^2 missing the 2ab cross-term)\n"
+    "  • a graph homomorphism whose arrows do not preserve edges, a "
+    "graph colouring with same-coloured adjacent vertices, a triangle "
+    "whose drawn angle measures don't fit the claim\n"
+    "  • a worked example whose final number is wrong\n"
+    "  • the figure CONTRADICTS the user's question or the stated "
+    "solution\n"
+    "A wrong-math figure is WORSE than no figure, because it teaches "
+    "the learner something false.  Math correctness is the single "
+    "most important check you do.\n"
+    "\n"
     "You are a pragmatic reviewer of mathematical figures AND the "
     "narration that explains them.  You are given the rendered figure "
     "(as a PNG) and the spoken narration script (as text).  Default to "
@@ -1041,6 +1059,8 @@ def _review_user_prompt(
     user_prompt: str,
     narration: list[dict[str, Any]] | None = None,
     svg_text: str | None = None,
+    solution: str | None = None,
+    math_claims: list | None = None,
 ) -> str:
     """Build the user message body for a figure review.
 
@@ -1075,8 +1095,24 @@ def _review_user_prompt(
             + "\n".join(lines)
             + "\n"
         )
+    # The math LLM's own stated solution + claims are the reference
+    # truth: the reviewer cross-checks the rendered figure against it.
+    math_block = ""
+    if solution:
+        math_block += f"\nLLM's stated solution:\n  {solution[:600]}\n"
+    if math_claims:
+        lines = []
+        for c in math_claims[:10]:
+            if isinstance(c, dict):
+                lines.append(
+                    f"  - {c.get('description','?')}: "
+                    f"{c.get('a','?')} == {c.get('b','?')}")
+        if lines:
+            math_block += ("\nMath claims it asserts (already verified "
+                           "by a CAS):\n" + "\n".join(lines) + "\n")
     return (
         f"User asked: {user_prompt!r}\n"
+        f"{math_block}"
         f"{narration_block}"
         f"{svg_block}\n"
         "Review the figure AND the narration together.  Two independent "
@@ -2367,6 +2403,8 @@ async def express_figure(
             model=model,        # unused, kept for signature stability
             api_key=api_key,    # unused, kept for signature stability
             narration=result.get("narration") or [],
+            solution=result.get("solution"),
+            math_claims=result.get("math_claims"),
         )
 
         # Merge structural issues into the verdict so a single retry
@@ -2594,6 +2632,8 @@ async def _vision_review(
     model: str,
     api_key: str | None,
     narration: list[dict[str, Any]] | None = None,
+    solution: str | None = None,
+    math_claims: list | None = None,
 ) -> str | None:
     """Ask the reviewer LLM to audit the (svg, narration) pair via the
     structured REVIEW_SCHEMA.  Returns ``None`` on PASS (or if the
@@ -2627,7 +2667,9 @@ async def _vision_review(
         # Send SVG-as-text + narration.  No rasterisation, no
         # multi-modal block, works on any text LLM.  The reviewer has
         # literal access to ids/attrs/structure that a PNG would hide.
-        user_msg = _review_user_prompt(user_prompt, narration, svg_text=svg)
+        user_msg = _review_user_prompt(user_prompt, narration, svg_text=svg,
+                                        solution=solution,
+                                        math_claims=math_claims)
         messages = [
             {"role": "system", "content": _REVIEW_SYSTEM},
             {"role": "user", "content": user_msg},
@@ -2647,7 +2689,9 @@ async def _vision_review(
             {"role": "system", "content": _REVIEW_SYSTEM},
             {"role": "user", "content": [
                 {"type": "text",
-                 "text": _review_user_prompt(user_prompt, narration)},
+                 "text": _review_user_prompt(
+                     user_prompt, narration,
+                     solution=solution, math_claims=math_claims)},
                 {"type": "image_url",
                  "image_url": {"url": f"data:image/png;base64,{b64}"}},
             ]},
