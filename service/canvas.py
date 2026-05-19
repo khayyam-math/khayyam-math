@@ -114,6 +114,11 @@ class Canvas:
     width: int = 700
     height: int = 440
     animate: bool = False
+    # Email of the signed-in user who created this canvas, when it was
+    # created through the Studio web app.  The HTTP /canvas/* endpoints
+    # refuse to serve a canvas to anyone else.  ``None`` for canvases
+    # created over the MCP tool surface (no web identity).
+    owner: str | None = None
     step_duration: float = 0.4   # seconds between successive appearances
     fade_duration: float = 0.35  # fade-in length per element
     graph: SceneGraph = field(default_factory=SceneGraph)
@@ -407,6 +412,7 @@ class Canvas:
         from service.storage import get_storage
         payload = {
             "canvas_id": self.canvas_id,
+            "owner": self.owner,
             "svg": self.svg,
             "is_raw_svg": self.is_raw_svg,
             "raw_svg_ids": sorted(self.raw_svg_ids),
@@ -613,6 +619,7 @@ class CanvasRegistry:
         width: int = 700,
         height: int = 440,
         animate: bool = False,
+        owner: str | None = None,
     ) -> Canvas:
         cid = canvas_id or _new_canvas_id()
         with self._lock:
@@ -624,6 +631,7 @@ class CanvasRegistry:
                 width=width,
                 height=height,
                 animate=animate,
+                owner=owner,
             )
             # initial empty render so the viewer has something to show
             c._rerender_locked()
@@ -670,6 +678,7 @@ class CanvasRegistry:
                 height=int(payload.get("height", 440)),
                 animate=bool(payload.get("animate", False)),
             )
+            c.owner = payload.get("owner") or None
             c.svg = payload.get("svg", "") or ""
             c.is_raw_svg = bool(payload.get("is_raw_svg", False))
             c.raw_svg_ids = set(payload.get("raw_svg_ids") or [])
@@ -726,7 +735,10 @@ REGISTRY = CanvasRegistry()
 # ---------------------------------------------------------------------------
 
 def _new_canvas_id() -> str:
-    return "c_" + secrets.token_hex(4)
+    # 16 bytes = 128 bits of entropy.  The canvas id is an unguessable
+    # capability: combined with the per-request auth check it means a
+    # canvas cannot be reached by guessing or enumerating ids.
+    return "c_" + secrets.token_hex(16)
 
 
 def _narration_dir(canvas_id: str) -> Path:

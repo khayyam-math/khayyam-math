@@ -41,13 +41,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from service.secrets import bootstrap as _bootstrap_secrets  # noqa: E402
 _bootstrap_secrets()
 
-from fastapi import FastAPI, HTTPException, Request  # noqa: E402
-from fastapi.responses import FileResponse, HTMLResponse, Response  # noqa: E402
+from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.responses import (  # noqa: E402
+    FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+)
 from sse_starlette.sse import EventSourceResponse  # noqa: E402
 
 from sevim.s3_map import _RELATION_PATTERN  # noqa: E402
 
 from .canvas import REGISTRY  # noqa: E402
+from studio.auth import require_user  # noqa: E402
 
 # Studio router: direct-to-LLM voice tutor surface (Anthropic / OpenAI /
 # local vLLM).  Imported lazily after REGISTRY so the studio module sees
@@ -62,12 +65,59 @@ except Exception as _exc:  # noqa: BLE001 — studio is optional
 
 
 app = FastAPI(
-    title="SeVim",
-    description="Figure runtime: structured spec → live canvas + audio "
-                "narration.  Drive via the MCP tools or the Studio chat "
-                "surface; this app exposes the /canvas/* viewer endpoints.",
+    title="Khayyam Math",
+    description="Khayyam Math.",
     version="0.3.0",
+    # No public API schema or Swagger/ReDoc UI.  The OpenAPI document
+    # would hand an attacker the entire endpoint surface; disabled in
+    # every environment.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+
+# ---------------------------------------------------------------------------
+# Security middleware: response hardening headers + a catch-all that keeps
+# unhandled exceptions (stack traces, internal paths) off the wire.
+# ---------------------------------------------------------------------------
+
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob:; "
+    "media-src 'self' https://*.amazonaws.com; "
+    "connect-src 'self'; "
+    "frame-ancestors 'self'; base-uri 'self'; form-action 'self'; "
+    "object-src 'none'"
+)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    try:
+        response = await call_next(request)
+    except Exception:  # noqa: BLE001
+        # Never surface a stack trace or internal path to the client.
+        import sys
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        response = JSONResponse(
+            {"detail": "Internal server error"}, status_code=500)
+    response.headers["Content-Security-Policy"] = _CSP
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains")
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(self), camera=()")
+    # Don't advertise the server software / framework / version.
+    response.headers["Server"] = "Khayyam Math"
+    return response
+
 
 if _STUDIO_AVAILABLE:
     app.include_router(_studio_router)
@@ -78,6 +128,54 @@ from service.contact import router as _contact_router  # noqa: E402
 app.include_router(_contact_router)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+# ---------------------------------------------------------------------------
+# Client-asset hardening: strip the explanatory comments out of the HTML we
+# serve.  The source files keep their comments (they document non-obvious
+# rendering decisions for maintainers) but the bytes that reach the browser
+# carry no architectural narration for someone reading "view source".
+# ---------------------------------------------------------------------------
+
+import re as _re  # noqa: E402
+
+_HTML_COMMENT = _re.compile(r"<!--.*?-->", _re.DOTALL)
+_BLOCK_COMMENT = _re.compile(r"/\*.*?\*/", _re.DOTALL)
+_LINE_COMMENT = _re.compile(r"^[ \t]*//.*$", _re.MULTILINE)
+_BLANK_LINES = _re.compile(r"\n[ \t]*\n(?:[ \t]*\n)+")
+
+
+def _strip_client_comments(html: str) -> str:
+    """Remove HTML/CSS/JS comments from a page before it is served.
+
+    Conservative on purpose: only ``<!-- -->`` blocks, ``/* */`` blocks,
+    and lines that are *entirely* a ``//`` comment are removed — an
+    inline trailing ``//`` is left alone so a URL or a regex literal is
+    never corrupted.
+    """
+    html = _HTML_COMMENT.sub("", html)
+    html = _BLOCK_COMMENT.sub("", html)
+    html = _LINE_COMMENT.sub("", html)
+    html = _BLANK_LINES.sub("\n", html)
+    return html
+
+
+def _require_canvas(cid: str, request: Request):
+    """Fetch a canvas, enforcing sign-in + ownership.
+
+    Raises 401 when the caller is not signed in (production), and 404
+    for both a missing canvas AND one owned by another user — a 404
+    rather than 403 so the response cannot be used to confirm that a
+    canvas id exists.
+    """
+    user = require_user(request)
+    try:
+        c = REGISTRY.get(cid)
+    except KeyError:
+        raise HTTPException(404, "not found")
+    if c.owner is not None and c.owner != user:
+        raise HTTPException(404, "not found")
+    return c
 
 
 @app.get("/", include_in_schema=False)
@@ -194,13 +292,17 @@ def favicon():
                     headers={"cache-control": "public, max-age=86400"})
 
 
-@app.get("/health")
+@app.get("/health", include_in_schema=False)
 def health():
-    return {"status": "ok", "canvases": len(REGISTRY.list())}
+    # Load-balancer health check only.  Deliberately exposes no
+    # internal state (canvas counts, model, backend).
+    return {"status": "ok"}
 
 
-@app.get("/ontology")
-def ontology():
+@app.get("/ontology", include_in_schema=False)
+def ontology(_user: str = Depends(require_user)):
+    # Internal vocabulary — sign-in required so it isn't a free
+    # reference for someone reverse-engineering the figure schema.
     return {
         "version": "v2",
         "relations": [
@@ -218,9 +320,21 @@ def ontology():
 # point: only the host LLM should be writing.
 # ---------------------------------------------------------------------------
 
-@app.get("/canvases")
-def list_canvases():
-    return {"canvases": REGISTRY.list()}
+@app.get("/canvases", include_in_schema=False)
+def list_canvases(request: Request, user: str = Depends(require_user)):
+    # Only the caller's own canvases — never enumerate everyone's.
+    out = []
+    for info in REGISTRY.list():
+        cid = info.get("canvas_id")
+        if not cid:
+            continue
+        try:
+            cv = REGISTRY.get(cid)
+        except KeyError:
+            continue
+        if cv.owner is None or cv.owner == user:
+            out.append(info)
+    return {"canvases": out}
 
 
 _CANVAS_404_HTML = """<!doctype html>
@@ -241,31 +355,32 @@ content="width=device-width,initial-scale=1"><title>Canvas not found</title>
 </div></body></html>"""
 
 
-@app.get("/canvas/{cid}/view", response_class=HTMLResponse)
-def canvas_view(cid: str):
+@app.get("/canvas/{cid}/view", response_class=HTMLResponse,
+         include_in_schema=False)
+def canvas_view(cid: str, request: Request):
     try:
-        REGISTRY.get(cid)
-    except KeyError:
-        # Friendly HTML 404 — without this the iframe would render
-        # the raw FastAPI JSON ({"detail": "canvas ... not found"})
-        # which the user reported as a broken UX after a deploy
-        # invalidated their stored canvas id.
+        _require_canvas(cid, request)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            # Not signed in — send them to the login page rather than
+            # rendering a raw JSON 401 in the browser tab.
+            return RedirectResponse("/studio/auth/login", status_code=302)
+        # Friendly HTML 404 — without this the iframe would render the
+        # raw FastAPI JSON, which is a broken UX after a deploy
+        # invalidated a stored canvas id.
         return HTMLResponse(_CANVAS_404_HTML, status_code=404)
     html_path = _STATIC_DIR / "canvas.html"
     if not html_path.exists():
-        raise HTTPException(500, "canvas.html template missing")
-    html = html_path.read_text(encoding="utf-8")
+        raise HTTPException(500, "canvas template missing")
+    html = _strip_client_comments(html_path.read_text(encoding="utf-8"))
     # inject the canvas id into the body so the script can pick it up
     html = html.replace("<body>", f'<body data-cid="{cid}">', 1)
     return HTMLResponse(html)
 
 
-@app.get("/canvas/{cid}/svg")
-def canvas_svg(cid: str):
-    try:
-        c = REGISTRY.get(cid)
-    except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+@app.get("/canvas/{cid}/svg", include_in_schema=False)
+def canvas_svg(cid: str, request: Request):
+    c = _require_canvas(cid, request)
     with c.lock:
         svg = c.svg
     return Response(content=svg, media_type="image/svg+xml")
@@ -290,34 +405,25 @@ def _serve_canvas_audio(cid: str, kind: str, local_path: str | None):
     raise HTTPException(404, f"no {kind} generated yet")
 
 
-@app.get("/canvas/{cid}/narration.wav")
-def canvas_narration_wav(cid: str):
-    try:
-        c = REGISTRY.get(cid)
-    except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+@app.get("/canvas/{cid}/narration.wav", include_in_schema=False)
+def canvas_narration_wav(cid: str, request: Request):
+    c = _require_canvas(cid, request)
     with c.lock:
         wav_path = c.narration_wav
     return _serve_canvas_audio(cid, "narration", wav_path)
 
 
-@app.get("/canvas/{cid}/intro.wav")
-def canvas_intro_wav(cid: str):
-    try:
-        c = REGISTRY.get(cid)
-    except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+@app.get("/canvas/{cid}/intro.wav", include_in_schema=False)
+def canvas_intro_wav(cid: str, request: Request):
+    c = _require_canvas(cid, request)
     with c.lock:
         wav_path = c.intro_wav
     return _serve_canvas_audio(cid, "intro", wav_path)
 
 
-@app.get("/canvas/{cid}/narration.json")
-def canvas_narration_manifest(cid: str):
-    try:
-        c = REGISTRY.get(cid)
-    except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+@app.get("/canvas/{cid}/narration.json", include_in_schema=False)
+def canvas_narration_manifest(cid: str, request: Request):
+    c = _require_canvas(cid, request)
     with c.lock:
         manifest = c.narration_manifest
     if not manifest:
@@ -325,12 +431,9 @@ def canvas_narration_manifest(cid: str):
     return manifest
 
 
-@app.get("/canvas/{cid}/state")
-def canvas_state(cid: str):
-    try:
-        c = REGISTRY.get(cid)
-    except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+@app.get("/canvas/{cid}/state", include_in_schema=False)
+def canvas_state(cid: str, request: Request):
+    c = _require_canvas(cid, request)
     with c.lock:
         return {
             "canvas_id": c.canvas_id,
@@ -353,13 +456,10 @@ def canvas_state(cid: str):
         }
 
 
-@app.get("/canvas/{cid}/events")
+@app.get("/canvas/{cid}/events", include_in_schema=False)
 async def canvas_events(cid: str, request: Request):
     """Server-Sent Events stream — one `render` event per revision bump."""
-    try:
-        c = REGISTRY.get(cid)
-    except KeyError:
-        raise HTTPException(404, f"canvas {cid!r} not found")
+    c = _require_canvas(cid, request)
 
     async def event_gen():
         last_rev = -1

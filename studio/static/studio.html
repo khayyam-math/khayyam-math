@@ -461,8 +461,8 @@
          one. -->
     <div class="canvas-loading" id="canvas-loading" hidden>
       <div class="cl-spinner" aria-hidden="true"></div>
-      <div class="cl-headline">Preparing visualization…</div>
-      <div class="cl-sub">Drafting the SVG, running structural checks, and synthesising narration.</div>
+      <div class="cl-headline">Preparing your visualization…</div>
+      <div class="cl-sub">This usually takes a few seconds.</div>
     </div>
   </main>
 </div>
@@ -651,37 +651,17 @@
     clearPersistedState();
   });
 
-  // ── Health check ─────────────────────────────────────────────────────
-  // The user doesn't care which model is configured — they care
-  // whether Sevim is *up*.  Show a green bullet on success, the
-  // specific failure mode on error.  Hover/title carries the model
-  // name for power users + future debugging.
+  // Health check — the status pill shows only a coarse, generic
+  // state.  It deliberately reveals no backend / model / provider
+  // detail: those are internal and were previously visible to anyone
+  // inspecting the page's network traffic.
   fetch('/studio/health').then(r => r.json()).then(h => {
-    let label = '', errored = false, title = '';
-    if (h.backend === 'vllm') {
-      const tag = h.remote === 'openai' ? 'openai' : 'local';
-      title = h.model + ' · ' + tag;
-      if (!h.vllm_reachable) {
-        label = tag === 'openai' ? 'openai unreachable' : 'vllm unreachable';
-        errored = true;
-      } else if (tag === 'openai' && !h.api_key_configured) {
-        label = 'no OPENAI_API_KEY';
-        errored = true;
-      } else {
-        label = 'ready';
-      }
-    } else if (!h.api_key_configured) {
-      label = 'no API key';
-      errored = true;
-    } else {
-      label = 'ready';
-      title = h.model || '';
-    }
-    status.textContent = label;
-    status.title = title;
-    if (errored) status.classList.add('error');
+    const ok = h && h.status === 'ok';
+    status.textContent = ok ? 'ready' : 'service temporarily unavailable';
+    status.title = '';
+    if (!ok) status.classList.add('error');
   }).catch(() => {
-    status.textContent = 'offline';
+    status.textContent = 'service temporarily unavailable';
     status.classList.add('error');
   });
 
@@ -1117,7 +1097,9 @@
               // the learner sees what went wrong.
               let summary = '';
               if (r.error) {
-                summary = 'Couldn\'t generate that figure — ' + String(r.error).slice(0, 80);
+                // Generic, fixed copy — never echo the raw error
+                // string, which can carry internal detail.
+                summary = 'Couldn’t generate that figure. Please try again.';
               } else if (Array.isArray(r.results)) {
                 const ok = r.results.filter(x => !x.error).length;
                 const err = r.results.length - ok;

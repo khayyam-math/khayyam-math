@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -442,6 +443,7 @@ async def _execute_tool(
     session_id: str | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
     on_primer_chunk: Callable[[str], Awaitable[None]] | None = None,
+    owner: str | None = None,
 ) -> dict[str, Any]:
     """Run the single Studio tool: ``sevim_express``.
 
@@ -535,9 +537,9 @@ async def _execute_tool(
     result = await figure_task
     primer_text = await primer_task
     duration_s = _time.monotonic() - t0
-    cid = "express_" + secrets.token_hex(8)
+    cid = "express_" + secrets.token_hex(16)
     c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=False,
-                      width=900, height=620)
+                      width=900, height=620, owner=owner)
     c.set_raw_svg(result["svg"])
     c.genesis_prompt = prompt
     narration = result.get("narration") or []
@@ -1152,6 +1154,7 @@ async def _stream_vllm_chat(req: ChatReq):
                     session_id=req.session_id,
                     on_svg_chunk=on_svg_chunk,
                     on_primer_chunk=on_primer_chunk,
+                    owner=user,
                 ))
 
                 if svg_queue is not None and primer_queue is not None:
@@ -1276,12 +1279,13 @@ async def _stream_vllm_chat(req: ChatReq):
 
 @router.post("/canvas/new")
 def new_canvas(user: str = Depends(require_user)) -> dict[str, str]:
-    """Spawn a fresh canvas owned by Studio (random id, math_mode, animate)."""
-    # 8 hex bytes (64 bits) — unguessable.  Old 6-hex (24-bit) ids were
-    # brute-forceable in seconds; bumping defends the unauthenticated
-    # /canvas/<id>/view endpoint until per-canvas owner auth lands.
-    cid = "studio_" + secrets.token_hex(8)
-    c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=True, width=820, height=520)
+    """Spawn a fresh canvas owned by the signed-in user."""
+    # 16 hex bytes (128 bits) — unguessable.  Combined with the
+    # per-canvas owner check on /canvas/<id>/*, a canvas cannot be
+    # reached by guessing ids or by another signed-in user.
+    cid = "studio_" + secrets.token_hex(16)
+    c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=True,
+                      width=820, height=520, owner=user)
     return {"canvas_id": c.canvas_id, "view_url": f"/canvas/{c.canvas_id}/view"}
 
 
@@ -1495,37 +1499,58 @@ def admin_set_active_model(
     return {"ok": True, "active_model": req.model_id, "updated_by": user}
 
 
-@router.get("/health")
+@router.get("/health", include_in_schema=False)
 def health() -> dict[str, Any]:
+    """Coarse liveness for the Studio status pill.
+
+    Returns ONLY ``{"status": "ok"|"unavailable"}`` — never the
+    backend, the model name, or the upstream URL.  Those used to be in
+    the payload and were visible to anyone reading the page's network
+    traffic; they are internal implementation details.
+    """
     backend = _backend()
-    info: dict[str, Any] = {"backend": backend}
+    ok = True
     if backend == "vllm":
-        info["model"] = _vllm_model()
-        info["vllm_url"] = _vllm_url()
-        # Distinguish local vLLM from OpenAI-style remote so the
-        # frontend status pill can label it correctly.
         url = _vllm_url()
-        if "openai.com" in url:
-            info["remote"] = "openai"
-            info["api_key_configured"] = bool(os.environ.get("OPENAI_API_KEY"))
-        else:
-            info["remote"] = "local"
         try:
-            with httpx.Client(timeout=2.0) as c:
-                probe_headers = {}
-                api_key = os.environ.get("OPENAI_API_KEY")
-                if api_key and "openai.com" in url:
-                    probe_headers["Authorization"] = f"Bearer {api_key}"
-                r = c.get(f"{url}/models", headers=probe_headers)
-            info["vllm_reachable"] = r.status_code == 200
+            headers = {}
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key and "openai.com" in url:
+                headers["Authorization"] = f"Bearer {api_key}"
+            # 6s budget: a 2s probe to a remote provider from Fargate
+            # times out intermittently even when the service is fine.
+            # Any HTTP response — even 401/429 — proves the network
+            # path works; only a connection/timeout error means down.
+            with httpx.Client(timeout=6.0) as c:
+                c.get(f"{url}/models", headers=headers)
         except Exception:  # noqa: BLE001
-            info["vllm_reachable"] = False
+            ok = False
     else:
-        info["api_key_configured"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
-        info["model"] = os.environ.get("SEVIM_STUDIO_MODEL", _DEFAULT_MODEL)
-    return info
+        ok = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return {"status": "ok" if ok else "unavailable"}
 
 
+
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_LINE_COMMENT_RE = re.compile(r"^[ \t]*//.*$", re.MULTILINE)
+
+
+def _strip_client_comments(html: str) -> str:
+    """Drop HTML/CSS/JS comments before serving a page.
+
+    The source keeps its comments (they document non-obvious UI
+    decisions) but the bytes the browser receives carry no
+    architectural narration for someone reading "view source".
+    Conservative: only ``<!-- -->`` blocks, ``/* */`` blocks, and
+    full-line ``//`` comments — an inline trailing ``//`` is left
+    untouched so a URL or regex literal is never corrupted.
+    """
+    html = _HTML_COMMENT_RE.sub("", html)
+    html = _BLOCK_COMMENT_RE.sub("", html)
+    html = _LINE_COMMENT_RE.sub("", html)
+    return html
 
 
 @router.get("", response_class=HTMLResponse)
@@ -1544,7 +1569,7 @@ def studio_index(request: Request):
     # session, which left the user staring at stale UI long after the
     # server had new code.  Force a fresh fetch on every page load.
     return HTMLResponse(
-        html_path.read_text(encoding="utf-8"),
+        _strip_client_comments(html_path.read_text(encoding="utf-8")),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
