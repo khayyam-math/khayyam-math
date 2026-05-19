@@ -18,6 +18,16 @@ dependencies = [
     # global-optimum guarantee on figure layouts.
     "ortools>=9.10",
     "matplotlib>=3.8",
+    # Plotly + Kaleido render high-quality 2-D plots and 3-D surfaces
+    # (studio/templates/plotly_render.py).  Kaleido exports static
+    # images via headless Chrome — the container already installs
+    # `chromium`.  If Kaleido can't find Chrome the renderer fails
+    # gracefully and the matplotlib renderer takes over.
+    "plotly>=6.0",
+    "kaleido>=1.0",
+    # SymPy: exact symbolic math (derivatives, Hessians, integrals)
+    # so the figure pipeline never relies on the LLM for arithmetic.
+    "sympy>=1.13",
 ]
 
 [project.optional-dependencies]

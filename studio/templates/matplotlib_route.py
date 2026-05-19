@@ -698,4 +698,16 @@ async def generate_matplotlib_svg(
         user_prompt, api_key=api_key, base_url=base_url, model=model)
     if not spec:
         return None
+    # Plotly renders 2-D plots, 3-D surfaces and contours at markedly
+    # higher quality than matplotlib's mplot3d — try it first for those
+    # kinds, falling back to the matplotlib renderer on any failure.
+    kind = (spec.get("kind") or "plot2d").lower()
+    if kind in ("surface3d", "contour", "plot2d"):
+        try:
+            from studio.templates.plotly_render import render_plotly
+            out = render_plotly(spec)
+            if out is not None:
+                return out
+        except Exception:  # noqa: BLE001
+            pass
     return render_plot_spec(spec)
