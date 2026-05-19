@@ -228,6 +228,7 @@ def _compute(spec: dict) -> Optional[dict]:
     out: dict[str, Any] = {
         "title": str(spec.get("title") or "Symbolic result"),
         "given": (f"f({', '.join(var_names)})", L(expr)),
+        "operation": op,
         "at_point": None,
     }
     point = spec.get("point") or {}
@@ -345,23 +346,112 @@ def _compute(spec: dict) -> Optional[dict]:
 
 def _draw_matrix(ax, mat: list, top: float, *, fontsize: int = 16,
                  cell_w: float = 0.26, row_h: float = 0.12,
-                 color: str = "#222") -> float:
-    """Draw a bracketed grid of mathtext cells; return the bottom y."""
+                 color: str = "#222", gid: Optional[str] = None) -> float:
+    """Draw a bracketed grid of mathtext cells; return the bottom y.
+
+    When ``gid`` is given, every cell and bracket carries that SVG id
+    so the canvas narration highlighter can light the matrix up."""
     ncol = len(mat[0]) if mat else 0
     nrow = len(mat)
     x0 = 0.5 - (ncol * cell_w) / 2
     for i, row in enumerate(mat):
         for j, cell in enumerate(row):
-            ax.text(x0 + cell_w * (j + 0.5), top - row_h * (i + 0.5),
-                    f"${cell}$", ha="center", va="center",
-                    fontsize=fontsize, color=color)
+            t = ax.text(x0 + cell_w * (j + 0.5), top - row_h * (i + 0.5),
+                        f"${cell}$", ha="center", va="center",
+                        fontsize=fontsize, color=color)
+            if gid:
+                t.set_gid(gid)
     by0, by1 = top - row_h * nrow, top
     bx0, bx1 = x0 - 0.03, x0 + cell_w * ncol + 0.03
     for bx, dx in ((bx0, 0.022), (bx1, -0.022)):
-        ax.plot([bx, bx], [by0, by1], color=color, lw=2)
-        ax.plot([bx, bx + dx], [by1, by1], color=color, lw=2)
-        ax.plot([bx, bx + dx], [by0, by0], color=color, lw=2)
+        for xs, ys in (([bx, bx], [by0, by1]),
+                       ([bx, bx + dx], [by1, by1]),
+                       ([bx, bx + dx], [by0, by0])):
+            ln, = ax.plot(xs, ys, color=color, lw=2)
+            if gid:
+                ln.set_gid(gid)
     return by0
+
+
+def _narrate(result: dict, spec: dict) -> list[dict]:
+    """Walk EVERY element of the figure, one phrase per element, each
+    carrying the matching SVG ``gid`` so the canvas highlights the
+    part being spoken about."""
+    kind = result.get("kind")
+    op = result.get("operation", "")
+    phr: list[dict] = []
+    intro = str(spec.get("intro") or "").strip()
+    phr.append({"speak": intro or "Let's work through this step by step.",
+                "highlight": ["fig_title"]})
+    phr.append({"speak": "This is the function we are working with.",
+                "highlight": ["given"]})
+
+    if kind == "critical":
+        n_sys = len(result.get("system") or [])
+        if n_sys:
+            phr.append({
+                "speak": "First, we set every first partial derivative "
+                         "equal to zero. Solving this system gives the "
+                         "critical points.",
+                "highlight": [f"sys_{i}" for i in range(n_sys)]})
+        if result.get("hessian"):
+            phr.append({
+                "speak": "The Hessian gathers the second derivatives. "
+                         "Its sign at each point tells us what kind of "
+                         "point we have.",
+                "highlight": ["hessian"]})
+        for i, p in enumerate(result.get("points") or []):
+            coords = (p.get("coords", "")
+                      .replace("\\ ", " ").replace("\\,", " "))
+            k = p.get("kind", "")
+            if "saddle" in k:
+                why = ("the Hessian determinant is negative, so the "
+                       "surface rises one way and falls another — a "
+                       "saddle point")
+            elif "minimum" in k:
+                why = ("the Hessian determinant is positive and the "
+                       "curvature points upward — a local minimum")
+            elif "maximum" in k:
+                why = ("the Hessian determinant is positive and the "
+                       "curvature points downward — a local maximum")
+            else:
+                why = "the second-derivative test is inconclusive here"
+            phr.append({"speak": f"At the point ({coords}), {why}.",
+                        "highlight": [f"pt_{i}"]})
+    elif kind == "matrix":
+        phr.append({
+            "speak": str(result.get("caption")
+                         or "Each entry is a second-order partial "
+                            "derivative."),
+            "highlight": ["result"]})
+        if result.get("at_point_matrix"):
+            phr.append({
+                "speak": "Evaluated at the given point, the matrix "
+                         "becomes these concrete numbers.",
+                "highlight": ["atpoint"]})
+    else:  # steps
+        steps = result.get("steps") or []
+        ordinals = ["first", "second", "third", "fourth", "fifth",
+                    "sixth"]
+        for i in range(len(steps[:6])):
+            if op == "derivative":
+                s = f"This is the {ordinals[i]} derivative."
+            elif op == "gradient":
+                s = ("This is the partial derivative with respect to "
+                     f"the {ordinals[i]} variable.")
+            elif op == "integral":
+                s = ("This is the antiderivative — the integral of the "
+                     "function, plus a constant.")
+            elif op == "limit":
+                s = "This is the value the function approaches."
+            else:
+                s = "Here is the result."
+            phr.append({"speak": s, "highlight": [f"step_{i}"]})
+
+    takeaway = str(spec.get("takeaway") or "").strip()
+    if takeaway:
+        phr.append({"speak": takeaway, "highlight": ["fig_title"]})
+    return phr
 
 
 def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
@@ -369,6 +459,9 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        # Keep text as <text> (not glyph paths) so each gid'd element
+        # is a real SVG node the narration highlighter can target.
+        plt.rcParams["svg.fonttype"] = "none"
     except Exception:  # noqa: BLE001
         return None
 
@@ -385,25 +478,27 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
         ax.set_ylim(0, 1)
         ax.text(0.5, 0.94, title, ha="center", va="center",
                 fontsize=19, fontweight="bold", color="#1a3a5c",
-                family="serif")
+                family="serif").set_gid("fig_title")
         ax.text(0.5, 0.82, fr"$\mathrm{{Given:}}\quad {given_l} = {given_r}$",
-                ha="center", va="center", fontsize=16, color="#222")
+                ha="center", va="center", fontsize=16,
+                color="#222").set_gid("given")
 
         y = 0.66
         if kind == "matrix":
             mat = result.get("matrix") or []
             if not mat:
                 return None
-            y = _draw_matrix(ax, mat, top=0.70) - 0.06
+            y = _draw_matrix(ax, mat, top=0.70, gid="result") - 0.06
         elif kind == "critical":
             y = 0.74
             ax.text(0.5, y, r"$\mathrm{Set}\ \nabla f = 0:$",
                     ha="center", va="center", fontsize=13, color="#666",
                     family="serif")
             y -= 0.045
-            for lhs, rhs in result.get("system", []):
+            for i, (lhs, rhs) in enumerate(result.get("system", [])):
                 ax.text(0.5, y, fr"${lhs} = {rhs} = 0$", ha="center",
-                        va="center", fontsize=15, color="#1a3a5c")
+                        va="center", fontsize=15,
+                        color="#1a3a5c").set_gid(f"sys_{i}")
                 y -= 0.045
             hess = result.get("hessian") or []
             if hess:
@@ -413,7 +508,8 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
                         family="serif")
                 y -= 0.03
                 y = _draw_matrix(ax, hess, top=y, fontsize=13,
-                                 cell_w=0.27, row_h=0.06) - 0.03
+                                 cell_w=0.27, row_h=0.06,
+                                 gid="hessian") - 0.03
             pts = result.get("points") or []
             ax.text(0.5, y, r"$\mathrm{Critical\ points:}$", ha="center",
                     va="center", fontsize=13, color="#666",
@@ -423,14 +519,16 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
                      "local minimum": "#2e7d32",
                      "local maximum": "#e69138",
                      "inconclusive": "#888888"}
-            for p in pts:
+            for i, p in enumerate(pts):
                 col = _cmap.get(p.get("kind"), "#222")
                 ax.text(0.5, y, fr"$({p['coords']})$ :  {p['kind']}",
-                        ha="center", va="center", fontsize=15, color=col)
+                        ha="center", va="center", fontsize=15,
+                        color=col).set_gid(f"pt_{i}")
                 y -= 0.034
                 if p.get("reason"):
-                    ax.text(0.5, y, p["reason"], ha="center", va="center",
-                            fontsize=10.5, color="#999", family="serif")
+                    ax.text(0.5, y, p["reason"], ha="center",
+                            va="center", fontsize=10.5, color="#999",
+                            family="serif").set_gid(f"pt_{i}")
                     y -= 0.045
                 else:
                     y -= 0.012
@@ -439,29 +537,32 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
             if not steps:
                 return None
             y = 0.66
-            for lhs, rhs in steps[:6]:
+            for i, (lhs, rhs) in enumerate(steps[:6]):
                 ax.text(0.5, y, fr"${lhs} = {rhs}$", ha="center",
-                        va="center", fontsize=17, color="#1a3a5c")
+                        va="center", fontsize=17,
+                        color="#1a3a5c").set_gid(f"step_{i}")
                 y -= 0.12
 
         cap = result.get("caption") or ""
         if cap:
             ax.text(0.5, max(y, 0.20), cap, ha="center", va="center",
-                    fontsize=12, color="#666", style="italic", family="serif")
+                    fontsize=12, color="#666", style="italic",
+                    family="serif")
             y = max(y, 0.20) - 0.08
 
-        # Evaluated-at-a-point result.
         apm = result.get("at_point_matrix")
         at = result.get("at_point")
         if apm and apm.get("matrix"):
             ax.text(0.5, y, f"$\\mathrm{{At\\ the\\ point:}}\\ "
                     f"{apm.get('label','')}=$", ha="center", va="center",
-                    fontsize=14, color="#cc4125")
+                    fontsize=14, color="#cc4125").set_gid("atpoint")
             _draw_matrix(ax, apm["matrix"], top=y - 0.05, fontsize=15,
-                         cell_w=0.18, row_h=0.10, color="#cc4125")
+                         cell_w=0.18, row_h=0.10, color="#cc4125",
+                         gid="atpoint")
         elif at:
-            ax.text(0.5, max(y, 0.07), f"${at[0]} = {at[1]}$", ha="center",
-                    va="center", fontsize=15, color="#cc4125")
+            ax.text(0.5, max(y, 0.07), f"${at[0]} = {at[1]}$",
+                    ha="center", va="center", fontsize=15,
+                    color="#cc4125").set_gid("atpoint")
 
         buf = io.StringIO()
         fig.savefig(buf, format="svg", bbox_inches="tight")
@@ -473,7 +574,6 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
 
     if "<svg" not in svg:
         return None
-    # Make the SVG scale to the canvas.
     m = re.search(r"<svg\b[^>]*>", svg)
     if m:
         tag = re.sub(r'\s(?:width|height)="[^"]*"', "", m.group(0))
@@ -483,17 +583,7 @@ def _render(result: dict, spec: dict) -> Optional[tuple[str, list[dict]]]:
             'display:block;margin:0 auto;"', 1)
         svg = svg[:m.start()] + tag + svg[m.end():]
 
-    narration: list[dict] = []
-    intro = str(spec.get("intro") or "").strip()
-    if intro:
-        narration.append({"speak": intro, "highlight": []})
-    narration.append({
-        "speak": str(result.get("caption") or "Here is the result."),
-        "highlight": []})
-    takeaway = str(spec.get("takeaway") or "").strip()
-    if takeaway:
-        narration.append({"speak": takeaway, "highlight": []})
-    return svg, narration
+    return svg, _narrate(result, spec)
 
 
 async def generate_symbolic_svg(
