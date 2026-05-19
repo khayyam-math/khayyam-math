@@ -396,6 +396,17 @@
     .canvas-pane { order: 0; border-bottom: none; }
     .chat { border-right: 1px solid var(--border); }
   }
+  /* "Something's wrong" — a low-key escape hatch on the canvas: the
+     user reports a figure problem; it's auto-repaired and flagged. */
+  #fix-btn {
+    position: absolute; left: 12px; bottom: 12px; z-index: 30;
+    background: rgba(255,255,255,0.94); color: #b3306a;
+    border: 1px solid #e3b9cd; border-radius: 8px;
+    padding: 0.4em 0.8em; font-size: 0.8em; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  #fix-btn:hover { background: #fff; border-color: #b3306a; }
+  body:not(.has-canvas) #fix-btn { display: none; }
 </style>
 </head>
 <body>
@@ -464,6 +475,9 @@
       <div class="cl-headline">Preparing your visualization…</div>
       <div class="cl-sub">This usually takes a few seconds.</div>
     </div>
+    <button id="fix-btn" type="button"
+            title="Report a problem with this figure and have it fixed">
+      ⚠ Something's wrong</button>
   </main>
 </div>
 <script>
@@ -629,6 +643,27 @@
   const input = document.getElementById('input');
   const sendBtn = document.getElementById('send-btn');
   const micBtn = document.getElementById('mic-btn');
+  const fixBtn = document.getElementById('fix-btn');
+
+  // "Something's wrong" escape hatch: the user describes the problem,
+  // it's sent as a normal refinement turn (so the figure is repaired
+  // in place) but flagged so telemetry records it as a reported
+  // problem for the operator's problem-patterns view.
+  let flaggedTurn = false;
+  if (fixBtn) {
+    fixBtn.addEventListener('click', () => {
+      if (input.disabled) return;  // a turn is already running
+      const what = window.prompt(
+        "What's wrong with this figure? Describe it and I'll fix it — "
+        + "for example: \"the triangle is too small\", \"use red\", "
+        + "\"step 3 is wrong\", \"the labels overlap\".");
+      if (what && what.trim()) {
+        input.value = 'Please fix the figure: ' + what.trim();
+        flaggedTurn = true;
+        sendMessage();
+      }
+    });
+  }
   const frame = document.getElementById('canvas-frame');
   const placeholder = document.getElementById('placeholder');
   const canvasBadge = document.getElementById('canvas-badge');
@@ -838,6 +873,9 @@
   async function sendMessage() {
     const user = input.value.trim();
     if (!user) return;
+    // Capture-and-clear the "Something's wrong" flag for this turn.
+    const flagged = flaggedTurn;
+    flaggedTurn = false;
     // Pause any in-flight narration the moment the user commits a new
     // turn — otherwise the old explanation keeps talking over the new
     // one being generated.
@@ -962,7 +1000,7 @@
         body: JSON.stringify({
           history, user, canvas_id: canvasId,
           prior_canvas_ids: pinnedCanvasIds.slice(),
-          session_id: sessionId,
+          session_id: sessionId, flagged,
         }),
       });
       console.log('[studio] response', resp.status, 'has body?', !!resp.body);

@@ -444,6 +444,7 @@ async def _execute_tool(
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
     on_primer_chunk: Callable[[str], Awaitable[None]] | None = None,
     owner: str | None = None,
+    flagged: bool = False,
 ) -> dict[str, Any]:
     """Run the single Studio tool: ``sevim_express``.
 
@@ -609,6 +610,7 @@ async def _execute_tool(
             svg=result.get("svg", ""),
             narration_phrases=narration,
             repairs=list(result.get("repairs") or []),
+            flagged=flagged,
         ) -> None:
             try:
                 turn_id = tel.record_turn(
@@ -616,7 +618,8 @@ async def _execute_tool(
                     canvas_id=canvas_id, prior_canvas_ids=context_ids,
                     n_phrases=n_phrases, retries_used=retries_used,
                     review_history=review_history, duration_s=duration_s,
-                    cost_usd_estimate=cost_estimate, intent="express",
+                    cost_usd_estimate=cost_estimate,
+                    intent=("flagged" if flagged else "express"),
                     model_id=resolved_model_id,
                 )
                 tel.record_canvas(
@@ -713,6 +716,11 @@ class ChatReq(BaseModel):
     # and cost guard.  When missing (older frontends), Studio assigns
     # a synthetic one for this single request.
     session_id: str | None = None
+    # True when this turn came from the "Fix this figure" button —
+    # the user is reporting a problem with the current figure.  The
+    # turn is tagged in telemetry so the problem-patterns admin view
+    # can surface what users are struggling with.
+    flagged: bool = False
 
 
 SYSTEM_PROMPT = (
@@ -762,6 +770,28 @@ SYSTEM_PROMPT = (
     "  • After the tool returns, end your turn with at most ONE short "
     "    acknowledgement sentence in chat (e.g. 'Updated.' or 'Here it "
     "    is.').  The canvas's narration covers the explanation.\n"
+    "\n"
+    "WHAT THE CANVAS CAN DRAW WELL — know your own range:\n"
+    "  • function graphs and 3-D surfaces — any y = f(x) or z = f(x,y)\n"
+    "  • exact symbolic calculus — derivatives, gradients, Hessians, "
+    "integrals, limits, and finding AND classifying critical points "
+    "(computed exactly with a CAS, never guessed)\n"
+    "  • matrices and matrix operations; vectors\n"
+    "  • automata, state machines, graphs, trees, flowcharts\n"
+    "  • geometry — triangles, circles, the unit circle, Pythagoras\n"
+    "  • fractions, number lines, place value, Venn diagrams, "
+    "probability and normal-distribution figures, algorithm traces\n"
+    "  Together these span primary-school through university math.\n"
+    "\n"
+    "BE HONEST ABOUT LIMITS: if a request is not math, or needs a kind "
+    "of figure the canvas does not do well, say so plainly and offer "
+    "the closest thing you CAN draw — never pretend or produce a "
+    "figure you know is wrong.\n"
+    "\n"
+    "USE THE CONVERSATION: you have the full history of this session. "
+    "When the user says 'it', 'that', 'the figure', 'fix it', 'change "
+    "the colour', they mean what is already on the canvas — refer back "
+    "and act on it; never ask them to repeat themselves.\n"
     "\n"
     "How sevim_express works internally (FYI): gpt-4o emits SVG + "
     "phrase-timed narration in one structured response; Sevim audits "
@@ -1155,6 +1185,7 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
                     on_svg_chunk=on_svg_chunk,
                     on_primer_chunk=on_primer_chunk,
                     owner=user,
+                    flagged=req.flagged,
                 ))
 
                 if svg_queue is not None and primer_queue is not None:
