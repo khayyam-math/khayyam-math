@@ -1650,6 +1650,44 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"symbolic route errored: {type(exc).__name__}: {exc}")
 
+    # ── Graph-homomorphism route ─────────────────────────────────
+    # The LLM emits two graphs and a function f:V(G)->V(H); a
+    # deterministic O(|E_G|) verifier confirms the mapping IS a
+    # homomorphism BEFORE the figure is rendered.  Fixes the earlier
+    # tangle-of-dashed-arrows class of failures.
+    if (api_key
+            and os.environ.get("SEVIM_HOMOM_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.graph_homomorphism import (
+                generate_homomorphism_svg, is_homomorphism_prompt,
+            )
+            if is_homomorphism_prompt(user_prompt):
+                hm_result = await generate_homomorphism_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url)
+                if hm_result is not None:
+                    hm_svg, hm_narration = hm_result
+                    _log(f"homomorphism fast-path: svg={len(hm_svg)} "
+                         f"chars narration={len(hm_narration)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(hm_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": hm_svg,
+                        "narration": hm_narration,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "homomorphism",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"homomorphism route errored: "
+                 f"{type(exc).__name__}: {exc}")
+
     # ── Multi-panel route ─────────────────────────────────────────
     # For "compare X and Y side by side" / cross-referenced-panel
     # prompts, decompose into sub-figures and composite them into a
