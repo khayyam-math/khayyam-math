@@ -56,7 +56,13 @@ def pythagoras(
     xmin, xmax = -b, a + b
     ymin, ymax = -a, a + b
     W = (xmax - xmin) * s + 2 * M
-    H = (ymax - ymin) * s + 2 * M + TITLE
+    # y of the lowest drawn unit, then the formula caption below it,
+    # then a generous bottom margin: the headless rasteriser clips
+    # the last ~9% of a viewBox, so the caption must sit well clear
+    # of the bottom edge.
+    draw_bottom = TITLE + M + (ymax - ymin) * s
+    formula_y = draw_bottom + 58.0
+    H = formula_y + 120.0
 
     def X(mx: float) -> float:
         return M + (mx - xmin) * s
@@ -157,7 +163,7 @@ def pythagoras(
 
     # Formula caption.
     parts.append(
-        f'<text id="formula" x="{W / 2:.0f}" y="{H - 44:.0f}" '
+        f'<text id="formula" x="{W / 2:.0f}" y="{formula_y:.0f}" '
         f'font-size="26" text-anchor="middle" font-family="serif" '
         f'fill="#111">a² + b² = c²'
         f'    ({_num(a2)} + {_num(b2)} = {_num(c2)})</text>'
