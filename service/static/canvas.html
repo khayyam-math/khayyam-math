@@ -90,7 +90,7 @@
     padding: 1em;
     padding-bottom: max(1em, env(safe-area-inset-bottom));
   }
-  @media (max-width: 720px) {
+  @media (max-width: 900px) {
     header { padding: 0.4em 0.7em; gap: 0.6em; font-size: 0.8em; }
     header button.play-btn { padding: 0.35em 0.75em; font-size: 0.85em; }
     main {
@@ -117,24 +117,36 @@
     main::-webkit-scrollbar-track {
       background: rgba(0, 0, 0, 0.06);
     }
-    /* SVG sizing on mobile: fit the iframe width when feasible, but
-       NEVER below a readable minimum.
-         - width:100% → fit the container horizontally
-         - min-width:640px → if container is narrower (e.g. 375-px
-           iPhone), the SVG stays 640 px wide so text in a 900-px
-           viewBox renders at ~71% scale (font-size 16 → 11.4 px,
-           which is right at the legibility floor).
+    /* On mobile #stage must be a full-width BLOCK, not the desktop
+       shrink-to-fit inline-block.  An SVG with a viewBox but no
+       intrinsic width/height attribute, sized `width:100%` inside a
+       shrink-to-fit inline-block, has nothing to resolve the
+       percentage against — so it collapses to the SVG spec default
+       of 300px (figures rendered ~300px wide on iPad, text at 7px).
+       A block #stage with width:100% gives the percentage a real
+       basis: the canvas width. */
+    #stage {
+      display: block;
+      width: 100%;
+    }
+    /* SVG sizing on mobile/tablet: fit the canvas width, but never
+       let the figure's labels fall below the legibility floor.
+         - width:100% → fit the container horizontally.
+         - min-width is NOT a fixed constant here.  A fixed 640px
+           floor kept text legible for a ~900px viewBox but still
+           rendered a ~1700px-wide figure (e.g. an improper-fraction
+           bar) at ~7-8px — unreadable.  Instead fitSvgToContent()
+           measures the smallest rendered <text> after layout and,
+           only when it lands below ~11px, sets an inline min-width
+           that scales the figure up until the smallest label hits
+           the floor.  The surplus is panned via <main>'s overflow.
          - height:auto preserves aspect ratio.
-       On a phone narrower than 640 px, <main>'s overflow:auto
-       activates: user pans horizontally for the ~265 px sliver that
-       doesn't fit.  On a phone ≥640 px wide, the SVG fully fits.
-       This is the "matching but slidable" middle ground the user
-       asked for — figure mostly visible, no microscopic text, no
-       silent edge-clip. */
+       Result: simple figures fit fully with no scroll; dense/wide
+       figures stay legible and become slidable — the "matching but
+       slidable" behaviour the user asked for, now legibility-aware. */
     #stage svg {
       width: 100% !important;
       height: auto !important;
-      min-width: 640px !important;
       max-width: none !important;
       max-height: none !important;
       min-height: 0 !important;
@@ -304,6 +316,33 @@
      cos(π/4) label in the audit screenshots).  The .embedded class
      is set by JS when window !== window.top. */
   body.embedded .play-overlay { display: none !important; }
+  /* Pan affordance.  When a figure is larger than the canvas the
+     content that doesn't fit is reachable only by scrolling <main>.
+     On touch devices the scrollbar is an overlay that stays hidden
+     until the user already scrolls — so a figure's answer (a
+     "det(A) = -150" off the right edge, the result label on a number
+     line) can look simply absent.  This pill appears for one-time
+     guidance whenever the figure overflows, and dismisses itself on
+     the first scroll or after a few seconds. */
+  #pan-hint {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    /* Sits above the bottom-right Play-narration pill so the two
+       transient hints don't collide on a narrow phone. */
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 48px);
+    background: rgba(17, 24, 39, 0.86);
+    color: #fff;
+    padding: 0.45em 1em;
+    border-radius: 999px;
+    font-size: 0.8em;
+    z-index: 900;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s;
+    white-space: nowrap;
+  }
+  #pan-hint.show { opacity: 1; }
   /* Mobile: hide the developer-oriented meta info in the canvas
      header (canvas_id, revision number, node/edge counts, clock).
      They're useful on the standalone viewer for debugging but waste
@@ -339,6 +378,7 @@
     <button id="overlay-play" type="button">▶ Play narration</button>
   </div>
 </div>
+<div id="pan-hint">⇄ drag the figure to see all of it</div>
 <script>
   // Mark the body as `embedded` when this viewer is loaded inside an
   // iframe (Studio's canvas pane).  The CSS rules above use this class
@@ -364,6 +404,35 @@
   const playBtn = document.getElementById('play-btn');
   const overlay = document.getElementById('play-overlay');
   const overlayPlay = document.getElementById('overlay-play');
+  const panHint = document.getElementById('pan-hint');
+
+  // Show the one-time pan hint whenever the figure overflows <main>.
+  // Dismisses itself on the first scroll or after a few seconds.
+  let panHintTimer = null;
+  function updatePanHint(main) {
+    if (!panHint || !main) return;
+    const overflowsX = main.scrollWidth  > main.clientWidth  + 6;
+    const overflowsY = main.scrollHeight > main.clientHeight + 6;
+    if (overflowsX || overflowsY) {
+      panHint.textContent = overflowsX
+        ? '⇄ drag the figure to see all of it'
+        : '↕ drag the figure to see all of it';
+      panHint.classList.add('show');
+      clearTimeout(panHintTimer);
+      panHintTimer = setTimeout(
+        () => panHint.classList.remove('show'), 5000);
+    } else {
+      panHint.classList.remove('show');
+    }
+  }
+  {
+    const mainEl = document.querySelector('main');
+    if (mainEl) {
+      mainEl.addEventListener('scroll', () => {
+        if (panHint) panHint.classList.remove('show');
+      }, {passive: true});
+    }
+  }
 
   // Narration manifest currently driving the highlight schedule.
   let narration = null;            // {duration_s, phrases: [...]}
@@ -546,16 +615,44 @@
     if (nx !== vx || ny !== vy || nw !== vw || nh !== vh) {
       svg.setAttribute('viewBox', `${nx} ${ny} ${nw} ${nh}`);
     }
-    // Cap the min dimensions so a runaway model output (viewBox
-    // 4000px wide) doesn't make scrolling feel infinite.  1100 / 800
-    // is a comfortable readable scale on any device.
-    svg.style.minWidth  = `${Math.min(nw, 1100)}px`;
-    svg.style.minHeight = `${Math.min(nh, 800)}px`;
-    // After the SVG settles, center `main`'s scroll on the content
-    // bounding box.  Without this, the default scroll position is
-    // (0, 0) — when the model lays out its figure on the right half
-    // of viewBox, the user sees an empty left half and has to
-    // discover horizontal scrolling.
+    const narrow = window.innerWidth <= 900;
+    if (!narrow) {
+      // Desktop: cap the min dimensions so a runaway model output
+      // (viewBox 4000px wide) doesn't make scrolling feel infinite.
+      // 1100 / 800 is a comfortable readable scale on a large screen.
+      svg.style.minWidth  = `${Math.min(nw, 1100)}px`;
+      svg.style.minHeight = `${Math.min(nh, 800)}px`;
+    } else {
+      // Mobile/tablet: CSS width:100% fits the figure to the canvas.
+      // Then enforce a text-legibility floor — computed DETERMINISTIC-
+      // ALLY from the SVG's own font sizes, not from measured pixels
+      // (getBoundingClientRect on rendered text differs between Blink/
+      // Gecko/WebKit, which made the same figure scroll on Chrome but
+      // fit on Firefox).  getComputedStyle().fontSize returns the font
+      // size in viewBox user units, identically on every engine.  The
+      // smallest glyph renders at  fontVB * renderedWidth / viewBoxW
+      // CSS px; widen the SVG until that reaches 11px.
+      svg.style.minHeight = '0px';
+      let minFontVB = Infinity;
+      svg.querySelectorAll('text, tspan').forEach(t => {
+        const fs = parseFloat(getComputedStyle(t).fontSize);
+        if (fs > 0.5 && fs < minFontVB) minFontVB = fs;
+      });
+      const FLOOR = 11;
+      const container =
+        (svg.closest('main') || document.body).clientWidth || 1;
+      let minW = 0;
+      if (minFontVB < Infinity && nw > 0) {
+        const required = nw * FLOOR / minFontVB;
+        if (required > container) {
+          minW = Math.min(1600, Math.ceil(required));
+        }
+      }
+      svg.style.minWidth = `${minW}px`;
+    }
+    // Once the SVG has settled, position the scroll: (mobile) align
+    // the figure's natural top-left into view; (desktop) centre on the
+    // content box.  Then surface the pan hint if the figure overflows.
     requestAnimationFrame(() => {
       try {
         const main = svg.closest('main');
@@ -563,20 +660,31 @@
         const svgRect = svg.getBoundingClientRect();
         const mainRect = main.getBoundingClientRect();
         if (!svgRect.width || !svgRect.height) return;
-        // bbox is in viewBox units; convert to client px proportional
-        // to the rendered SVG size.
         const scaleX = svgRect.width / nw;
         const scaleY = svgRect.height / nh;
-        const contentCx = (bbox.x + bbox.width / 2 - nx) * scaleX;
-        const contentCy = (bbox.y + bbox.height / 2 - ny) * scaleY;
-        // Where the centre should land in main's scrollable area:
-        // svg's left edge inside main + content centre in svg.
         const svgLeftInMain = svgRect.left - mainRect.left + main.scrollLeft;
         const svgTopInMain = svgRect.top - mainRect.top + main.scrollTop;
-        const targetX = svgLeftInMain + contentCx - mainRect.width / 2;
-        const targetY = svgTopInMain + contentCy - mainRect.height / 2;
-        if (targetX > 0) main.scrollLeft = targetX;
-        if (targetY > 0) main.scrollTop = targetY;
+        if (narrow) {
+          // Align the figure's top-left into view: the learner starts
+          // at the natural beginning (title, first matrix, left end of
+          // a number line) and pans right toward the answer.  Centring
+          // would hide BOTH edges and bury the start of the figure.
+          const contentL = (bbox.x - nx) * scaleX;
+          const contentT = (bbox.y - ny) * scaleY;
+          const tx = svgLeftInMain + contentL - 6;
+          const ty = svgTopInMain + contentT - 6;
+          if (tx > 0) main.scrollLeft = tx;
+          if (ty > 0) main.scrollTop = ty;
+        } else {
+          // Desktop: centre the scroll on the content bounding box.
+          const contentCx = (bbox.x + bbox.width / 2 - nx) * scaleX;
+          const contentCy = (bbox.y + bbox.height / 2 - ny) * scaleY;
+          const targetX = svgLeftInMain + contentCx - mainRect.width / 2;
+          const targetY = svgTopInMain + contentCy - mainRect.height / 2;
+          if (targetX > 0) main.scrollLeft = targetX;
+          if (targetY > 0) main.scrollTop = targetY;
+        }
+        updatePanHint(main);
       } catch (_) {}
     });
   }
