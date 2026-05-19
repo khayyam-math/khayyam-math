@@ -413,6 +413,11 @@
      The overlay is `#canvas-loading`; fix-btn is its DOM sibling, so
      the general-sibling combinator picks it up. */
   #canvas-loading:not([hidden]) ~ #fix-btn { display: none !important; }
+  /* And keep it hidden through the whole "still emerging" window —
+     after the loading overlay clears but before the `done` SSE event
+     fires (svg streaming, vision audit retries, narration synthesis).
+     Only show after the figure has fully landed. */
+  body.generating #fix-btn { display: none !important; }
 </style>
 </head>
 <body>
@@ -902,6 +907,10 @@
     // overlay too.
     const loadingEl = document.getElementById('canvas-loading');
     if (loadingEl) loadingEl.hidden = false;
+    // Mark the turn as in-flight so transient affordances (the
+    // "Not quite right?" button) stay hidden until the figure has
+    // FULLY emerged — i.e. the `done` SSE event has fired.
+    document.body.classList.add('generating');
     document.body.classList.add('has-canvas');
     appendMsg('user', user);
 
@@ -1301,6 +1310,9 @@
     } finally {
       input.disabled = false;
       sendBtn.disabled = false;
+      // Figure has fully emerged (or failed) — show the
+      // "Not quite right?" button again.
+      document.body.classList.remove('generating');
       // Always tear down the "Preparing visualisation" overlay when
       // the turn ends, regardless of how — success, server error,
       // network failure, user cancel.  Leaving the spinner up would
