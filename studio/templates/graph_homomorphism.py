@@ -64,15 +64,54 @@ Rules:
   ["v1","v2"] and ["v2","v1"]).
 - Every vertex of G MUST have a mapping entry.
 - The image f(v) for every vertex v must be a vertex of H.
-- For "C_n homomorphic to K_2": G is the n-cycle (n even); H is the
-  single-edge graph on {u1,u2}; alternate the mapping (v1->u1,
-  v2->u2, v3->u1, v4->u2, ...).
-- For "K_3 homomorphic to K_3": identity mapping is the obvious one.
 - A homomorphism cannot map an edge of G to a single vertex of H
   (no self-loops), unless H itself has that self-loop.
 
+CRITICAL CONSTRAINT (avoids the most common mistake):
+- A homomorphism G -> H exists ONLY IF chi(G) <= chi(H), where chi
+  is the chromatic number.  In particular, if H is K_2 (one edge,
+  two vertices), then G MUST be BIPARTITE — no odd cycles, no
+  triangles, no chords creating odd cycles.  An n-cycle is bipartite
+  iff n is EVEN.
+- If the user prompt is vague ("show graph homomorphism", "explain
+  it") and asks you to invent an example, USE THE CANONICAL EXAMPLE:
+    G = C_4 (vertices v1,v2,v3,v4 with edges v1-v2, v2-v3, v3-v4,
+    v4-v1, NO chord), H = single edge (vertices u1,u2 with edge
+    u1-u2), mapping v1->u1, v2->u2, v3->u1, v4->u2.
+- For "K_3 homomorphic to K_3": identity mapping.
+- Do NOT add chords to G unless the user explicitly asked for a
+  specific non-bipartite graph and then chose an H with chi >= 3.
+
+VERIFY YOUR OWN MAPPING BEFORE EMITTING: for every edge (a,b) in
+graph_g.edges, the pair (mapping[a], mapping[b]) MUST be in
+graph_h.edges.  If not, fix the mapping or change H.
+
 Respond with ONLY the JSON object.
 """
+
+
+# Canonical fallback used when the LLM cannot produce a valid mapping.
+# Guaranteed to verify; used as a teaching example for vague prompts.
+_CANONICAL_SPEC = {
+    "title": "Graph homomorphism: C_4 -> K_2",
+    "graph_g": {
+        "vertices": ["v1", "v2", "v3", "v4"],
+        "edges": [["v1", "v2"], ["v2", "v3"],
+                  ["v3", "v4"], ["v4", "v1"]],
+    },
+    "graph_h": {
+        "vertices": ["u1", "u2"],
+        "edges": [["u1", "u2"]],
+    },
+    "mapping": {"v1": "u1", "v2": "u2", "v3": "u1", "v4": "u2"},
+    "intro": ("A graph homomorphism is a function from the vertices "
+              "of one graph to the vertices of another that maps "
+              "every edge to an edge."),
+    "takeaway": ("Vertices of the 4-cycle alternate between the two "
+                 "colours of the target edge, so every edge of the "
+                 "cycle maps to the single edge of K_2 — that's what "
+                 "makes the function a homomorphism."),
+}
 
 
 async def _llm_emit_spec(
@@ -283,16 +322,35 @@ async def generate_homomorphism_svg(
     model: str = "gpt-4o-mini",
     max_attempts: int = 3,
 ) -> Optional[tuple[str, list[dict]]]:
-    """End-to-end: emit spec → verify → retry on failure → render."""
+    """End-to-end: emit spec → verify → retry on failure → render.
+
+    If every LLM attempt fails verification, render the canonical
+    C_4 -> K_2 example instead of returning None.  This guarantees
+    that any homomorphism-shaped prompt is served by the deterministic
+    Graphviz path — never by the free-hand LLM SVG fallback, which
+    routinely produces floating edges that don't terminate at node
+    centres.
+    """
     feedback = ""
+    last_problems: list[str] = []
     for _ in range(max_attempts):
         spec = await _llm_emit_spec(
             user_prompt, api_key=api_key, base_url=base_url, model=model,
             extra_feedback=feedback)
         if not spec:
-            return None
+            break   # LLM unreachable / unparseable — use canonical
         ok, problems = verify_homomorphism(spec)
         if ok:
-            return _render(spec)
-        feedback = "\n".join(f"  - {p}" for p in problems)
-    return None
+            rendered = _render(spec)
+            if rendered is not None:
+                return rendered
+            break   # rendering failed — fall through to canonical
+        last_problems = problems
+        feedback = ("\n".join(f"  - {p}" for p in problems)
+                    + "\n\nReminder: if H is K_2, G MUST be bipartite "
+                    "(no odd cycle, no triangle, no chord that creates "
+                    "an odd cycle).  If unsure, emit the canonical "
+                    "C_4 -> K_2 example exactly as described in the "
+                    "system rules.")
+    # Canonical fallback — guaranteed valid + deterministic figure.
+    return _render(_CANONICAL_SPEC)
