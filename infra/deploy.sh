@@ -50,6 +50,28 @@ case "$cmd" in
         echo "[deploy.sh] SEVIM_DOMAIN=$SEVIM_DOMAIN"
         echo "[deploy.sh] SEVIM_REDIRECT_DOMAINS=${SEVIM_REDIRECT_DOMAINS:-(unset)}"
         echo
+
+        # ── Quality gate ────────────────────────────────────────
+        # Run the test battery against the LOCAL build before any
+        # cdk deploy lands in production.  Set SEVIM_SKIP_QUALITY_GATE=1
+        # to bypass (emergency hotfix only); set
+        # SEVIM_QUALITY_GATE_FAST=1 to use the 3-prompt fast subset.
+        if [[ "${SEVIM_SKIP_QUALITY_GATE:-0}" == "1" ]]; then
+            echo "[deploy.sh] ⚠️  SEVIM_SKIP_QUALITY_GATE=1 — skipping pre-deploy quality gate."
+        else
+            echo "[deploy.sh] Running pre-deploy quality gate…"
+            if ! (cd .. && uv run python infra/quality_gate.py); then
+                echo
+                echo "[deploy.sh] ❌ Quality gate FAILED — deploy blocked."
+                echo "[deploy.sh] Fix the regressions above, or set"
+                echo "[deploy.sh]   SEVIM_SKIP_QUALITY_GATE=1 ./deploy.sh"
+                echo "[deploy.sh] to bypass (emergency hotfixes only)."
+                exit 2
+            fi
+            echo "[deploy.sh] ✅ Quality gate passed — proceeding with cdk deploy."
+            echo
+        fi
+
         exec npx aws-cdk deploy --require-approval=never "$@"
         ;;
     *)
