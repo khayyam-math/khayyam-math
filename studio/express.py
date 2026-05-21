@@ -2358,8 +2358,14 @@ async def express_figure(
             elif _math_results:
                 n_z3 = sum(1 for r in _math_results
                            if r.get("engine") == "z3")
-                engine_tag = (f" (z3 decided {n_z3} of "
-                              f"{len(_math_results)})" if n_z3 else "")
+                n_lean = sum(1 for r in _math_results
+                             if r.get("engine") == "lean")
+                tags: list[str] = []
+                if n_z3:
+                    tags.append(f"z3={n_z3}")
+                if n_lean:
+                    tags.append(f"lean={n_lean}")
+                engine_tag = (f" ({', '.join(tags)})" if tags else "")
                 _log(f"math-correctness verifier: all "
                      f"{len(_math_results)} claim(s) verified"
                      f"{engine_tag}")

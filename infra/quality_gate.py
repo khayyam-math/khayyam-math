@@ -490,6 +490,11 @@ BATTERY: list[TestPrompt] = [
     TestPrompt("alg_euler",
                "Verify Euler's identity: e^(i*pi) + 1 = 0",
                expect_claims=True),
+    # Closed Nat arithmetic — exercises the Lean third-tier verifier
+    # via gcd/lcm/factorial/power-of-2 claims that fall through Z3.
+    TestPrompt("arith_gcd",
+               "Show that gcd(24, 36) = 12 and 2^10 = 1024",
+               expect_claims=True),
 ]
 
 if FAST:

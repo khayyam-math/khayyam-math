@@ -72,10 +72,27 @@ RUN apt-get update \
         ca-certificates \
         graphviz \
         chromium \
+        curl \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
  && useradd --system --create-home --home-dir /home/sevim --uid 1001 sevim \
  && mkdir -p /var/sevim/canvases /opt/sevim/voices \
  && chown -R sevim:sevim /var/sevim /opt/sevim /app
+
+# ── Lean 4 (core — no Mathlib) ────────────────────────────────────────
+# The math_verifier's third tier (after SymPy + Z3) sends decidable
+# Nat-arithmetic claims through Lean's `decide` tactic for kernel-
+# checked rigour.  Mathlib (~3 GB) is NOT installed — that lives in
+# the offline catalog-verifier service.  Total cost ~300 MB.
+# Disable at runtime with SEVIM_LEAN_VERIFIER=off if needed.
+ENV ELAN_HOME=/opt/elan
+ENV PATH=/opt/elan/bin:$PATH
+RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+      -o /tmp/elan-init.sh \
+ && chmod +x /tmp/elan-init.sh \
+ && /tmp/elan-init.sh -y --default-toolchain stable \
+ && rm /tmp/elan-init.sh \
+ && ln -sf /opt/elan/bin/lean /usr/local/bin/lean \
+ && chown -R sevim:sevim /opt/elan
 
 # Copy the resolved venv, voice assets, and application source.
 COPY --from=builder --chown=sevim:sevim /app/.venv          /app/.venv

@@ -21,6 +21,7 @@ unfooled — distinct from the (LLM-based, fallible) vision audit.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 
@@ -159,6 +160,19 @@ def verify_claim(claim: dict) -> dict:
             return {"ok": False, "claim": claim,
                     "reason": z3r["reason"],
                     "engine": "z3"}
+        # Fourth try: Lean 4 core via `decide`.  Narrow scope (closed
+        # Nat arithmetic) but kernel-checked rigour when it fires.
+        leanr = _try_lean(a_text, b_text)
+        if leanr and leanr.get("ok"):
+            return {"ok": True, "claim": claim,
+                    "reason": "", "engine": "lean"}
+        if leanr and leanr.get("ok") is False \
+                and "unsupported" not in (leanr.get("reason") or "") \
+                and "timeout" not in (leanr.get("reason") or ""):
+            # Lean rejected with a concrete error — surface it.
+            return {"ok": False, "claim": claim,
+                    "reason": leanr["reason"],
+                    "engine": "lean"}
         return {"ok": False, "claim": claim,
                 "reason": f"not equal: a - b simplifies to {d2!s}",
                 "engine": "sympy"}
@@ -192,6 +206,29 @@ def _try_z3(a_text: str, b_text: str) -> dict | None:
                 continue
             return r   # decisive non-ok (counter-model / timeout)
         return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _try_lean(a_text: str, b_text: str) -> dict | None:
+    """Optional Lean 4 core fallback (third tier).
+
+    Lean is the highest-rigour available — kernel-checked dependent
+    types.  Without Mathlib the scope is narrow: closed Nat arithmetic
+    via `decide`.  Only fires when SymPy and Z3 are both inconclusive
+    AND the claim is closed Nat-only.
+    """
+    if os.environ.get("SEVIM_LEAN_VERIFIER", "on").lower() == "off":
+        return None
+    try:
+        from studio.templates import lean_verifier
+    except ImportError:
+        return None
+    if not lean_verifier.is_available():
+        return None
+    try:
+        return lean_verifier.verify_identity(a_text, b_text,
+                                              timeout_s=5.0)
     except Exception:  # noqa: BLE001
         return None
 
