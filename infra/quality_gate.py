@@ -360,6 +360,44 @@ def check_narration_phrases(pr: PromptResult) -> None:
            detail=f"{n} phrases")
 
 
+# Boilerplate openers we want to discourage in narration / chat.
+# Treat each as a regex that matches the FIRST ~80 chars of a phrase.
+_BOILERPLATE_OPENERS = (
+    r"\bwe (?:can )?see\b",
+    r"\bhere (?:we (?:can )?see|is|are)\b",
+    r"\bon the (?:left|right|top|bottom)\b",
+    r"\bthe (?:figure|diagram|image) shows\b",
+    r"\bin (?:this |the )?(?:figure|diagram)\b",
+    r"\bnote that .{0,30}\bis connected to\b",
+    r"\brecall that\b",
+    r"\bin mathematics, a\b",
+    r"\bfirst,? let'?s\b",
+    r"\bas (?:we|you) can see\b",
+)
+
+
+def check_no_boilerplate_opener(pr: PromptResult) -> None:
+    """Narration anti-padding: the FIRST narration phrase must not
+    open with a description-of-the-picture cliché.  Catches the
+    'we see X is connected to Y' regression class."""
+    # Pull all `"speak": "…"` strings from the server log slice in
+    # order, take the first.
+    speak_matches = re.findall(r'"speak"\s*:\s*"([^"]{0,300})"',
+                                pr.server_log)
+    if not speak_matches:
+        # No narration in window — let the dedicated check handle it.
+        pr.add("narration avoids boilerplate opener", "Narration",
+               True, "(no narration captured)")
+        return
+    first = speak_matches[0].strip().lower()[:120]
+    bad = [pat for pat in _BOILERPLATE_OPENERS
+           if re.search(pat, first, flags=re.IGNORECASE)]
+    pr.add("narration avoids boilerplate opener", "Narration",
+           passed=(not bad),
+           detail=(f"first phrase opens with cliché "
+                   f"({bad[0]!r}): {first[:80]!r}" if bad else ""))
+
+
 def check_no_reveal_mask(pr: PromptResult) -> None:
     """UX #32: no opacity:0 reveal mask on the root figure."""
     bad = bool(re.search(r'opacity\s*=\s*["\']0["\']',
@@ -634,6 +672,7 @@ def run_assertions(pr: PromptResult, tp: TestPrompt) -> None:
     check_no_verifier_failures(pr)
     check_template_route(pr, tp.expect_route)
     check_narration_phrases(pr)
+    check_no_boilerplate_opener(pr)
     check_no_reveal_mask(pr)
 
     # Performance criteria
