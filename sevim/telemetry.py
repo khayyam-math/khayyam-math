@@ -78,8 +78,28 @@ CREATE TABLE IF NOT EXISTS canvases (
     title            TEXT,
     svg              TEXT,
     narration_json   TEXT,
+    math_claims_json TEXT,
     accepted         INTEGER NOT NULL DEFAULT 0,
     model_id         TEXT NOT NULL DEFAULT 'gpt-4o'
+);
+
+-- One row per (canvas, claim_idx).  Populated by the OFFLINE
+-- Lean+Mathlib catalog verifier (studio/catalog_verifier.py).
+-- Status: 'verified' (Lean kernel accepted) | 'failed' (kernel
+-- rejected) | 'unsupported' (translator couldn't formalise) |
+-- 'timeout' | 'queued' (not yet attempted).
+CREATE TABLE IF NOT EXISTS lean_verifications (
+    canvas_id        TEXT NOT NULL,
+    claim_idx        INTEGER NOT NULL,
+    claim_a          TEXT,
+    claim_b          TEXT,
+    claim_kind       TEXT,
+    status           TEXT NOT NULL DEFAULT 'queued',
+    lean_source      TEXT,
+    lean_output      TEXT,
+    duration_s       REAL,
+    verified_at      REAL,
+    PRIMARY KEY (canvas_id, claim_idx)
 );
 
 CREATE TABLE IF NOT EXISTS repairs (
@@ -148,8 +168,23 @@ CREATE TABLE IF NOT EXISTS canvases (
     title            TEXT,
     svg              TEXT,
     narration_json   TEXT,
+    math_claims_json TEXT,
     accepted         INTEGER NOT NULL DEFAULT 0,
     model_id         TEXT NOT NULL DEFAULT 'gpt-4o'
+);
+
+CREATE TABLE IF NOT EXISTS lean_verifications (
+    canvas_id        TEXT NOT NULL,
+    claim_idx        INTEGER NOT NULL,
+    claim_a          TEXT,
+    claim_b          TEXT,
+    claim_kind       TEXT,
+    status           TEXT NOT NULL DEFAULT 'queued',
+    lean_source      TEXT,
+    lean_output      TEXT,
+    duration_s       DOUBLE PRECISION,
+    verified_at      DOUBLE PRECISION,
+    PRIMARY KEY (canvas_id, claim_idx)
 );
 
 CREATE TABLE IF NOT EXISTS repairs (
@@ -180,6 +215,9 @@ CREATE TABLE IF NOT EXISTS settings (
 ALTER TABLE turns    ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
 ALTER TABLE canvases ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
 ALTER TABLE repairs  ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
+-- Phase C (Lean+Mathlib offline catalog verifier) — store math
+-- claims alongside the canvas so the offline service can read them.
+ALTER TABLE canvases ADD COLUMN IF NOT EXISTS math_claims_json TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
@@ -489,28 +527,53 @@ class Telemetry:
         svg: str | None,
         narration: list[dict] | None,
         model_id: str = "gpt-4o",
+        math_claims: list[dict] | None = None,
     ) -> None:
         # ON CONFLICT (canvas_id) DO UPDATE replaces SQLite-specific
         # `INSERT OR REPLACE`; portable to Postgres.
         self._exec(
             """
             INSERT INTO canvases (canvas_id, session_id, turn_id, timestamp,
-                                  title, svg, narration_json, model_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                  title, svg, narration_json, math_claims_json,
+                                  model_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (canvas_id) DO UPDATE SET
-                session_id     = EXCLUDED.session_id,
-                turn_id        = EXCLUDED.turn_id,
-                timestamp      = EXCLUDED.timestamp,
-                title          = EXCLUDED.title,
-                svg            = EXCLUDED.svg,
-                narration_json = EXCLUDED.narration_json,
-                model_id       = EXCLUDED.model_id
+                session_id       = EXCLUDED.session_id,
+                turn_id          = EXCLUDED.turn_id,
+                timestamp        = EXCLUDED.timestamp,
+                title            = EXCLUDED.title,
+                svg              = EXCLUDED.svg,
+                narration_json   = EXCLUDED.narration_json,
+                math_claims_json = EXCLUDED.math_claims_json,
+                model_id         = EXCLUDED.model_id
             """,
             (
                 canvas_id, session_id, turn_id, time.time(),
-                title, svg, json.dumps(narration or []), model_id,
+                title, svg, json.dumps(narration or []),
+                json.dumps(math_claims or []) if math_claims else None,
+                model_id,
             ),
         )
+        # Enqueue each claim for the offline Lean+Mathlib catalog
+        # verifier.  Status starts as 'queued'; the verifier picks
+        # them up and updates in-place.
+        for idx, claim in enumerate(math_claims or []):
+            try:
+                self._exec(
+                    """
+                    INSERT INTO lean_verifications
+                        (canvas_id, claim_idx, claim_a, claim_b,
+                         claim_kind, status)
+                    VALUES (?, ?, ?, ?, ?, 'queued')
+                    ON CONFLICT (canvas_id, claim_idx) DO NOTHING
+                    """,
+                    (canvas_id, idx,
+                     str(claim.get("a", "")),
+                     str(claim.get("b", "")),
+                     str(claim.get("kind", ""))),
+                )
+            except Exception:  # noqa: BLE001
+                pass   # telemetry failures must never break canvas write
 
     def record_repair_pair(
         self,

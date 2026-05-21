@@ -611,6 +611,7 @@ async def _execute_tool(
             narration_phrases=narration,
             repairs=list(result.get("repairs") or []),
             flagged=flagged,
+            math_claims=list(result.get("math_claims") or []),
         ) -> None:
             try:
                 turn_id = tel.record_turn(
@@ -627,6 +628,7 @@ async def _execute_tool(
                     turn_id=turn_id, title=title, svg=svg,
                     narration=narration_phrases,
                     model_id=resolved_model_id,
+                    math_claims=math_claims,
                 )
                 for pair in repairs:
                     tel.record_repair_pair(
@@ -1581,6 +1583,65 @@ def admin_problems(_user: str = Depends(require_admin)) -> dict[str, Any]:
         "flagged": _rows(flagged, ("prompt", "ts", "canvas_id")),
         "errored": _rows(errored, ("prompt", "error", "ts")),
         "high_retry": _rows(high_retry, ("prompt", "retries", "ts")),
+    }
+
+
+@router.get("/admin/lean", include_in_schema=False)
+def admin_lean(_user: str = Depends(require_admin)) -> dict[str, Any]:
+    """Lean+Mathlib offline catalog verifier dashboard.
+
+    Reports counts by status across the last 30 days, plus the most
+    recent FAILED rows for triage.  Failures do NOT pull figures from
+    production — they're surfaced here for the operator to review.
+    """
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"available": False, "reason": "telemetry disabled"}
+
+    def _q(sql: str, args: tuple = ()) -> list:
+        try:
+            return tel.query(sql, args)
+        except Exception:  # noqa: BLE001
+            return []
+
+    counts: dict[str, int] = {}
+    for row in _q(
+            "SELECT status, COUNT(*) FROM lean_verifications "
+            "GROUP BY status"):
+        counts[row[0]] = int(row[1])
+
+    failed_rows = _q(
+        "SELECT v.canvas_id, v.claim_idx, v.claim_a, v.claim_b, "
+        "       v.claim_kind, v.lean_output, v.verified_at, c.title "
+        "FROM lean_verifications v "
+        "LEFT JOIN canvases c ON c.canvas_id = v.canvas_id "
+        "WHERE v.status IN ('failed','timeout') "
+        "ORDER BY v.verified_at DESC LIMIT 40")
+    recent_verified = _q(
+        "SELECT canvas_id, claim_idx, claim_a, claim_b, verified_at "
+        "FROM lean_verifications "
+        "WHERE status = 'verified' "
+        "ORDER BY verified_at DESC LIMIT 20")
+
+    failed = [
+        {"canvas_id": r[0], "claim_idx": r[1],
+         "a": (r[2] or "")[:120], "b": (r[3] or "")[:120],
+         "kind": r[4], "lean_output": (r[5] or "")[:400],
+         "verified_at": r[6], "title": (r[7] or "")[:120]}
+        for r in failed_rows
+    ]
+    verified = [
+        {"canvas_id": r[0], "claim_idx": r[1],
+         "a": (r[2] or "")[:120], "b": (r[3] or "")[:120],
+         "verified_at": r[4]}
+        for r in recent_verified
+    ]
+    return {
+        "available": True,
+        "counts": counts,
+        "failed_recent": failed,
+        "verified_recent": verified,
     }
 
 
