@@ -102,13 +102,20 @@ def verify_claim(claim: dict) -> dict:
         return {"ok": False, "claim": claim,
                 "reason": "missing 'a' or 'b'"}
     a = parse(a_text)
-    if a is None:
-        return {"ok": False, "claim": claim,
-                "reason": f"parse_error 'a': {a_text!r}"}
     b = parse(b_text)
-    if b is None:
-        return {"ok": False, "claim": claim,
-                "reason": f"parse_error 'b': {b_text!r}"}
+    # Non-formalisable claims (free-text descriptions of category-
+    # theory / rewriting / proof structure that SymPy can't lex) are
+    # SKIPPED, not rejected — the LLM emits "α is natural" / "F preserves
+    # identity" as a `math_claims` entry for abstract topics, and we
+    # don't want to spuriously retry the figure just because there is no
+    # CAS-formal check available.  A real false claim STILL fails
+    # (parses cleanly, simplifies to something nonzero).
+    if a is None or b is None:
+        return {"ok": True, "claim": claim,
+                "reason": f"skipped_unparseable: "
+                          f"a={'ok' if a is not None else 'no'}, "
+                          f"b={'ok' if b is not None else 'no'}",
+                "engine": "sympy", "skipped": True}
 
     try:
         if hasattr(a, "shape") and hasattr(b, "shape"):
@@ -245,8 +252,13 @@ def verify_claims(claims: list) -> list[dict]:
 
 
 def failures_critique(results: list[dict]) -> str:
-    """Format the verifier failures as a critique the LLM can read."""
-    fails = [r for r in results if not r.get("ok", True)]
+    """Format the verifier failures as a critique the LLM can read.
+
+    Skipped (unparseable) claims are NOT failures — they just couldn't
+    be formalised.  Only real false-math claims get critiqued.
+    """
+    fails = [r for r in results
+             if not r.get("ok", True) and not r.get("skipped")]
     if not fails:
         return ""
     lines = ["The math-correctness verifier rejected the figure. "

@@ -25,17 +25,58 @@ import json
 from typing import Any, Optional
 
 
-_KEYWORDS = (
-    "homomorphism", "graph homomorphism", "homomorphic",
-    "morphism between graphs", "edge-preserving map",
-    "edge preserving map", "homomorphic image",
-    "morphism of graphs",
+# Phrases that name graph homomorphism unambiguously — no further
+# disambiguation needed.
+_STRONG_KEYWORDS = (
+    "graph homomorphism", "morphism between graphs",
+    "morphism of graphs", "edge-preserving map", "edge preserving map",
+)
+
+# Soft keywords (anything containing "homomorph") that require a graph
+# context to fire, otherwise they could mean ring/group/relation/
+# term-algebra homomorphism — all valid algebra but unrelated to the
+# C_4 → K_2 graph-homomorphism figure this template renders.
+_SOFT_KEYWORDS = ("homomorphism", "homomorphic", "homomorphic image")
+
+# Graph-context anchors that promote a soft match into a real graph-
+# homomorphism prompt.
+_GRAPH_CONTEXT = (
+    "graph", "vertex", "vertices", "edge", "edges", "node", "nodes",
+    "k_2", "k_3", "k_4", "k_5", "c_3", "c_4", "c_5", "c_6", "c_7",
+    "k-graph", "cycle graph", "complete graph", "bipartite",
+)
+
+# Anti-keywords: if any of these appear, this is some OTHER kind of
+# homomorphism (ring/group/relation/term/category/module/lattice
+# homomorphism), NOT the graph kind — bail out even if "homomorphism"
+# is in the prompt.
+_NON_GRAPH_HOMOMORPHISM = (
+    "ring homomorphism", "group homomorphism", "module homomorphism",
+    "lattice homomorphism", "field homomorphism",
+    "relation homomorphism", "relation homomorphisms",
+    "term homomorphism", "algebra homomorphism",
+    "category homomorphism",
+    "preserved by relation homomorphism",
+    "preserved by relation homomorphisms",
 )
 
 
 def is_homomorphism_prompt(prompt: str) -> bool:
+    """True iff this prompt is asking for a GRAPH homomorphism (i.e.
+    something the C_4 → K_2 / Graphviz template can illustrate).
+
+    Returns False for ring / group / module / relation / term-algebra
+    homomorphisms — those share the keyword but want very different
+    figures.
+    """
     p = (prompt or "").lower()
-    return any(kw in p for kw in _KEYWORDS)
+    if any(bad in p for bad in _NON_GRAPH_HOMOMORPHISM):
+        return False
+    if any(kw in p for kw in _STRONG_KEYWORDS):
+        return True
+    if any(kw in p for kw in _SOFT_KEYWORDS):
+        return any(ctx in p for ctx in _GRAPH_CONTEXT)
+    return False
 
 
 HOMOM_SPEC_SYSTEM = """\

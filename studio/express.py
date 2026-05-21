@@ -2388,25 +2388,38 @@ async def express_figure(
             )
             _math_results = verify_claims(result.get("math_claims") or [])
             _math_critique = failures_critique(_math_results)
+            n_skipped = sum(1 for r in _math_results
+                            if r.get("skipped"))
             if _math_critique:
                 math_review_lines.append(_math_critique)
+                n_failed = sum(1 for r in _math_results
+                               if not r.get("ok", True)
+                               and not r.get("skipped"))
+                skip_tag = (f" ({n_skipped} skipped as unparseable)"
+                            if n_skipped else "")
                 _log(f"math-correctness verifier: "
-                     f"{sum(1 for r in _math_results if not r.get('ok',True))}"
-                     f" of {len(_math_results)} claim(s) FAILED")
+                     f"{n_failed} of {len(_math_results)} "
+                     f"claim(s) FAILED{skip_tag}")
             elif _math_results:
                 n_z3 = sum(1 for r in _math_results
-                           if r.get("engine") == "z3")
+                           if r.get("engine") == "z3"
+                           and not r.get("skipped"))
                 n_lean = sum(1 for r in _math_results
-                             if r.get("engine") == "lean")
+                             if r.get("engine") == "lean"
+                             and not r.get("skipped"))
                 tags: list[str] = []
                 if n_z3:
                     tags.append(f"z3={n_z3}")
                 if n_lean:
                     tags.append(f"lean={n_lean}")
+                if n_skipped:
+                    tags.append(f"skipped={n_skipped}")
                 engine_tag = (f" ({', '.join(tags)})" if tags else "")
-                _log(f"math-correctness verifier: all "
-                     f"{len(_math_results)} claim(s) verified"
-                     f"{engine_tag}")
+                n_verified = (len(_math_results) - n_skipped)
+                _log(f"math-correctness verifier: "
+                     f"{n_verified} verified, {n_skipped} skipped "
+                     f"(unparseable, no retry) of {len(_math_results)} "
+                     f"claim(s){engine_tag}")
         except Exception as exc:  # noqa: BLE001
             _log(f"math-correctness verifier errored "
                  f"(skipping): {type(exc).__name__}: {exc}")
@@ -3430,11 +3443,18 @@ def snap_edges_to_nodes(svg: str) -> str:
                 p1 = perim(n1, x2, y2)
                 p2 = perim(n2, x1, y1)
                 return p1[0], p1[1], p2[0], p2[1]
-            # small-gap, per endpoint.
+            # small-gap, per endpoint.  Two cases we always fix:
+            #   (a) endpoint INSIDE the node (d < r) → arrow marker
+            #       would render inside the node, hiding the head;
+            #   (b) endpoint within 2.6·r OFF the perimeter (d > r)
+            #       and not already on the perimeter (>4 px off).
             nx1, ny1, nx2, ny2 = x1, y1, x2, y2
-            if d1 <= n1[2] * 2.6 and abs(d1 - n1[2]) > 4.0:
+            r1, r2 = n1[2], n2[2]
+            inside1 = d1 < r1 - 1.0
+            inside2 = d2 < r2 - 1.0
+            if inside1 or (d1 <= r1 * 2.6 and abs(d1 - r1) > 4.0):
                 nx1, ny1 = perim(n1, x2, y2)
-            if d2 <= n2[2] * 2.6 and abs(d2 - n2[2]) > 4.0:
+            if inside2 or (d2 <= r2 * 2.6 and abs(d2 - r2) > 4.0):
                 nx2, ny2 = perim(n2, x1, y1)
             return nx1, ny1, nx2, ny2
 
@@ -3471,6 +3491,38 @@ def snap_edges_to_nodes(svg: str) -> str:
 
         svg = re.sub(r'(<path\b[^>]*\bd\s*=\s*["\'])([^"\']*)(["\'])',
                      _path_repl, svg)
+
+        # <polyline points="x,y x,y …"> — retract endpoints (first and
+        # last point) that sit inside a node.  Internal points untouched
+        # so curved / multi-segment connectors keep their shape.
+        def _polyline_repl(m: "re.Match[str]") -> str:
+            attrs = m.group(0)
+            pm = re.search(r'\bpoints\s*=\s*["\']([^"\']+)["\']', attrs)
+            if not pm:
+                return attrs
+            raw = pm.group(1)
+            pts = re.findall(r'(-?\d+\.?\d*(?:[eE][-+]?\d+)?)[, ]+'
+                             r'(-?\d+\.?\d*(?:[eE][-+]?\d+)?)', raw)
+            if len(pts) < 2:
+                return attrs
+            pts_f = [(float(x), float(y)) for x, y in pts]
+            n_first, d_first = nearest(*pts_f[0])
+            n_last, d_last = nearest(*pts_f[-1])
+            changed = False
+            if (n_first is not None and d_first < n_first[2] - 1.0):
+                pts_f[0] = perim(n_first, *pts_f[1])
+                changed = True
+            if (n_last is not None and d_last < n_last[2] - 1.0):
+                pts_f[-1] = perim(n_last, *pts_f[-2])
+                changed = True
+            if not changed:
+                return attrs
+            new_points = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts_f)
+            return re.sub(r'(\bpoints\s*=\s*["\'])[^"\']+(["\'])',
+                          lambda mm: f"{mm.group(1)}{new_points}"
+                                     f"{mm.group(2)}", attrs, count=1)
+
+        svg = re.sub(r"<polyline\b[^>]*>", _polyline_repl, svg)
         return svg
     except Exception:  # noqa: BLE001
         return svg
