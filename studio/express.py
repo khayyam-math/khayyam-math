@@ -2356,8 +2356,13 @@ async def express_figure(
                      f"{sum(1 for r in _math_results if not r.get('ok',True))}"
                      f" of {len(_math_results)} claim(s) FAILED")
             elif _math_results:
+                n_z3 = sum(1 for r in _math_results
+                           if r.get("engine") == "z3")
+                engine_tag = (f" (z3 decided {n_z3} of "
+                              f"{len(_math_results)})" if n_z3 else "")
                 _log(f"math-correctness verifier: all "
-                     f"{len(_math_results)} claim(s) verified")
+                     f"{len(_math_results)} claim(s) verified"
+                     f"{engine_tag}")
         except Exception as exc:  # noqa: BLE001
             _log(f"math-correctness verifier errored "
                  f"(skipping): {type(exc).__name__}: {exc}")

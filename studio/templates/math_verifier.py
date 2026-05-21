@@ -112,34 +112,88 @@ def verify_claim(claim: dict) -> dict:
     try:
         if hasattr(a, "shape") and hasattr(b, "shape"):
             if _matrices_equal(a, b, sp):
-                return {"ok": True, "claim": claim, "reason": ""}
+                return {"ok": True, "claim": claim,
+                        "reason": "", "engine": "sympy"}
             return {"ok": False, "claim": claim,
                     "reason": f"matrix mismatch: a={sp.simplify(a)}, "
-                              f"b={sp.simplify(b)}"}
+                              f"b={sp.simplify(b)}",
+                    "engine": "sympy"}
         if kind == "value":
             try:
                 na = complex(sp.N(a, 20))
                 nb = complex(sp.N(b, 20))
                 if abs(na - nb) < 1e-9 * max(1.0, abs(na), abs(nb)):
-                    return {"ok": True, "claim": claim, "reason": ""}
+                    return {"ok": True, "claim": claim,
+                            "reason": "", "engine": "sympy"}
+                # Try Z3 (it may decide the symbolic form even when
+                # numeric eval disagreed due to overflow / Float drift).
+                z3r = _try_z3(a_text, b_text)
+                if z3r and z3r.get("ok"):
+                    return {"ok": True, "claim": claim,
+                            "reason": "", "engine": "z3"}
                 return {"ok": False, "claim": claim,
-                        "reason": f"value mismatch: a≈{na}, b≈{nb}"}
+                        "reason": f"value mismatch: a≈{na}, b≈{nb}",
+                        "engine": "sympy"}
             except Exception:  # noqa: BLE001
                 pass  # fall through to symbolic
         # Default / "identity": prove a == b by simplifying the diff.
         d = sp.simplify(a - b)
         if d == 0:
-            return {"ok": True, "claim": claim, "reason": ""}
-        # A second try via expand and trigsimp for resistant identities.
+            return {"ok": True, "claim": claim,
+                    "reason": "", "engine": "sympy"}
+        # Second try: expand + trigsimp for resistant identities.
         d2 = sp.trigsimp(sp.expand(d))
         if d2 == 0:
-            return {"ok": True, "claim": claim, "reason": ""}
+            return {"ok": True, "claim": claim,
+                    "reason": "", "engine": "sympy"}
+        # Third try: Z3.  This catches nonlinear-arithmetic identities
+        # SymPy's simplify() can't crack (e.g. polynomial identities
+        # over reals, integer-only statements).
+        z3r = _try_z3(a_text, b_text)
+        if z3r and z3r.get("ok"):
+            return {"ok": True, "claim": claim,
+                    "reason": "", "engine": "z3"}
+        # If Z3 produced a concrete counter-model, surface that — it's
+        # more actionable feedback than "a - b simplifies to …".
+        if z3r and "counter_model" in (z3r.get("reason") or ""):
+            return {"ok": False, "claim": claim,
+                    "reason": z3r["reason"],
+                    "engine": "z3"}
         return {"ok": False, "claim": claim,
-                "reason": f"not equal: a - b simplifies to {d2!s}"}
+                "reason": f"not equal: a - b simplifies to {d2!s}",
+                "engine": "sympy"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "claim": claim,
                 "reason": f"verifier_error: "
-                          f"{type(exc).__name__}: {str(exc)[:80]}"}
+                          f"{type(exc).__name__}: {str(exc)[:80]}",
+                "engine": "sympy"}
+
+
+def _try_z3(a_text: str, b_text: str) -> dict | None:
+    """Optional Z3 fallback.  Returns None if Z3 is unavailable or
+    the claim is out of Z3's scope (transcendentals, matrices, …)."""
+    try:
+        from studio.templates import z3_verifier
+    except ImportError:
+        return None
+    if not z3_verifier.is_available():
+        return None
+    try:
+        # Try as integer first (catches divisibility / mod claims that
+        # are unsat over Q but sat over Z), then as real if integer
+        # translation fails to give a definitive answer.
+        for int_vars in (True, False):
+            r = z3_verifier.verify_identity(
+                a_text, b_text, integer_vars=int_vars, timeout_ms=3000)
+            if r.get("ok"):
+                return r
+            reason = r.get("reason") or ""
+            if "unsupported" in reason or "parse_error" in reason:
+                continue
+            return r   # decisive non-ok (counter-model / timeout)
+        return None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def verify_claims(claims: list) -> list[dict]:

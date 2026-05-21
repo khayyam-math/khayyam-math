@@ -28,6 +28,10 @@ dependencies = [
     # SymPy: exact symbolic math (derivatives, Hessians, integrals)
     # so the figure pipeline never relies on the LLM for arithmetic.
     "sympy>=1.13",
+    # Z3: SMT solver used as a second-tier check when SymPy can't
+    # decide an identity (especially nonlinear arithmetic and
+    # quantified statements).  Lightweight (~10 MB) Python bindings.
+    "z3-solver>=4.13",
 ]
 
 [project.optional-dependencies]
