@@ -392,6 +392,57 @@ class SevimStack(Stack):
                     ),
                 )
 
+        # ── 7c. Allowlist-friendly alias: math.REDACTED-domain ─────────────────
+        # The university content filter blocks new uncategorized .com
+        # domains by default; the .ae country-code TLD is auto-allow-
+        # listed at UAE universities because the registry is the UAE
+        # national one (aeDA).  We already own REDACTED-domain and host its DNS
+        # in this account, so we can mount the app at math.REDACTED-domain with
+        # zero new infrastructure: just a SAN cert + alias + a host-
+        # header forward rule routing to the same Fargate service.
+        # Both URLs (khayyammath.com and math.REDACTED-domain) resolve to the
+        # same backend; users on restricted networks get the .ae alias.
+        # Set SEVIM_XAM_ALIAS=off to disable this block.
+        if os.environ.get("SEVIM_XAM_ALIAS", "on").lower() != "off":
+            try:
+                xam_zone = route53.HostedZone.from_lookup(
+                    self, "XamZone", domain_name="REDACTED-domain",
+                )
+                xam_alias_name = "math.REDACTED-domain"
+                xam_alias_cert = acm.Certificate(
+                    self, "XamMathCert",
+                    domain_name=xam_alias_name,
+                    validation=acm.CertificateValidation.from_dns(
+                        xam_zone),
+                )
+                service.listener.add_certificates(
+                    "XamMathListenerCert",
+                    certificates=[xam_alias_cert],
+                )
+                route53.ARecord(
+                    self, "XamMathAlias",
+                    zone=xam_zone,
+                    record_name="math",   # → math.REDACTED-domain
+                    target=route53.RecordTarget.from_alias(
+                        r53_targets.LoadBalancerTarget(
+                            service.load_balancer),
+                    ),
+                )
+                service.listener.add_action(
+                    "XamMathForwardAction",
+                    # Distinct from www-redirect priority 50 and the
+                    # 7b loop (10..10+N).
+                    priority=60,
+                    conditions=[elbv2.ListenerCondition.host_headers(
+                        [xam_alias_name])],
+                    action=elbv2.ListenerAction.forward(
+                        target_groups=[service.target_group],
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[stack] XAM alias setup skipped: "
+                      f"{type(exc).__name__}: {exc}")
+
         # ── 7b'. www subdomain — same hosted zone as the apex domain ──
         # Adds www.<apex> as a 301-redirect alias to the apex.  Distinct
         # from 7b above because the www record lives inside the SAME
