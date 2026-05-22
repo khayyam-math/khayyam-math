@@ -30,6 +30,7 @@ Outputs:
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import aws_cdk as cdk
@@ -187,11 +188,18 @@ class SevimStack(Stack):
         # CDK builds the Docker image locally (needs `docker` on the
         # synth host) and pushes to a CDK-managed ECR repo.  For
         # CodeBuild-based remote builds, swap to a CdkPipeline.
+        # Pass the deploy-time git SHA via the Dockerfile's
+        # SEVIM_GIT_SHA build-arg.  This stamps every captured
+        # /studio/feedback row with the deploy it came from, so the
+        # admin recurrence-after-fix heuristic has a basis to compare.
+        sevim_git_sha = (os.environ.get("SEVIM_GIT_SHA")
+                         or "unknown")[:40]
         image_asset = ecr_assets.DockerImageAsset(
             self, "SevimImage",
             directory="..",  # repo root — Dockerfile lives there
             file="Dockerfile",
             platform=ecr_assets.Platform.LINUX_AMD64,
+            build_args={"SEVIM_GIT_SHA": sevim_git_sha},
         )
 
         # ── 6. ECS Fargate behind ALB ────────────────────────────────

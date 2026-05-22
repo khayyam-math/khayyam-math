@@ -1328,6 +1328,65 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
     yield {"event": "done", "data": json.dumps({"stop_reason": "max_steps"})}
 
 
+class FeedbackReq(BaseModel):
+    """Body of POST /studio/feedback.
+
+    The user pressed the "Not quite right?" button.  We CAPTURE the
+    report — we do NOT trigger a live regeneration.  Admins review
+    accumulated reports, ship a backend fix, and mark items resolved
+    with the commit SHA.  Future reports filed AFTER a resolved SHA
+    that echo a previously-fixed complaint can be flagged as
+    'recurrence after fix' and escalated.
+    """
+    user_description: str
+    canvas_id: str | None = None
+    original_prompt: str | None = None
+    session_id: str | None = None
+
+
+@router.post("/feedback")
+def post_feedback(
+    req: FeedbackReq,
+    user: str = Depends(require_user),
+) -> dict[str, Any]:
+    """Capture a 'Not quite right?' report — no regeneration here.
+
+    The returned ``thanks`` message is what the frontend toast shows
+    the learner; it MUST avoid implying that the figure on screen is
+    about to change.
+    """
+    desc = (req.user_description or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400,
+                            detail="user_description is required")
+    if len(desc) > 2000:
+        desc = desc[:2000]
+    try:
+        from sevim.telemetry import get_telemetry
+        tel = get_telemetry()
+        if tel is not None:
+            tel.record_feedback(
+                user_description=desc,
+                session_id=req.session_id,
+                user_email=user if user != "anonymous" else None,
+                canvas_id=req.canvas_id,
+                original_prompt=(req.original_prompt or "")[:2000],
+                git_sha=os.environ.get("SEVIM_GIT_SHA", "")[:40] or None,
+                model_id=os.environ.get("SEVIM_ACTIVE_MODEL", "gpt-4o"),
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Telemetry failure must never break the user's UX.
+        print(f"[feedback] record_feedback failed: "
+              f"{type(exc).__name__}: {exc}", flush=True, file=sys.stderr)
+    return {
+        "ok": True,
+        "thanks": "Thanks — your feedback has been recorded.  "
+                  "We review reports and improve the system between "
+                  "sessions, so the figure on screen won't change "
+                  "right now.",
+    }
+
+
 @router.post("/canvas/new")
 def new_canvas(user: str = Depends(require_user)) -> dict[str, str]:
     """Spawn a fresh canvas owned by the signed-in user."""
@@ -1602,6 +1661,128 @@ def admin_problems(_user: str = Depends(require_admin)) -> dict[str, Any]:
         "errored": _rows(errored, ("prompt", "error", "ts")),
         "high_retry": _rows(high_retry, ("prompt", "retries", "ts")),
     }
+
+
+@router.get("/admin/feedback", include_in_schema=False)
+def admin_feedback(
+    status: str = "open",
+    limit: int = 100,
+    _user: str = Depends(require_admin),
+) -> dict[str, Any]:
+    """List captured 'Not quite right?' reports.
+
+    `status` ∈ {open, resolved, escalated, all}.  Default 'open' so the
+    operator's primary view is the unresolved queue.  Escalation is
+    computed on read: any OPEN row whose `original_prompt` substring-
+    matches the prompt of a resolved row newer than its `resolved_sha`
+    is tagged 'recurrence' in the response (without changing the DB
+    status — the admin decides what to do).
+    """
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"available": False, "reason": "telemetry disabled"}
+    limit = max(1, min(int(limit or 100), 500))
+    where = ""
+    args: tuple = ()
+    if status in ("open", "resolved", "escalated"):
+        where = "WHERE status = ?"
+        args = (status,)
+    try:
+        rows = tel.query(
+            "SELECT feedback_id, timestamp, session_id, user_email, "
+            "canvas_id, original_prompt, user_description, git_sha, "
+            "model_id, status, resolved_at, resolved_sha, resolution_note "
+            "FROM feedback "
+            f"{where} ORDER BY timestamp DESC LIMIT ?", args + (limit,))
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": f"{type(exc).__name__}"}
+
+    cols = ("feedback_id", "ts", "session_id", "user_email",
+            "canvas_id", "original_prompt", "user_description",
+            "git_sha", "model_id", "status",
+            "resolved_at", "resolved_sha", "resolution_note")
+    items = [dict(zip(cols, r)) for r in rows]
+
+    # Recurrence heuristic: substring overlap on original_prompt between
+    # an OPEN row and a RESOLVED row newer than the open row's git_sha.
+    try:
+        resolved = tel.query(
+            "SELECT original_prompt, resolved_sha, resolved_at "
+            "FROM feedback WHERE status='resolved' "
+            "AND resolved_sha IS NOT NULL "
+            "ORDER BY resolved_at DESC LIMIT 500", ())
+    except Exception:  # noqa: BLE001
+        resolved = []
+    norm = lambda s: " ".join((s or "").lower().split())[:200]
+    resolved_prompts = [(norm(p), r_sha, r_at)
+                        for p, r_sha, r_at in resolved if p]
+    for it in items:
+        if it["status"] != "open":
+            it["recurrence"] = False
+            continue
+        op = norm(it.get("original_prompt"))
+        it["recurrence"] = False
+        if not op:
+            continue
+        for rp, r_sha, r_at in resolved_prompts:
+            if not rp:
+                continue
+            # Shared 12-char window or 60% overlap counts as a match
+            overlap = (op in rp) or (rp in op) or (
+                len(set(op.split()) & set(rp.split())) >= 4)
+            if overlap and r_at and r_at < (it.get("ts") or 0):
+                it["recurrence"] = True
+                it["matched_resolved_sha"] = r_sha
+                break
+
+    return {
+        "available": True,
+        "status_filter": status,
+        "count": len(items),
+        "items": items,
+    }
+
+
+class ResolveReq(BaseModel):
+    feedback_id: int
+    resolved_sha: str | None = None
+    resolution_note: str | None = None
+    status: str = "resolved"  # 'resolved' | 'escalated' | 'open'
+
+
+@router.post("/admin/feedback/resolve", include_in_schema=False)
+def admin_feedback_resolve(
+    req: ResolveReq,
+    _user: str = Depends(require_admin),
+) -> dict[str, Any]:
+    """Mark a feedback row resolved (or escalated, or re-open it).
+
+    `resolved_sha` is the commit SHA that addressed the issue.  Future
+    reports filed before that SHA AND echoing the same complaint will
+    appear in the listing with `recurrence: true` so the admin can
+    decide whether the underlying issue is deeper than the fix
+    addressed.
+    """
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        raise HTTPException(503, "telemetry disabled")
+    status = req.status if req.status in ("resolved", "escalated",
+                                           "open") else "resolved"
+    import time as _t
+    resolved_at = _t.time() if status != "open" else None
+    try:
+        tel._exec(
+            "UPDATE feedback "
+            "SET status = ?, resolved_at = ?, resolved_sha = ?, "
+            "    resolution_note = ? "
+            "WHERE feedback_id = ?",
+            (status, resolved_at, req.resolved_sha,
+             (req.resolution_note or "")[:1000], req.feedback_id))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}")
+    return {"ok": True, "feedback_id": req.feedback_id, "status": status}
 
 
 @router.get("/admin/lean", include_in_schema=False)

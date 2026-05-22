@@ -592,6 +592,23 @@ def global_checks() -> list[Check]:
         out.append(Check("HSTS header present", "Security",
                          False, f"{type(exc).__name__}"))
 
+    # /studio/feedback exists and accepts a POST without 5xx.  Captures
+    # the "Not quite right?" reports for offline triage; replaces the
+    # old live-regeneration behaviour that rarely converged.
+    try:
+        r = httpx.post(f"{BASE}/studio/feedback",
+                       json={"user_description": "quality-gate probe",
+                             "canvas_id": None,
+                             "original_prompt": "(probe)",
+                             "session_id": "gate-feedback"},
+                       timeout=5)
+        ok = r.status_code in (200, 401)   # 401 if auth required
+        out.append(Check("/studio/feedback accepts reports",
+                         "UX", ok, f"got {r.status_code}"))
+    except Exception as exc:  # noqa: BLE001
+        out.append(Check("/studio/feedback accepts reports",
+                         "UX", False, f"{type(exc).__name__}"))
+
     # Security: studio.html does not contain backend identifiers.
     try:
         r = httpx.get(f"{BASE}/studio", timeout=5)

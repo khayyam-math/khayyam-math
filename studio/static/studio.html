@@ -656,24 +656,68 @@
   const micBtn = document.getElementById('mic-btn');
   const fixBtn = document.getElementById('fix-btn');
 
-  // "Something's wrong" escape hatch: the user describes the problem,
-  // it's sent as a normal refinement turn (so the figure is repaired
-  // in place) but flagged so telemetry records it as a reported
-  // problem for the operator's problem-patterns view.
-  let flaggedTurn = false;
+  // "Not quite right?" — pure feedback capture.  We deliberately do NOT
+  // regenerate the figure live: LLM retries rarely converge on the same
+  // prompt and the user usually sees the same kind of error again.
+  // Instead we POST to /studio/feedback, which records the report; an
+  // operator reviews the queue at /studio/admin/feedback and ships a
+  // backend fix (prompt rule, new template, post-processor).  Future
+  // reports filed AFTER a resolved SHA that echo the same complaint
+  // are flagged 'recurrence' for escalation.
+  let flaggedTurn = false;   // legacy; left in for old code paths
   if (fixBtn) {
-    fixBtn.addEventListener('click', () => {
+    fixBtn.addEventListener('click', async () => {
       if (input.disabled) return;  // a turn is already running
       const what = window.prompt(
-        "What's wrong with this figure? Describe it and I'll fix it — "
-        + "for example: \"the triangle is too small\", \"use red\", "
-        + "\"step 3 is wrong\", \"the labels overlap\".");
-      if (what && what.trim()) {
-        input.value = 'Please fix the figure: ' + what.trim();
-        flaggedTurn = true;
-        sendMessage();
+        "What's not quite right? Describe it — e.g. \"the triangle is "
+        + "too small\", \"step 3 is wrong\", \"the labels overlap\".\n\n"
+        + "Your feedback goes to the team and informs the next backend "
+        + "fix.  The figure on screen will NOT change.");
+      const desc = (what || '').trim();
+      if (!desc) return;
+      try {
+        const r = await fetch('/studio/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            user_description: desc,
+            canvas_id: canvasId,
+            original_prompt: (history && history.length)
+              ? history[history.length - 1].content || ''
+              : '',
+            session_id: sessionId,
+          }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        showToast(j.thanks
+          || 'Thanks — your feedback has been recorded.');
+      } catch (exc) {
+        showToast("Couldn't send feedback right now — please try again.");
       }
     });
+  }
+
+  // Lightweight toast helper used by the feedback button.  Avoids the
+  // browser's native alert() because that's modal and blocking.
+  function showToast(message) {
+    let t = document.getElementById('km-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'km-toast';
+      t.style.cssText = 'position:fixed;left:50%;bottom:24px;'
+        + 'transform:translateX(-50%);max-width:520px;padding:14px 20px;'
+        + 'background:#1f2937;color:#fff;border-radius:10px;'
+        + 'font-family:Georgia,serif;font-size:15px;line-height:1.4;'
+        + 'box-shadow:0 4px 16px rgba(0,0,0,0.18);z-index:9999;'
+        + 'opacity:0;transition:opacity 0.18s ease;pointer-events:none;';
+      document.body.appendChild(t);
+    }
+    t.textContent = message;
+    t.style.opacity = '1';
+    clearTimeout(t._hideT);
+    t._hideT = setTimeout(() => { t.style.opacity = '0'; }, 4800);
   }
   const frame = document.getElementById('canvas-frame');
   const placeholder = document.getElementById('placeholder');

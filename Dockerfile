@@ -103,6 +103,13 @@ COPY --from=builder --chown=sevim:sevim /app/studio         /app/studio
 COPY --from=builder --chown=sevim:sevim /app/mcp_server     /app/mcp_server
 COPY --from=builder --chown=sevim:sevim /app/pyproject.toml /app/pyproject.toml
 
+# Build-time git SHA so /studio/feedback can stamp each captured
+# report with the deploy it came from.  Future reports filed AFTER a
+# resolved SHA that echo the same complaint get flagged 'recurrence'
+# in the admin view.  Passed by infra/deploy.sh.
+ARG SEVIM_GIT_SHA=unknown
+ENV SEVIM_GIT_SHA=$SEVIM_GIT_SHA
+
 # Defaults that make the image production-ready.  Overridden via the ECS
 # task definition or `docker run -e` for local smoke tests.
 #

@@ -102,6 +102,28 @@ CREATE TABLE IF NOT EXISTS lean_verifications (
     PRIMARY KEY (canvas_id, claim_idx)
 );
 
+-- User-reported figure problems captured via the "Not quite right?"
+-- button.  Pure capture — NO live regeneration happens.  Admins
+-- review accumulated reports, ship a backend fix (prompt update,
+-- new template, post-processor), and mark items resolved with the
+-- commit SHA so future reports referencing the same complaint can
+-- be flagged as 'recurrence after fix'.
+CREATE TABLE IF NOT EXISTS feedback (
+    feedback_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp          REAL NOT NULL,
+    session_id         TEXT,
+    user_email         TEXT,
+    canvas_id          TEXT,
+    original_prompt    TEXT,
+    user_description   TEXT NOT NULL,
+    git_sha            TEXT,
+    model_id           TEXT,
+    status             TEXT NOT NULL DEFAULT 'open',
+    resolved_at        REAL,
+    resolved_sha       TEXT,
+    resolution_note    TEXT
+);
+
 CREATE TABLE IF NOT EXISTS repairs (
     repair_id          INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id            INTEGER,
@@ -186,6 +208,27 @@ CREATE TABLE IF NOT EXISTS lean_verifications (
     verified_at      DOUBLE PRECISION,
     PRIMARY KEY (canvas_id, claim_idx)
 );
+
+CREATE TABLE IF NOT EXISTS feedback (
+    feedback_id        BIGSERIAL PRIMARY KEY,
+    timestamp          DOUBLE PRECISION NOT NULL,
+    session_id         TEXT,
+    user_email         TEXT,
+    canvas_id          TEXT,
+    original_prompt    TEXT,
+    user_description   TEXT NOT NULL,
+    git_sha            TEXT,
+    model_id           TEXT,
+    status             TEXT NOT NULL DEFAULT 'open',
+    resolved_at        DOUBLE PRECISION,
+    resolved_sha       TEXT,
+    resolution_note    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_status_ts
+    ON feedback (status, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_canvas
+    ON feedback (canvas_id);
 
 CREATE TABLE IF NOT EXISTS repairs (
     repair_id          BIGSERIAL PRIMARY KEY,
@@ -517,6 +560,31 @@ class Telemetry:
                 self._backend.commit()
         except Exception:  # noqa: BLE001
             pass
+
+    def record_feedback(
+        self,
+        user_description: str,
+        *,
+        session_id: str | None = None,
+        user_email: str | None = None,
+        canvas_id: str | None = None,
+        original_prompt: str | None = None,
+        git_sha: str | None = None,
+        model_id: str | None = None,
+    ) -> None:
+        """Record a "Not quite right?" report.  Pure capture — does NOT
+        trigger any regeneration.  Admins review and mark resolved."""
+        self._exec(
+            """
+            INSERT INTO feedback
+                (timestamp, session_id, user_email, canvas_id,
+                 original_prompt, user_description, git_sha, model_id,
+                 status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')
+            """,
+            (time.time(), session_id, user_email, canvas_id,
+             original_prompt, user_description, git_sha, model_id),
+        )
 
     def record_canvas(
         self,

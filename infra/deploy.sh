@@ -27,6 +27,12 @@ export AWS_PROFILE="${AWS_PROFILE:-sevim}"
 export CDK_DEFAULT_ACCOUNT="${CDK_DEFAULT_ACCOUNT:-REDACTED}"
 export CDK_DEFAULT_REGION="${CDK_DEFAULT_REGION:-us-east-1}"
 export SEVIM_DOMAIN="${SEVIM_DOMAIN:-khayyammath.com}"
+
+# Build-time git SHA — flows into the image as $SEVIM_GIT_SHA and
+# stamps every /studio/feedback row, so the admin recurrence-after-fix
+# heuristic can compare resolved-SHA vs. report-SHA.  HEAD by default;
+# override for replays.
+export SEVIM_GIT_SHA="${SEVIM_GIT_SHA:-$(git -C .. rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
 # SEVIM_REDIRECT_DOMAINS intentionally unset by default — the live
 # stack does not have typo-redirect ACM certs / Route53 aliases for
 # alternate domains.  Set explicitly in the caller's env if you
