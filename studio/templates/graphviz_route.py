@@ -87,6 +87,14 @@ def _make_svg_responsive(svg: str) -> str:
     if not m:
         return svg
     tag = m.group(0)
+    # Idempotent: if the root already carries our responsive
+    # max-width:100% style, do not re-apply (otherwise the tag ends
+    # up with TWO style= attributes, which makes the XML
+    # ill-formed — observed on Graph-theory prompts that route to
+    # the homomorphism template, which itself calls this helper
+    # after the underlying graphviz output already came through it).
+    if "max-width:100%" in tag:
+        return svg
     # Derive explicit pixel dimensions from the viewBox.  Keeping a
     # concrete width/height (instead of width="100%") means the SVG
     # has an intrinsic size, so headless rasterisation renders the

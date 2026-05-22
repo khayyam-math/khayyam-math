@@ -431,6 +431,27 @@ def check_no_arrowhead_inside_node(pr: PromptResult) -> None:
            detail=f"{bad} edge endpoint(s) sit inside a node circle")
 
 
+def check_svg_xml_valid(pr: PromptResult) -> None:
+    """Layout: the served SVG must be well-formed XML.  We saw 12/850
+    diff-{6,7,9} turns ship invalid SVG (duplicate `style=` from the
+    homomorphism template's double-wrap of Graphviz output) before
+    the fix.  Wrap as a virtual root so concatenated fragments (svg +
+    legend html) parse cleanly."""
+    if not pr.raw_svg:
+        pr.add("served SVG is valid XML", "Layout", True, "(no SVG)")
+        return
+    try:
+        from xml.etree import ElementTree as ET
+        s = re.sub(r"<\?xml[^?]*\?>", "", pr.raw_svg)
+        s = re.sub(r"<!DOCTYPE[^>]*>", "", s)
+        ET.fromstring(
+            f'<root xmlns:xlink="http://www.w3.org/1999/xlink">{s}</root>')
+        pr.add("served SVG is valid XML", "Layout", True, "")
+    except Exception as exc:  # noqa: BLE001
+        pr.add("served SVG is valid XML", "Layout", False,
+               f"{type(exc).__name__}: {str(exc)[:120]}")
+
+
 def check_narration_phrases(pr: PromptResult) -> None:
     """Narration #28: at least one narration phrase produced.
 
@@ -783,6 +804,7 @@ def run_assertions(pr: PromptResult, tp: TestPrompt) -> None:
     check_no_boilerplate_opener(pr)
     check_no_reveal_mask(pr)
     check_no_arrowhead_inside_node(pr)
+    check_svg_xml_valid(pr)
 
     # Performance criteria — deterministic-route turns finish in
     # <15s; LLM-SVG with vision-review retries can legitimately

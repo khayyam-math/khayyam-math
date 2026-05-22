@@ -324,8 +324,10 @@ def _render(spec: dict) -> Optional[tuple[str, list[dict]]]:
         f'margin-top:4px;">'
         f'<div style="font-weight:bold; color:#1a3a5c; font-size:1.05em;">'
         f'{title}</div>'
-        f'<div style="margin-top:6px; color:#555;">mapping&nbsp;'
-        f'<span style="font-family:monospace;">f</span>:&nbsp;{pairs}</div>'
+        # Use Unicode NBSP (U+00A0) instead of &nbsp; — XML parsers
+        # reject the named HTML entity unless it's declared in a DTD.
+        f'<div style="margin-top:6px; color:#555;">mapping '
+        f'<span style="font-family:monospace;">f</span>: {pairs}</div>'
         f'</div>')
     # The graphviz SVG is followed by the legend via <foreignObject> —
     # but the canvas viewer renders raw HTML alongside SVG happily
