@@ -431,6 +431,33 @@ def check_no_arrowhead_inside_node(pr: PromptResult) -> None:
            detail=f"{bad} edge endpoint(s) sit inside a node circle")
 
 
+def check_imperative_prompt_reaches_answer(pr: PromptResult,
+                                            expected_pattern: Optional[str]
+                                            ) -> None:
+    """Completeness check: for prompts that ASK FOR A VALUE (solve /
+    compute / find / evaluate / what is), the last narration phrase OR
+    the served SVG text must contain the expected answer pattern.
+    Without this check a system can pass every other gate while
+    teaching only the technique and never the answer."""
+    if not expected_pattern:
+        pr.add("imperative prompt reaches answer",
+               "Math correctness", True, "(no expected pattern)")
+        return
+    # Pull narration text from server log window
+    speak_phrases = re.findall(
+        r'"(?:text|speak)"\s*:\s*"([^"]{0,500})"', pr.server_log)
+    last_phrase = speak_phrases[-1] if speak_phrases else ""
+    svg_text = " ".join(re.findall(r">([^<]+)<", pr.raw_svg))
+    haystack = (last_phrase + " " + svg_text).lower()
+    seen = bool(re.search(expected_pattern, haystack,
+                          re.IGNORECASE | re.DOTALL))
+    pr.add("imperative prompt reaches answer",
+           "Math correctness",
+           passed=seen,
+           detail=("expected pattern not found in last phrase + svg: "
+                   f"{expected_pattern!r}" if not seen else ""))
+
+
 def check_svg_xml_valid(pr: PromptResult) -> None:
     """Layout: the served SVG must be well-formed XML.  We saw 12/850
     diff-{6,7,9} turns ship invalid SVG (duplicate `style=` from the
@@ -593,6 +620,7 @@ class TestPrompt:
     expect_claims: bool = False         # math_claims expected?
     expect_route: Optional[str] = None  # which fast-path should fire
     expect_nodes: bool = False          # check edge-endpoints?
+    expect_answer: Optional[str] = None # regex; last phrase or SVG must match
     # When the prompt exists only to test one specific assertion (e.g.
     # "homomorphism didn't fire for a non-graph prompt"), skip the
     # universal checks like perf/typography/arrowhead-inside-node —
@@ -643,6 +671,14 @@ BATTERY: list[TestPrompt] = [
     TestPrompt("arith_gcd",
                "Show that gcd(24, 36) = 12 and 2^10 = 1024",
                expect_claims=True),
+    # Completeness regression: "solve x^2-5x+6=0" must reach x=2 AND x=3
+    # in the last narration phrase or the SVG.  Before the FINISH-THE-
+    # PROBLEM rule, this prompt routinely stopped on "this illustrates
+    # the quadratic and its roots" — describing the technique, not
+    # giving the roots.
+    TestPrompt("solve_quad",
+               "Solve x^2 - 5x + 6 = 0.",
+               expect_answer=r"\b2\b.*\b3\b|\b3\b.*\b2\b"),
     # Anti-regression: this prompt mentions "homomorphism" but is
     # about RELATION homomorphisms, not graph homomorphisms.  The
     # homomorphism template MUST NOT fire — otherwise the user would
@@ -805,6 +841,7 @@ def run_assertions(pr: PromptResult, tp: TestPrompt) -> None:
     check_no_reveal_mask(pr)
     check_no_arrowhead_inside_node(pr)
     check_svg_xml_valid(pr)
+    check_imperative_prompt_reaches_answer(pr, tp.expect_answer)
 
     # Performance criteria — deterministic-route turns finish in
     # <15s; LLM-SVG with vision-review retries can legitimately
