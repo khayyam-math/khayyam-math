@@ -9,9 +9,7 @@
 [![Tests passing](https://img.shields.io/badge/tests-67_passing-brightgreen.svg)](#testing)
 [![Live demo](https://img.shields.io/badge/demo-khayyammath.com-orange.svg)](https://khayyammath.com)
 [![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v4-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)
-[![Zenodo DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20011107-purple.svg)](https://zenodo.org/records/20011107)
-
-[**Live demo**](https://khayyammath.com) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Paper**](https://zenodo.org/records/20011107)
+[**Live demo**](https://khayyammath.com) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md)
 
 ---
 
@@ -379,35 +377,29 @@ What's coming, in rough order:
 
 ## Research
 
-The architecture is described in a paper that is open at:
+A peer-reviewed paper describing this work has **not yet been
+published**. A manuscript is in preparation; this section will be
+updated once the paper has a DOI.
 
-* Zenodo preprint: [10.5281/zenodo.20011107](https://zenodo.org/records/20011107)
-* Companion negative-result work on neural layout correction:
-  see [`studio/neural_layout/PLAN.md`](studio/neural_layout/PLAN.md). We
-  trained LayoutDM-style discrete diffusion and a graph-conditioned
-  GNN delta-predictor on 22 K (broken, fixed) pairs; **neither beat
-  the trivial no-op baseline**. The trained **layout-quality scorer**
-  (1.8 M-param graph NN) DID land a measurable **+2 pp gpt-4o
-  pass-rate** improvement when used as a candidate re-ranker. All
-  models + training data + benchmark code in the repo.
+The companion negative-result work on neural layout correction lives
+in this repo:
+see [`studio/neural_layout/PLAN.md`](studio/neural_layout/PLAN.md). We
+trained LayoutDM-style discrete diffusion and a graph-conditioned
+GNN delta-predictor on 22 K (broken, fixed) pairs; **neither beat
+the trivial no-op baseline**. The trained **layout-quality scorer**
+(1.8 M-param graph NN) DID land a measurable **+2 pp gpt-4o
+pass-rate** improvement when used as a candidate re-ranker. All
+models + training data + benchmark code in the repo.
 
-If you cite this work, please use:
+If you'd like to cite the system in the meantime, please use the
+project URL together with the release version in your bibliography:
 
-```bibtex
-@article{kermani2026khayyammath,
-  title   = {Khayyam Math: Multi-Tool Routing, Vision-Audited
-             LLM-SVG, and Self-Distillation for Interactive Math
-             Tutoring},
-  author  = {Kermani Kolankeh, Arash},
-  journal = {Journal of Artificial Intelligence Research},
-  year    = {2026},
-  note    = {In submission; preprint: \url{https://zenodo.org/records/20011107}}
-}
+```
+Khayyam Math (Arash Kermani Kolankeh)
+https://github.com/khayyam-math/khayyam-math
+Released under the MIT licence.
 ```
 
-The companion CGF/EUROGRAPHICS paper on the deterministic SeVim
-backbone (cited by the JAIR draft) is at
-[Zenodo](https://zenodo.org/records/20011107).
 See [`CITATION.cff`](CITATION.cff) / [`NOTICE`](NOTICE) for the
 machine-readable metadata.
 
