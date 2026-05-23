@@ -129,49 +129,144 @@ back-ends. Switch between OpenAI and the fine-tuned Qwen model in a
 single line — same call signature, same return type, no other code
 changes.
 
+### Install
+
 ```bash
-pip install khayyam-math                # ~5 MB, OpenAI provider only
-pip install "khayyam-math[qwen]"        # +torch/transformers/peft for local Qwen
+# Light install — OpenAI / vLLM providers only (~5 MB + transitive deps)
+pip install khayyam-math
+
+# Full install — adds torch + transformers + peft + accelerate + safetensors
+# for local Qwen inference (~5 GB)
+pip install "khayyam-math[qwen]"
 ```
+
+The package is on **PyPI** at
+[pypi.org/project/khayyam-math](https://pypi.org/project/khayyam-math/).
+The HF model + repo are currently private during the soft-launch
+window; they will be public at GA.
+
+### Five-line quick start (OpenAI)
 
 ```python
 from khayyam_math import KhayyamMath
+client = KhayyamMath()                                # picks OPENAI_API_KEY from env
+result = client.generate("Solve x^2 - 5x + 6 = 0")
+print(result.solution)                                # 'x = 2 and x = 3'
+print(result.svg[:120])                               # '<svg width="300"…'
+```
 
-# Default — OpenAI GPT-4o.  Reads OPENAI_API_KEY from env.
-client = KhayyamMath()
+Real output from the call above:
 
-# Fine-tuned Qwen (downloads adapter from HF on first call).
+<p align="center">
+  <img src="docs/screenshots/newuser/openai_gpt4o_quadratic.png"
+       alt="GPT-4o output for the quadratic prompt" width="600">
+  <br>
+  <em>OpenAI GPT-4o, ~3 s end-to-end, 4 narration phrases.</em>
+</p>
+
+### Switching to the fine-tuned Qwen
+
+```python
+from khayyam_math import KhayyamMath
 client = KhayyamMath(provider="qwen",
-                     model="khayyam-math/khayyam-math-qwen2.5-7b-v4")
+                     model="khayyam-math/khayyam-math-qwen2.5-7b-v4",
+                     hf_token="hf_…")                 # while the model is private
+result = client.generate("Solve x^2 - 5x + 6 = 0")
+```
 
-# Production-style: hit a running vLLM server.
+First call downloads the LoRA adapter (~162 MB) and, if not already
+cached, the Qwen 2.5-7B base (~14 GB) into `~/.cache/huggingface/`.
+Inference runs on GPU if available, otherwise CPU (very slow).
+
+Same prompt, **fine-tuned Qwen v4** output (richer figure than GPT-4o
+on this prompt — number line with both roots marked, 7 narration phrases):
+
+<p align="center">
+  <img src="docs/screenshots/newuser/qwen_v4_quadratic.png"
+       alt="Khayyam-Math Qwen v4 output for the quadratic prompt" width="600">
+  <br>
+  <em>Khayyam-Math Qwen 2.5-7B v4 on RTX 5090, ~23 s end-to-end after a
+  ~15 s one-time model load, 7 narration phrases.</em>
+</p>
+
+### Production-style: remote vLLM endpoint
+
+```python
 client = KhayyamMath(provider="qwen-vllm",
                      base_url="http://localhost:8000/v1",
                      model="khayyam-v4")
+```
 
-# Same call regardless of provider:
-result = client.generate("Solve x^2 - 5x + 6 = 0")
-print(result.svg)         # rendered figure
-print(result.narration)   # phrase-timed walkthrough
-print(result.math_claims) # symbolic identities the figure depends on
+To stand up the vLLM server:
+
+```bash
+vllm serve Qwen/Qwen2.5-7B-Instruct \
+  --enable-lora \
+  --lora-modules khayyam-v4=khayyam-math/khayyam-math-qwen2.5-7b-v4 \
+  --max-lora-rank 16 --dtype bfloat16
 ```
 
 ### Provider table
 
-| Provider | Install | When to use |
-|---|---|---|
-| `openai` | `pip install khayyam-math` | Default. Fastest path, no GPU needed. Pay per call. |
-| `qwen` | `pip install khayyam-math[qwen]` | Local inference. Requires GPU for usable throughput. Free after install. |
-| `qwen-vllm` | `pip install khayyam-math` | Production. You run vLLM on your own hardware and the package just talks to it. |
+| Provider | Install | Throughput | When to use |
+|---|---|---|---|
+| `openai` | `pip install khayyam-math` | ~3 s / prompt | Default. No GPU needed. Pay per call. |
+| `qwen` | `pip install khayyam-math[qwen]` | ~20 s / prompt on GPU; minutes on CPU | Local inference. Free after install. |
+| `qwen-vllm` | `pip install khayyam-math` | ~5 s / prompt | Production. You run vLLM on your own hardware; package just talks to it. |
 
-You can also set the provider/model via environment variables, so the
-same Python code works in dev and production:
+### Configure via env vars
+
+The same Python code works in dev and production by reading from the
+environment:
 
 ```bash
 export KHAYYAM_PROVIDER=qwen-vllm
 export KHAYYAM_MODEL=khayyam-v4
 export KHAYYAM_VLLM_URL=https://qwen.internal.mycompany.com/v1
 ```
+
+```python
+from khayyam_math import KhayyamMath
+client = KhayyamMath()                                # reads all three env vars
+```
+
+### The unified result object
+
+`client.generate(prompt)` always returns a `GenerationResult` regardless
+of provider:
+
+```python
+@dataclass
+class GenerationResult:
+    svg: str                                          # extracted SVG string
+    narration: list[dict]                             # [{speak, highlight}, ...]
+    problem_statement: str                            # the model's restatement
+    solution: str                                     # worked answer text
+    math_claims: list[dict]                           # [{a, b}, ...] symbolic identities
+    raw: dict                                         # full JSON from the model
+    provider: str                                     # 'openai' | 'qwen' | 'qwen-vllm'
+    model: str                                        # model id used
+```
+
+A shortcut for "just the figure":
+
+```python
+svg = client.generate_figure("Show the unit circle with 30°, 45°, 60°")
+```
+
+### What's bundled, what's not
+
+The `khayyam-math` pip package is the **public client API** + the
+three provider back-ends. The full production stack on
+[khayyammath.com](https://khayyammath.com) layers additional
+deterministic engines on top (Graphviz, matplotlib, Plotly, SymPy
+templates, the CP-SAT layout planner, the Lean+Z3+Mathlib verifier
+chain). Those live in this same git repo under `studio/` and
+`service/` and are imported by the production runtime — they are
+not part of the pip-installable surface today. If you need the full
+production behaviour, clone the repo and run `studio/` directly
+(see the next section), or call the production HTTP API at
+khayyammath.com.
 
 The fine-tuned Qwen model is documented on Hugging Face:
 **[huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)**.

@@ -67,20 +67,31 @@ class QwenProvider:
             {"role": "system", "content": system},
             {"role": "user",   "content": user},
         ]
-        inputs = self.tokenizer.apply_chat_template(
+        # transformers 5.x changed apply_chat_template's return type
+        # depending on tokenize/return_dict flags: older releases returned
+        # a tensor when return_tensors="pt", newer releases return a
+        # BatchEncoding dict.  Normalise to (input_ids, attention_mask).
+        encoded = self.tokenizer.apply_chat_template(
             messages,
-            return_tensors="pt",
             add_generation_prompt=True,
-        ).to(self.model.device)
+            tokenize=True,
+            return_tensors="pt",
+            return_dict=True,
+        )
+        input_ids = encoded["input_ids"].to(self.model.device)
+        attention_mask = encoded.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.model.device)
 
         do_sample = temperature > 0
         with torch.no_grad():
             out = self.model.generate(
-                inputs,
+                input_ids,
+                attention_mask=attention_mask,
                 max_new_tokens=max_tokens,
                 do_sample=do_sample,
                 temperature=temperature if do_sample else 1.0,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
-        gen_tokens = out[0, inputs.shape[1]:]
+        gen_tokens = out[0, input_ids.shape[1]:]
         return self.tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
