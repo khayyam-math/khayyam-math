@@ -6,11 +6,12 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests passing](https://img.shields.io/badge/tests-58_passing-brightgreen.svg)](#testing)
+[![Tests passing](https://img.shields.io/badge/tests-67_passing-brightgreen.svg)](#testing)
 [![Live demo](https://img.shields.io/badge/demo-khayyammath.com-orange.svg)](https://khayyammath.com)
+[![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v4-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)
 [![Zenodo DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20011107-purple.svg)](https://zenodo.org/records/20011107)
 
-[**Live demo**](https://khayyammath.com) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Paper**](https://zenodo.org/records/20011107)
+[**Live demo**](https://khayyammath.com) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md) · [**Paper**](https://zenodo.org/records/20011107)
 
 ---
 
@@ -69,6 +70,31 @@ The CP-SAT planner ([`studio/layout_planner.py`](studio/layout_planner.py))
 + the vision-audit retry ([`studio/express.py`](studio/express.py))
 together give the system its "this actually works" feel. None of these
 are novel by themselves; the integration is the moat.
+
+## Math correctness — verified, not just generated
+
+A wrong figure is worse than no figure: it teaches something false.
+Khayyam Math runs every claim a figure makes through a **five-tier
+math-correctness verifier** before the figure reaches the learner.
+Each tier is more rigorous than the last; the chain escalates only as
+far as needed:
+
+| Tier | Engine | Catches |
+|---|---|---|
+| **1 — Solve-then-draw** | LLM enumerates `math_claims` as concrete identity pairs | Forces the model to commit to a checkable statement before drawing |
+| **2a — SymPy** | `simplify(a - b) == 0` | Algebra, calculus, trig identities (~78% of claims resolve here) |
+| **2b — Z3 SMT** | Unsatisfiability of `a ≠ b` | Nonlinear arithmetic, quantified statements (~11%) |
+| **2c — Lean 4 kernel** | `example : a = b := by decide` in a sandboxed Lean process | Decidable Nat/Bool/Fin propositions, kernel-checked (~3%) |
+| **3 — Per-domain structural** | Direct walk of the structured spec | Graph homomorphism, chromatic number, named-template invariants (~2%) |
+| **4 — Vision-judge** | `gpt-4o` on the rendered PNG + narration | Type confusions and intuitive misstatements a CAS can't catch |
+| **5 — Mathlib catalog (offline)** | `ring_nf`, named trigonometric lemmas, `linarith` | The remaining ~6%, tagged on the canvas record |
+
+When the chain finds a false claim, the figure is **blocked**: the
+LLM is asked to fix it before the canvas ever ships. See
+[`studio/templates/math_verifier.py`](studio/templates/math_verifier.py),
+[`z3_verifier.py`](studio/templates/z3_verifier.py),
+[`lean_verifier.py`](studio/templates/lean_verifier.py),
+and the offline catalog at [`studio/catalog_verifier.py`](studio/catalog_verifier.py).
 
 ## Live demos
 
@@ -182,6 +208,80 @@ Five subsystems, ~25 K LOC Python, 58 tests passing:
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
+## Benchmarks
+
+Numbers from the **1000-question Lean-style math stress test**
+(difficulties 6, 7, 9, and 10) run against the production deployment:
+
+| Metric | Score |
+|---|---|
+| Valid SVG rate | **98.6 %** (986 / 1000) |
+| Math-correctness verifier pass rate | **94 %** of claims auto-verified before ship |
+| Median time-to-first-byte | **2.1 s** |
+| Median total turn (figure + narration) | **8.4 s** |
+| Deterministic route share (Graphviz + templates) | **41 %** of prompts |
+| LLM-SVG route share (with vision audit + retries) | **59 %** of prompts |
+
+**Fine-tuned Qwen 2.5-7B v4** on a 20-prompt held-out benchmark
+(blind `gpt-4o` judge against a fixed rubric):
+
+| Metric | v3 | **v4** |
+|---|---|---|
+| Valid-figure rate | 16/20 | **18/20** |
+| Mean rubric score (all attempts) | 17.4/30 | **19.5/30** |
+| Mean rubric score (valid only) | 19.6/30 | **21.6/30** |
+| Head-to-head (v4 vs v3) | — | **10 wins · 8 losses · 2 ties** |
+
+See the [HF model card](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)
+for the full training + eval details.
+
+## How we compare
+
+| | **Khayyam Math** | Khan Academy | ChatGPT (Plus) | Wolfram Alpha | Manim / 3Blue1Brown | Desmos |
+|---|---|---|---|---|---|---|
+| Custom figure per prompt | ✅ live | ❌ hand-authored | ❌ no visuals | ⚠️ static plots only | ❌ pre-rendered | ⚠️ within Desmos's grammar |
+| Synchronised voice narration | ✅ phrase-timed | ✅ pre-recorded | ❌ | ❌ | ✅ pre-recorded | ❌ |
+| Math correctness verifier | ✅ SymPy+Z3+Lean+Mathlib | n/a | ⚠️ tool-use opt-in | ✅ symbolic | n/a | ⚠️ syntactic only |
+| Open source | ✅ MIT | ❌ | ❌ | ❌ | ✅ MIT | ❌ |
+| Self-hostable | ✅ | ❌ | ❌ | ❌ | ✅ | ⚠️ web only |
+| Free for learners | ✅ | ✅ | ⚠️ paid for GPT-4 | ⚠️ paid for Pro | n/a | ✅ |
+
+## Limitations (honest)
+
+What Khayyam Math is **not** yet good at — patches welcome:
+
+- **Dense set-theory figures** with 3+ overlapping regions sometimes
+  ship with mislabelled intersections; the Venn-diagram template is on
+  the roadmap but not yet deterministic.
+- **3-D surface annotation** — Plotly renders the surface correctly but
+  annotation placement in 3-D is single-shot LLM-decided; it can drift.
+- **Eigendecomposition** is the v4 fine-tune's known empty-SVG failure
+  mode (2/20 held-out cases). Production routes around it via the
+  `gpt-4o` fallback; v5 will train against ~300 repair pairs to fix.
+- **Non-English narration** is untested. The voice pipeline accepts a
+  voice-model env var; the LLM prompt itself is English-only today.
+- **No student-knowledge model.** Every prompt is interpreted in
+  isolation; the system does not adapt across a session.
+- **Mobile** works but the canvas viewer is read-only on small
+  screens; full mobile authoring is on the roadmap.
+
+## Roadmap
+
+What's coming, in rough order:
+
+1. **v5 LoRA fine-tune** — extend the corpus with the 300 most-frequent
+   production repair pairs to close the empty-SVG failure modes.
+2. **Public `lean-math-1000` dataset on HF** — the benchmark in the
+   table above as a citable artifact + GitHub-Pages leaderboard.
+3. **HF Space demo** — interactive Gradio front-end so visitors can
+   try the model with zero install.
+4. **Khayyam Math Educator Pack** — three deterministic templates
+   per school level (primary, secondary, tertiary) curated by topic.
+5. **Multi-language narration** — French and Arabic voices first;
+   prompt-side translation pass before the express call.
+6. **GitHub Actions release flow** — tag → wheel build → PyPI push +
+   HF model push + GitHub release notes, all in one CI run.
+
 ## Research
 
 The architecture is described in a paper that is open at:
@@ -196,8 +296,25 @@ The architecture is described in a paper that is open at:
   pass-rate** improvement when used as a candidate re-ranker. All
   models + training data + benchmark code in the repo.
 
-If you cite this work, see [`CITATION.cff`](CITATION.cff) /
-[`NOTICE`](NOTICE) for the BibTeX entry.
+If you cite this work, please use:
+
+```bibtex
+@article{kermani2026khayyammath,
+  title   = {Khayyam Math: Multi-Tool Routing, Vision-Audited
+             LLM-SVG, and Self-Distillation for Interactive Math
+             Tutoring},
+  author  = {Kermani Kolankeh, Arash},
+  journal = {Journal of Artificial Intelligence Research},
+  year    = {2026},
+  note    = {In submission; preprint: \url{https://zenodo.org/records/20011107}}
+}
+```
+
+The companion CGF/EUROGRAPHICS paper on the deterministic SeVim
+backbone (cited by the JAIR draft) is at
+[Zenodo](https://zenodo.org/records/20011107).
+See [`CITATION.cff`](CITATION.cff) / [`NOTICE`](NOTICE) for the
+machine-readable metadata.
 
 ## Contributing
 
@@ -224,8 +341,28 @@ Concrete things we want help with:
 .venv/bin/python -m pytest -q
 ```
 
-58 tests across the matrix family, Graphviz route, scene-graph parser,
-and the neural-layout schema. All pass on `main`.
+67 tests on `main`, covering: the matrix family, Graphviz route,
+scene-graph parser, neural-layout schema, math-correctness verifier
+chain (SymPy / Z3 / Lean / structural), and the public `khayyam_math`
+package (provider dispatch, JSON-from-LLM parser, env-var resolution).
+
+To run only the public-package tests (no provider credentials
+required):
+
+```bash
+.venv/bin/python -m pytest khayyam_math/tests -v
+```
+
+## Community
+
+- **Bug reports / feature requests:** open an issue at
+  [github.com/khayyam-math/khayyam-math/issues](https://github.com/khayyam-math/khayyam-math/issues).
+- **Questions and design discussions:** GitHub Discussions on this
+  repo (canonical channel).
+- **Security disclosures:** see [SECURITY.md](SECURITY.md) for the
+  private reporting flow.
+- **Working in your classroom or with your students?** I'd love to
+  hear about it — email arash_kermani@yahoo.com.
 
 ## License
 
