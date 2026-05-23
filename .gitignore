@@ -78,9 +78,20 @@ runs/
 # filing's contents and git history would make it permanent.
 uae_ip_registration/
 
-# v5 practical-test per-prompt artefacts (40 SVGs + 40 raw responses, ~800 KB).
-# The summary.json and POSTMORTEM.md are kept tracked; the per-prompt
-# files are too noisy for git and live alongside them in
-# s3://<your-lora-bucket>/qwen_lora_v5_rejected/practical_test/
+# v5 practical-test per-prompt artefacts (40 SVGs + 40 raw responses,
+# ~800 KB).  The summary.json and POSTMORTEM.md are kept tracked;
+# the per-prompt files are too noisy for git and live alongside them
+# in the operator's own S3 bucket configured via SEVIM_EXPORT_S3_BUCKET.
 runs/v5_practical_test/*.svg
 runs/v5_practical_test/*.raw.txt
+
+
+# CDK cache file — contains the deployer's AWS account ID and
+# Route 53 hosted-zone IDs.  Per-account; regenerated on first
+# `cdk synth`.  Must never be committed to a public repo.
+infra/cdk.context.json
+
+# Private business / outreach drafts — not part of the open-source
+# product surface; live in the repo for the author's convenience.
+docs/application_openai_startup.md
+docs/email_openai_education_contact.md

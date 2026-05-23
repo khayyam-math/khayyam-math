@@ -115,9 +115,11 @@ def main() -> int:
         print("  git diff studio/app.py infra/sevim_stack.py")
         print(f"  git add studio/app.py infra/sevim_stack.py")
         print(f"  git commit -m 'promote {args.model_id} as active'")
-        print("  cd infra && AWS_PROFILE=sevim CDK_DEFAULT_ACCOUNT=REDACTED \\")
-        print("    CDK_DEFAULT_REGION=us-east-1 SEVIM_DOMAIN=khayyammath.com \\")
-        print("    npx aws-cdk deploy --require-approval never")
+        print("  cd infra && AWS_PROFILE=<your-aws-profile> \\")
+        print("    CDK_DEFAULT_ACCOUNT=<your-12-digit-account-id> \\")
+        print("    CDK_DEFAULT_REGION=us-east-1 \\")
+        print("    SEVIM_DOMAIN=<your-route53-domain> \\")
+        print("    ./deploy.sh")
         return 0
     print("Nothing to change.")
     return 0

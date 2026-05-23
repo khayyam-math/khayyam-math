@@ -14,8 +14,8 @@
 # Env (typical defaults shown):
 #   SEVIM_TELEMETRY_DB              postgresql://... (production) or
 #                                   ~/.local/share/sevim/telemetry.db (dev)
-#   SEVIM_EXPORT_S3_BUCKET          sevim-prod-training       (export upload)
-#   SEVIM_LORA_S3_BUCKET            sevim-prod-loras           (artefact upload)
+#   SEVIM_EXPORT_S3_BUCKET          <your-training-bucket>       (export upload)
+#   SEVIM_LORA_S3_BUCKET            <your-lora-bucket>           (artefact upload)
 #   SEVIM_LORA_INCUMBENT            qwen_lora_v2               (the model to beat)
 #   SEVIM_LORA_BASE_MODEL           Qwen/Qwen2.5-7B-Instruct
 #   SEVIM_PROMOTION_DELTA           1.0   (judge delta required to swap)

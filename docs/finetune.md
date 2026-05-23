@@ -176,13 +176,13 @@ three-set Venn).
 
 Push to **both** S3 (production inference cache) and HuggingFace
 (public discovery surface). The two are kept in lockstep so the
-production vLLM container and the public `khayyam-math` pip package
+production vLLM container and downstream `khayyam_math` clients
 load the same bytes.
 
 ### 4.1 S3 (production source of truth)
 
 ```bash
-AWS_PROFILE=sevim aws s3 sync /tmp/qwen-v5/ \
+AWS_PROFILE=<your-aws-profile> aws s3 sync /tmp/qwen-v5/ \
   s3://<your-lora-bucket>/qwen_lora_v5/
 ```
 
@@ -190,7 +190,7 @@ Update the active-model setting from `/studio/admin` (or via the
 CDK secret value `SEVIM_DEFAULT_ACTIVE_MODEL`) once you're ready
 to switch traffic.
 
-### 4.2 HuggingFace (public + the pip package)
+### 4.2 HuggingFace (public discovery surface)
 
 You need an HF write token scoped to the `khayyam-math` org. See
 the **"HF token — exact configuration"** section in the README for

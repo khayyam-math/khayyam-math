@@ -41,7 +41,7 @@ Examples
     python -m studio.export_finetune --mode sft-clean
     python -m studio.export_finetune --mode sft-corrected --since 1715300000
     python -m studio.export_finetune --mode dpo-pairs \\
-            --s3-bucket sevim-prod-training --s3-prefix dpo/
+            --s3-bucket <your-training-bucket> --s3-prefix dpo/
 """
 from __future__ import annotations
 

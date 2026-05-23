@@ -23,7 +23,7 @@ The current local code has three implicit assumptions that AWS breaks:
 
 1. **Local file system for canvases** (`~/.local/share/sevim/canvases/`)
    * Fix: introduce `service.storage` abstraction with `LocalStorage` (current) and `S3Storage` (new) backends, picked by `SEVIM_STORAGE_BACKEND` env var.
-   * S3Storage uses `boto3` and a single bucket: `s3://sevim-prod-canvases/<canvas_id>/intro.wav` etc.
+   * S3Storage uses `boto3` and a single bucket: `s3://<your-canvas-bucket>/<canvas_id>/intro.wav` etc.
    * The viewer endpoints `/canvas/<id>/intro.wav` already serve via `FileResponse`; swap to a redirect to a presigned S3 URL when storage is S3.
 
 2. **In-memory `REGISTRY` (CanvasRegistry singleton)**
@@ -81,12 +81,12 @@ docker push <acct>.dkr.ecr.<region>.amazonaws.com/sevim:v0.4
 
 # 2. RDS
 aws rds create-db-instance \
-  --db-instance-identifier sevim-prod \
+  --db-instance-identifier <your-stack-name> \
   --engine postgres --db-instance-class db.t4g.small \
   --allocated-storage 20 ...
 
 # 3. S3
-aws s3 mb s3://sevim-prod-canvases
+aws s3 mb s3://<your-canvas-bucket>
 
 # 4. Secret
 aws secretsmanager create-secret --name sevim/openai \
@@ -95,7 +95,7 @@ aws secretsmanager create-secret --name sevim/openai \
 # 5. ECS cluster + service via Terraform / CDK / console
 #    Task def: 1 vCPU, 2 GB, port 8080, image from step 1
 #    Env: SEVIM_TELEMETRY_DB, SEVIM_STORAGE_BACKEND=s3, ...
-#    IAM role with S3 read+write to sevim-prod-canvases and SecretsManager read
+#    IAM role with S3 read+write to <your-canvas-bucket> and SecretsManager read
 
 # 6. ALB → target group → ECS service
 #    Health check: GET /studio/health (200)

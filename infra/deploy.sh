@@ -11,9 +11,19 @@
 #   cd infra && ./deploy.sh --hotswap        # extra flags forwarded
 #   cd infra && ./deploy.sh diff             # diff instead of deploy
 #
-# Required tooling:
-#   * AWS CLI profile named ``sevim`` with deploy permissions on
-#     account REDACTED (see ~/.aws/config).
+# Required tooling and environment:
+#   * AWS_PROFILE                — an AWS CLI profile with deploy
+#                                  permissions on the target account
+#                                  (configure with ``aws configure
+#                                  --profile <your-profile>``).
+#   * CDK_DEFAULT_ACCOUNT        — the 12-digit AWS account ID you
+#                                  want to deploy into.
+#   * CDK_DEFAULT_REGION         — defaults to us-east-1 if unset.
+#   * SEVIM_DOMAIN               — the Route 53-hosted domain the
+#                                  stack should attach an ALB +
+#                                  ACM cert to (e.g. yourdomain.com).
+#                                  The hosted zone must already
+#                                  exist in the target account.
 #   * Node + npx (cdk runs via ``npx aws-cdk``).
 #   * The repo's .venv must be the active Python (cdk shells out to
 #     python3, which has to import aws_cdk).
@@ -23,10 +33,12 @@ set -euo pipefail
 # ``cdk.json`` regardless of the caller's PWD.
 cd "$(dirname "$(readlink -f "$0")")"
 
-export AWS_PROFILE="${AWS_PROFILE:-sevim}"
-export CDK_DEFAULT_ACCOUNT="${CDK_DEFAULT_ACCOUNT:-REDACTED}"
+# Required env vars — no defaults, to avoid accidentally deploying
+# into the wrong AWS account.
+: "${AWS_PROFILE:?Set AWS_PROFILE to the CLI profile that should run cdk deploy}"
+: "${CDK_DEFAULT_ACCOUNT:?Set CDK_DEFAULT_ACCOUNT to your 12-digit AWS account ID}"
 export CDK_DEFAULT_REGION="${CDK_DEFAULT_REGION:-us-east-1}"
-export SEVIM_DOMAIN="${SEVIM_DOMAIN:-khayyammath.com}"
+: "${SEVIM_DOMAIN:?Set SEVIM_DOMAIN to the Route 53 domain to deploy under (e.g. example.com)}"
 
 # Build-time git SHA — flows into the image as $SEVIM_GIT_SHA and
 # stamps every /studio/feedback row, so the admin recurrence-after-fix
