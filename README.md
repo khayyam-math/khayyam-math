@@ -129,19 +129,27 @@ changes.
 
 ### Install
 
+Install directly from the GitHub repo (the package is not on PyPI —
+the full Khayyam Math experience is the self-hosted Studio service
+below, not a pip-able client library):
+
 ```bash
 # Light install — OpenAI / vLLM providers only (~5 MB + transitive deps)
-pip install khayyam-math
+pip install git+https://github.com/khayyam-math/khayyam-math
 
 # Full install — adds torch + transformers + peft + accelerate + safetensors
 # for local Qwen inference (~5 GB)
-pip install "khayyam-math[qwen]"
+pip install "khayyam-math[qwen] @ git+https://github.com/khayyam-math/khayyam-math"
+
+# Or, from a local clone (recommended if you also want to run the
+# Studio service or contribute):
+git clone https://github.com/khayyam-math/khayyam-math
+cd khayyam-math
+pip install -e ".[qwen]"
 ```
 
-The package is on **PyPI** at
-[pypi.org/project/khayyam-math](https://pypi.org/project/khayyam-math/).
-The HF model + repo are currently private during the soft-launch
-window; they will be public at GA.
+The HF model + GitHub repo are currently private during the
+soft-launch window; both will be public at GA.
 
 ### Five-line quick start (OpenAI)
 
@@ -208,9 +216,9 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
 
 | Provider | Install | Throughput | When to use |
 |---|---|---|---|
-| `openai` | `pip install khayyam-math` | ~3 s / prompt | Default. No GPU needed. Pay per call. |
-| `qwen` | `pip install khayyam-math[qwen]` | ~20 s / prompt on GPU; minutes on CPU | Local inference. Free after install. |
-| `qwen-vllm` | `pip install khayyam-math` | ~5 s / prompt | Production. You run vLLM on your own hardware; package just talks to it. |
+| `openai` | base install | ~3 s / prompt | Default. No GPU needed. Pay per call. |
+| `qwen` | install with `[qwen]` extra | ~20 s / prompt on GPU; minutes on CPU | Local inference. Free after install. |
+| `qwen-vllm` | base install | ~5 s / prompt | Production. You run vLLM on your own hardware; package just talks to it. |
 
 ### Configure via env vars
 
@@ -372,8 +380,8 @@ What's coming, in rough order:
    per school level (primary, secondary, tertiary) curated by topic.
 5. **Multi-language narration** — French and Arabic voices first;
    prompt-side translation pass before the express call.
-6. **GitHub Actions release flow** — tag → wheel build → PyPI push +
-   HF model push + GitHub release notes, all in one CI run.
+6. **GitHub Actions release flow** — tag → wheel build → HF model
+   push + GitHub release notes, all in one CI run.
 
 ## Research
 
