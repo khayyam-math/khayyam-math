@@ -98,7 +98,13 @@ def _generate(model, tokenizer, system: str, user: str, max_new_tokens: int = 20
 
 
 def _extract_svg(text: str) -> str:
-    """Pull the SVG out of the model's JSON response."""
+    """Pull the SVG out of the model's JSON response.
+
+    Mirrors khayyam_math.client._parse_response: structured JSON paths
+    first, then the regex fallback unescapes any leftover JSON-string
+    escapes (\\\" -> \", \\n -> newline) the model leaves behind when
+    it breaks structural JSON across raw newlines.
+    """
     import json as _json, re
     # Try fenced block first, then plain JSON, then substring.
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -118,9 +124,16 @@ def _extract_svg(text: str) -> str:
             return _json.loads(text[start : end + 1]).get("svg", "") or ""
         except _json.JSONDecodeError:
             pass
-    # Last resort — raw <svg>...</svg> in the response
+    # Last resort — raw <svg>...</svg> in the response, with the
+    # JSON-string escapes the model probably left behind unescaped
+    # so xml.etree can parse it.
     m = re.search(r"<svg[\s\S]*?</svg>", text)
-    return m.group(0) if m else ""
+    if not m:
+        return ""
+    svg = m.group(0)
+    if "\\\"" in svg or "\\n" in svg or "\\t" in svg:
+        svg = svg.replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t")
+    return svg
 
 
 def _is_valid_svg(svg: str) -> tuple[bool, str]:

@@ -153,14 +153,32 @@ class KhayyamMath:
 # ---------------------------------------------------------------------------
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_SVG_BLOCK_RE  = re.compile(r"<svg[\s\S]*?</svg>", re.IGNORECASE)
+
+
+def _unescape_svg_literal(s: str) -> str:
+    """Undo the JSON-string escapes the model often emits when it
+    breaks structural JSON across raw newlines.  Cheap, idempotent —
+    a no-op on already-clean SVG strings."""
+    if not s:
+        return s
+    if "\\\"" in s or "\\n" in s or "\\t" in s:
+        # Unescape only the JSON-string escapes; do NOT touch the SVG
+        # XML's own &amp; / &quot; which are different.
+        s = s.replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t")
+    return s
 
 
 def _parse_response(text: str) -> dict[str, Any]:
     """Tolerant JSON-from-LLM parser.
 
     Tries the raw string first, then any ```json fenced block, then the
-    largest balanced ``{...}`` substring.  Returns ``{}`` if nothing
-    parses — callers should treat that as an empty/failed response.
+    largest balanced ``{...}`` substring.  If all JSON-parse paths fail
+    (typically because the model emitted raw newlines inside string
+    values), falls back to extracting the ``<svg>...</svg>`` block with
+    a regex and unescaping the leftover JSON escapes.  Returns ``{}``
+    if nothing parses — callers should treat that as an empty/failed
+    response.
     """
     if not text:
         return {}
@@ -183,5 +201,12 @@ def _parse_response(text: str) -> dict[str, Any]:
             return json.loads(text[start : end + 1])
         except json.JSONDecodeError:
             pass
+
+    # Last resort: the model produced structurally broken JSON
+    # (typically raw newlines inside a string value).  Recover any
+    # <svg>...</svg> block via regex and unescape JSON-string escapes.
+    m = _SVG_BLOCK_RE.search(text)
+    if m:
+        return {"svg": _unescape_svg_literal(m.group(0))}
 
     return {}

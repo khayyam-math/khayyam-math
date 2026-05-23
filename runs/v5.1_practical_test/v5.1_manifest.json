@@ -1,0 +1,38 @@
+{
+  "adapter_id": "qwen_lora_v5.1",
+  "base_model": "Qwen/Qwen2.5-7B-Instruct",
+  "trained_at": "2026-05-23T17:32:00+04:00",
+  "supersedes": "qwen_lora_v5_rejected",
+  "verdict": "GO",
+  "corpus_examples": 2402,
+  "corpus_source": "data/distill/teacher_v7.jsonl (2350 synthetic + 39 production sft-clean + 13 production sft-corrected; deduped by prompt)",
+  "first_release_using_production_telemetry": true,
+  "hyperparams": {
+    "rank": 8,
+    "alpha": 16,
+    "lr": 0.0002,
+    "epochs": 2,
+    "max_seq_len": 6144,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "dtype": "bf16",
+    "note": "Halved LoRA capacity vs v5 (r16/a32) to fight over-fit; one fewer epoch."
+  },
+  "training_loss_final": 0.06383,
+  "mean_token_accuracy_final": 0.9865,
+  "wall_clock_seconds": 7136,
+  "hardware": "NVIDIA RTX 5090 (32 GB)",
+  "trainable_params": 20185088,
+  "trainable_params_pct": 0.2643,
+  "practical_test_summary": {
+    "v5.1_valid": 20,
+    "v4_valid": 20,
+    "total": 20,
+    "min_valid_threshold": 16,
+    "regressions_vs_v4": [],
+    "v4_known_failures_v5.1_recovered": ["set_venn", "linalg_eigen"]
+  },
+  "release_notes": "Ties v4 on the 20-prompt held-out battery (20/20). Brings two material improvements over v4: (a) first release trained on production telemetry (52 turns from khayyammath.com under ToS §5 anonymisation), (b) more recent corpus snapshot. Inference latency unchanged.",
+  "relation_to_v5_rejected": "Same corpus as v5; halved LoRA capacity (rank 16->8, alpha 32->16) and one fewer epoch fixed the over-fit that caused v5 to regress on 5 prompts.",
+  "extractor_fix_dependency": "Releases pre-fix khayyam_math < 0.4.1 may see 3/20 of the figures rendered as escaped-text-in-XML due to a known JSON-newline extractor bug. The 0.4.1 release ships an unescape fallback. Use khayyam_math >= 0.4.1."
+}

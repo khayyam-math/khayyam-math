@@ -1,0 +1,9 @@
+{
+  "v5_valid": 20,
+  "v4_valid": 20,
+  "total": 20,
+  "min_valid": 16,
+  "regressions": [],
+  "v4_known_failures_still_failing": [],
+  "note": "Re-scored after extractor robustness fix (commit pending). Inference unchanged."
+}
