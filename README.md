@@ -84,7 +84,7 @@ are novel by themselves; the integration is the moat.
 
 ```bash
 # Python 3.12+, uv installed, OPENAI_API_KEY in your env
-git clone https://github.com/arashkermaniprojects/khayyam-math
+git clone https://github.com/khayyam-math/khayyam-math
 cd khayyam-math
 uv sync                                # install deps
 sudo apt-get install -y graphviz       # for the graph-shaped route
@@ -95,6 +95,60 @@ open http://127.0.0.1:8765/studio
 Then type `draw a DFA for the language L = (a|b)* ending in ab` and
 watch the canvas build itself. The narration plays through your
 speakers; phrases highlight as they're spoken.
+
+## Use it from your own Python code
+
+The `khayyam-math` package exposes one client class with three
+back-ends. Switch between OpenAI and the fine-tuned Qwen model in a
+single line — same call signature, same return type, no other code
+changes.
+
+```bash
+pip install khayyam-math                # ~5 MB, OpenAI provider only
+pip install "khayyam-math[qwen]"        # +torch/transformers/peft for local Qwen
+```
+
+```python
+from khayyam_math import KhayyamMath
+
+# Default — OpenAI GPT-4o.  Reads OPENAI_API_KEY from env.
+client = KhayyamMath()
+
+# Fine-tuned Qwen (downloads adapter from HF on first call).
+client = KhayyamMath(provider="qwen",
+                     model="khayyam-math/khayyam-math-qwen2.5-7b-v4")
+
+# Production-style: hit a running vLLM server.
+client = KhayyamMath(provider="qwen-vllm",
+                     base_url="http://localhost:8000/v1",
+                     model="khayyam-v4")
+
+# Same call regardless of provider:
+result = client.generate("Solve x^2 - 5x + 6 = 0")
+print(result.svg)         # rendered figure
+print(result.narration)   # phrase-timed walkthrough
+print(result.math_claims) # symbolic identities the figure depends on
+```
+
+### Provider table
+
+| Provider | Install | When to use |
+|---|---|---|
+| `openai` | `pip install khayyam-math` | Default. Fastest path, no GPU needed. Pay per call. |
+| `qwen` | `pip install khayyam-math[qwen]` | Local inference. Requires GPU for usable throughput. Free after install. |
+| `qwen-vllm` | `pip install khayyam-math` | Production. You run vLLM on your own hardware and the package just talks to it. |
+
+You can also set the provider/model via environment variables, so the
+same Python code works in dev and production:
+
+```bash
+export KHAYYAM_PROVIDER=qwen-vllm
+export KHAYYAM_MODEL=khayyam-v4
+export KHAYYAM_VLLM_URL=https://qwen.internal.mycompany.com/v1
+```
+
+The fine-tuned Qwen model is documented on Hugging Face:
+**[huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)**.
 
 ## How it's built
 
