@@ -97,6 +97,34 @@ def _open_telemetry() -> Telemetry:
 # Mode: sft-clean — first-try-pass turns
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# PII scrub — applied to user prompts before they reach a training corpus.
+# ---------------------------------------------------------------------------
+
+# Conservative regexes.  Each one matches a clearly-personal pattern; on a
+# hit, the whole turn is DROPPED (not redacted) so the model never sees
+# even a sanitised version of the original.
+_PII_PATTERNS: tuple[tuple[str, "re.Pattern"], ...] = (
+    ("email",   __import__("re").compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+")),
+    ("phone",   __import__("re").compile(r"\+?\d[\d\s\-()]{7,}\d")),
+    ("student", __import__("re").compile(
+        r"\b(my (?:student|son|daughter|child|kid|teacher|professor|advisor|"
+        r"supervisor|tutor)|named\s+[A-Z][a-z]+|for (?:my|the) "
+        r"(?:student|son|daughter)\s+[A-Z][a-z]+)\b",
+        __import__("re").IGNORECASE)),
+)
+
+
+def _pii_flag(text: str) -> str | None:
+    """Return the name of the first PII pattern that matches, or None."""
+    if not text:
+        return None
+    for name, pat in _PII_PATTERNS:
+        if pat.search(text):
+            return name
+    return None
+
+
 def _export_sft_clean(
     tel: Telemetry,
     out_path: Path,
@@ -122,6 +150,7 @@ def _export_sft_clean(
     stats = {
         "mode": "sft-clean", "walked": 0, "kept": 0,
         "skipped_no_svg": 0, "skipped_retries": 0, "skipped_refined": 0,
+        "skipped_pii": 0,
         "out_path": str(out_path), "last_ts": since_ts,
     }
     sys_prompt = _system_prompt()
@@ -144,6 +173,9 @@ def _export_sft_clean(
                         and refined_within_s < refined_threshold_s):
                     stats["skipped_refined"] += 1
                     continue
+            if _pii_flag(user_prompt):
+                stats["skipped_pii"] += 1
+                continue
             try:
                 narration = json.loads(narration_json or "[]")
             except json.JSONDecodeError:
@@ -351,6 +383,15 @@ def export(
 
 def main(argv: list[str] | None = None) -> int:
     import os
+    # Translate SEVIM_DB_SECRET_JSON (the form ECS injects) into the
+    # SEVIM_TELEMETRY_DB URL the telemetry layer expects.  Without this
+    # the export silently falls back to an empty local SQLite when run
+    # as a one-off task (`python -m studio.export_finetune ...`).
+    try:
+        from service.secrets import bootstrap as _bootstrap_secrets  # noqa: PLC0415
+        _bootstrap_secrets()
+    except Exception:  # noqa: BLE001
+        pass
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mode", choices=["sft-clean", "sft-corrected", "dpo-pairs"],
