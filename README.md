@@ -430,6 +430,32 @@ Concrete things we want help with:
 - More routes: a **TikZ → SVG** route for publication-quality
   math figures; a **matplotlib server-side** route for function plots
 
+## Fine-tuning your own adapter
+
+The training pipeline that produced every `khayyam-math/khayyam-math-qwen2.5-7b-*`
+release is in this repo. Two modes:
+
+| Mode | Corpus | Wall-clock on RTX 5090 | Use for |
+|---|---|---|---|
+| **Smoke** (`v*.1-smoke`) | 200 ex, 1 ep, rank 8 | **~5 min** | Pipeline sanity gate |
+| **Full** (`v*`) | 3,395 ex, 3 ep, rank 16 | **~5 h** | Production candidate |
+
+Smoke first, full second. The smoke run catches transformers/peft/trl
+version drift, GPU-OOM, and corpus-schema regressions before you pay
+for the long run.
+
+Real smoke run (2026-05-23, v4.1-smoke — loss 1.88 → 0.050,
+token accuracy 0.61 → 0.986 in 4 m 19 s):
+
+<p align="center">
+  <img src="docs/screenshots/finetune/smoke_training_curve.png"
+       alt="Smoke fine-tune loss + accuracy curves" width="850">
+</p>
+
+Full step-by-step procedure — corpus, hyperparameters, expected
+metrics, what "smoke green" looks like, and how to push to both S3
+and HuggingFace — is in **[docs/finetune.md](docs/finetune.md)**.
+
 ## Testing
 
 ```bash

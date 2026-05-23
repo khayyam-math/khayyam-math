@@ -1,0 +1,28 @@
+{
+  "adapter_id": "qwen_lora_v4.1_smoke",
+  "base_model": "Qwen/Qwen2.5-7B-Instruct",
+  "trained_at": "2026-05-23T10:29:00+04:00",
+  "purpose": "Pipeline smoke test, NOT for production use",
+  "corpus_examples": 200,
+  "corpus_source": "data/distill/teacher_v6_mini.jsonl (random.seed=42, first 200)",
+  "hyperparams": {
+    "rank": 8,
+    "alpha": 16,
+    "lr": 0.0002,
+    "epochs": 1,
+    "max_seq_len": 4096,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "dtype": "bf16"
+  },
+  "training_loss_initial": 1.881,
+  "training_loss_final": 0.0497,
+  "mean_token_accuracy_initial": 0.606,
+  "mean_token_accuracy_final": 0.986,
+  "wall_clock_seconds": 259,
+  "hardware": "NVIDIA RTX 5090 (32 GB)",
+  "trainable_params": 20185088,
+  "trainable_params_pct": 0.2643,
+  "intended_use": "Validates the training loop end-to-end. Not better than v4. Do not flip the production active-model setting to this adapter.",
+  "next": "v5 full run will use the complete 3395-example corpus, rank 16, 3 epochs, on the same 5090."
+}
