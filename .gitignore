@@ -67,8 +67,20 @@ distill/
 # 990 MB combined; kept on the 5090 + S3, not in git.
 data/neural_layout/
 runs/
+# v5 release artefacts ARE allowed back in (summary + post-mortem);
+# the per-prompt SVGs / raw outputs stay ignored.
+!runs/v5_practical_test/
+!runs/v5_practical_test/*.md
+!runs/v5_practical_test/*.json
 
 # UAE IP-registration package — legal/business filing documents, not
 # app code.  Kept out of the (soon-public) code repo: it carries the
 # filing's contents and git history would make it permanent.
 uae_ip_registration/
+
+# v5 practical-test per-prompt artefacts (40 SVGs + 40 raw responses, ~800 KB).
+# The summary.json and POSTMORTEM.md are kept tracked; the per-prompt
+# files are too noisy for git and live alongside them in
+# s3://<your-lora-bucket>/qwen_lora_v5_rejected/practical_test/
+runs/v5_practical_test/*.svg
+runs/v5_practical_test/*.raw.txt

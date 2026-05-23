@@ -1,0 +1,18 @@
+{
+  "v5_valid": 15,
+  "v4_valid": 20,
+  "total": 20,
+  "min_valid": 16,
+  "regressions": [
+    "trig_addition",
+    "linalg_matmul",
+    "geom_triangle_sum",
+    "auto_turing",
+    "cs_3sat"
+  ],
+  "v4_known_failures_still_failing": [],
+  "timing": {
+    "v5_load_s": 10.566116571426392,
+    "v4_load_s": 8.982081890106201
+  }
+}
