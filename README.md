@@ -8,8 +8,9 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests passing](https://img.shields.io/badge/tests-67_passing-brightgreen.svg)](#testing)
 [![Live demo](https://img.shields.io/badge/demo-khayyammath.com-orange.svg)](https://khayyammath.com)
-[![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v4-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)
-[**Live demo**](https://khayyammath.com) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md)
+[![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v5.1-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1)
+[![HuggingFace Space](https://img.shields.io/badge/🤗_Space-try_in_browser-blueviolet.svg)](https://huggingface.co/spaces/khayyam-math/demo)
+[**Live demo**](https://khayyammath.com) · [**Try in browser (HF Space)**](https://huggingface.co/spaces/khayyam-math/demo) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md)
 
 ---
 

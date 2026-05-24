@@ -1,0 +1,13 @@
+# Light install — Gradio frontend + the openai client + a small
+# helper to load the khayyam_math package directly from the public
+# GitHub repo so we always serve the latest released code.
+#
+# We deliberately DO NOT install torch/transformers/peft here — those
+# are needed only for the Qwen provider, which is unusably slow on
+# CPU.  Adding them would push the container past the free-tier RAM
+# ceiling and break the build for the OpenAI path that actually works.
+#
+# When the Space is upgraded to GPU hardware, add the [qwen] extra to
+# the install line below and the Qwen provider becomes useful.
+gradio>=4.0
+khayyam-math @ git+https://github.com/khayyam-math/khayyam-math
