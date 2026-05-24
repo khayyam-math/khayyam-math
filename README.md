@@ -10,7 +10,8 @@
 [![Live demo](https://img.shields.io/badge/demo-khayyammath.com-orange.svg)](https://khayyammath.com)
 [![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v5.1-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1)
 [![HuggingFace Space](https://img.shields.io/badge/🤗_Space-try_in_browser-blueviolet.svg)](https://huggingface.co/spaces/khayyam-math/demo)
-[**Live demo**](https://khayyammath.com) · [**Try in browser (HF Space)**](https://huggingface.co/spaces/khayyam-math/demo) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20367147.svg)](https://doi.org/10.5281/zenodo.20367147)
+[**Live demo**](https://khayyammath.com) · [**Paper (Zenodo)**](https://doi.org/10.5281/zenodo.20367147) · [**Try in browser (HF Space)**](https://huggingface.co/spaces/khayyam-math/demo) · [**Model on HF**](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1) · [**Architecture**](ARCHITECTURE.md) · [**Contributing**](CONTRIBUTING.md)
 
 ---
 
