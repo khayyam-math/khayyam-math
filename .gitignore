@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# MaxMind GeoLite2 database — refreshed at deploy time by
+# infra/refresh_geolite.sh; the 60 MB binary must never enter git history.
+infra/geolite/*.mmdb
+
 # Python
 __pycache__/
 *.py[cod]

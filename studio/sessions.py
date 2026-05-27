@@ -244,6 +244,16 @@ def check_cost_guard(session_id: str) -> str | None:
 
 # ── ip_hash helper ──────────────────────────────────────────────────────
 
+def client_ip_from(request) -> str | None:  # type: ignore[no-untyped-def]
+    """Real client IP: leftmost X-Forwarded-For when SEVIM_TRUST_PROXY=1,
+    else the direct socket peer.  Centralised so the auth + chat paths
+    agree on what counts as the client."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded and os.environ.get("SEVIM_TRUST_PROXY", "0") == "1":
+        return forwarded.split(",")[0].strip() or None
+    return request.client.host if request.client else None
+
+
 def hash_ip(ip: str | None, salt: str | None = None) -> str | None:
     """Salted SHA-256 of an IP address — for telemetry without PII.
 

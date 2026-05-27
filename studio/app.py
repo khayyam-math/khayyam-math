@@ -1509,6 +1509,25 @@ def auth_verify(t: str, request: Request) -> Response:
     email = verify_link_and_set_cookie(t, redirect)
     if email is None:
         return RedirectResponse(url="/studio/auth/login", status_code=302)
+    # Record the login: upsert users row with first/last seen + geo from
+    # IP.  Wrapped so any telemetry failure can't break the auth flow.
+    try:
+        from sevim.telemetry import get_telemetry
+        from studio.sessions import client_ip_from, hash_ip
+        from studio.geoip import lookup as geo_lookup
+        tel = get_telemetry()
+        if tel is not None:
+            ip = client_ip_from(request)
+            geo = geo_lookup(ip)
+            tel.record_login(
+                email=email,
+                ip_hash=hash_ip(ip),
+                country=geo.country,
+                region=geo.region,
+                city=geo.city,
+            )
+    except Exception:  # noqa: BLE001
+        pass
     return redirect
 
 

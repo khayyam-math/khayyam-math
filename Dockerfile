@@ -53,6 +53,12 @@ COPY service   ./service
 COPY studio    ./studio
 COPY mcp_server ./mcp_server
 
+# GeoLite2-City database for IP→geo lookup at magic-link verification.
+# infra/refresh_geolite.sh writes the file here before docker build;
+# .dockerignore makes infra/geolite/ visible to the build context as a
+# narrow exception to the blanket `infra/` ignore.
+COPY infra/geolite/GeoLite2-City.mmdb /opt/sevim/geoip/GeoLite2-City.mmdb
+
 
 # ── Stage 2: runtime — slim base + .so libs only ─────────────────────────
 FROM python:3.12-slim AS runtime
@@ -75,7 +81,7 @@ RUN apt-get update \
         curl \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
  && useradd --system --create-home --home-dir /home/sevim --uid 1001 sevim \
- && mkdir -p /var/sevim/canvases /opt/sevim/voices \
+ && mkdir -p /var/sevim/canvases /opt/sevim/voices /opt/sevim/geoip \
  && chown -R sevim:sevim /var/sevim /opt/sevim /app
 
 # ── Lean 4 (core — no Mathlib) ────────────────────────────────────────
@@ -97,6 +103,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-ini
 # Copy the resolved venv, voice assets, and application source.
 COPY --from=builder --chown=sevim:sevim /app/.venv          /app/.venv
 COPY --from=builder --chown=sevim:sevim /opt/sevim/voices   /opt/sevim/voices
+COPY --from=builder --chown=sevim:sevim /opt/sevim/geoip    /opt/sevim/geoip
 COPY --from=builder --chown=sevim:sevim /app/sevim          /app/sevim
 COPY --from=builder --chown=sevim:sevim /app/service        /app/service
 COPY --from=builder --chown=sevim:sevim /app/studio         /app/studio
@@ -130,6 +137,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     SEVIM_HTTP_PORT=8080 \
     SEVIM_HTTP_HOST=0.0.0.0 \
     SEVIM_VOICE_MODEL=/opt/sevim/voices/en_US-lessac-medium.onnx \
+    SEVIM_GEOLITE_DB=/opt/sevim/geoip/GeoLite2-City.mmdb \
     SEVIM_DATA_DIR=/var/sevim/canvases \
     SEVIM_NO_BROWSER=1 \
     SEVIM_TELEMETRY=1 \

@@ -146,10 +146,22 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_by TEXT
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    email                 TEXT PRIMARY KEY,
+    first_seen_at         REAL NOT NULL,
+    last_seen_at          REAL NOT NULL,
+    login_count           INTEGER NOT NULL DEFAULT 1,
+    last_login_ip_hash    TEXT,
+    last_login_country    TEXT,
+    last_login_region     TEXT,
+    last_login_city       TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_turn ON repairs (turn_id);
+CREATE INDEX IF NOT EXISTS idx_users_country ON users (last_login_country);
 """
 
 _SCHEMA_POSTGRES = """
@@ -262,11 +274,24 @@ ALTER TABLE repairs  ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gp
 -- claims alongside the canvas so the offline service can read them.
 ALTER TABLE canvases ADD COLUMN IF NOT EXISTS math_claims_json TEXT;
 
+CREATE TABLE IF NOT EXISTS users (
+    email                 TEXT PRIMARY KEY,
+    first_seen_at         DOUBLE PRECISION NOT NULL,
+    last_seen_at          DOUBLE PRECISION NOT NULL,
+    login_count           INTEGER NOT NULL DEFAULT 1,
+    last_login_ip_hash    TEXT,
+    last_login_country    TEXT,
+    last_login_region     TEXT,
+    last_login_city       TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_turn ON repairs (turn_id);
 CREATE INDEX IF NOT EXISTS idx_turns_model ON turns (model_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_users_country ON users (last_login_country);
+CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users (last_seen_at DESC);
 """
 
 
@@ -458,6 +483,41 @@ class Telemetry:
                 ip_hash      = COALESCE(sessions.ip_hash,    EXCLUDED.ip_hash)
             """,
             (session_id, now, now, user_agent, ip_hash, note),
+        )
+
+    def record_login(
+        self,
+        email: str,
+        ip_hash: str | None = None,
+        country: str | None = None,
+        region: str | None = None,
+        city: str | None = None,
+    ) -> None:
+        """Upsert a row in the users table on every successful login.
+
+        New row: first_seen_at = now, login_count = 1.
+        Existing row: bumps last_seen_at + login_count, refreshes geo with
+        the most recent values (only when non-NULL, so a failed lookup
+        doesn't wipe the previous reading).
+        """
+        if not email:
+            return
+        now = time.time()
+        self._exec(
+            """
+            INSERT INTO users (email, first_seen_at, last_seen_at, login_count,
+                               last_login_ip_hash, last_login_country,
+                               last_login_region, last_login_city)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                last_seen_at       = EXCLUDED.last_seen_at,
+                login_count        = users.login_count + 1,
+                last_login_ip_hash = COALESCE(EXCLUDED.last_login_ip_hash, users.last_login_ip_hash),
+                last_login_country = COALESCE(EXCLUDED.last_login_country, users.last_login_country),
+                last_login_region  = COALESCE(EXCLUDED.last_login_region,  users.last_login_region),
+                last_login_city    = COALESCE(EXCLUDED.last_login_city,    users.last_login_city)
+            """,
+            (email, now, now, ip_hash, country, region, city),
         )
 
     def record_turn(

@@ -61,6 +61,11 @@ scripts/
 # directory) recursing back into the build context.
 infra/
 cdk.out/
+# Exception: GeoLite2-City.mmdb is a build-time asset baked into the
+# runtime image for offline IP→geo lookup at magic-link verification.
+# infra/refresh_geolite.sh writes the binary here before docker build.
+!infra/geolite/
+infra/geolite/.gitkeep
 
 # Telemetry DB / training corpora — runtime artefacts, not build inputs
 *.db

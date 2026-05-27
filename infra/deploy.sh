@@ -69,6 +69,15 @@ case "$cmd" in
         echo "[deploy.sh] SEVIM_REDIRECT_DOMAINS=${SEVIM_REDIRECT_DOMAINS:-(unset)}"
         echo
 
+        # ── GeoLite2 refresh ────────────────────────────────────
+        # Pull the freshest GeoLite2-City.mmdb from MaxMind so the
+        # image baked by `cdk deploy` ships this week's database.
+        # Falls through gracefully if no credentials are configured
+        # (keeps any existing on-disk copy).
+        ./refresh_geolite.sh || {
+            echo "[deploy.sh] ⚠️  refresh_geolite.sh failed — continuing with existing mmdb (if any)."
+        }
+
         # ── Quality gate ────────────────────────────────────────
         # Run the test battery against the LOCAL build before any
         # cdk deploy lands in production.  Set SEVIM_SKIP_QUALITY_GATE=1

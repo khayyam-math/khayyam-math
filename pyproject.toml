@@ -46,7 +46,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "httpx>=0.27"]
-aws = ["boto3>=1.34", "psycopg[binary]>=3.1"]
+aws = ["boto3>=1.34", "psycopg[binary]>=3.1", "geoip2>=4.8"]
 # Local Qwen back-end — pulls torch + transformers + peft + accelerate.
 # Heavy (~5 GB once installed) so it stays opt-in:  pip install
 # khayyam-math[qwen].  Without this extra, only the openai and
