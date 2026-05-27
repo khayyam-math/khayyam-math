@@ -4813,7 +4813,7 @@ def strip_narration_prose_text(svg: str) -> str:
         return svg
 
 
-def resolve_text_overlaps(svg: str, max_iterations: int = 8) -> str:
+def resolve_text_overlaps(svg: str, max_iterations: int = 60) -> str:
     """Deterministic final-pass that moves overlapping <text> elements
     apart by adjusting their `y` attribute.  Handles <text> ANYWHERE in
     the SVG (including inside <g> groups, which `reflow_overlapping_text`
@@ -4910,47 +4910,83 @@ def resolve_text_overlaps(svg: str, max_iterations: int = 8) -> str:
                 count=1,
             )
 
+        # Match critic's bbox model EXACTLY (line 5556):
+        #   y_min = ty - fs ;  height = 1.2 * fs
+        # (critic puts a FULL font-size above the baseline, not 0.8 fs).
+        def _bbox(it: dict) -> tuple[float, float, float, float]:
+            x_left = it["x_left"]
+            y_top = it["ty"] - it["fs"]
+            return (x_left, y_top, it["width"], 1.2 * it["fs"])
+
+        def _overlap_ratio(a: dict, b: dict) -> float:
+            ax, ay, aw, ah = _bbox(a)
+            bx, by, bw, bh = _bbox(b)
+            ix0 = max(ax, bx); ix1 = min(ax + aw, bx + bw)
+            iy0 = max(ay, by); iy1 = min(ay + ah, by + bh)
+            if ix1 <= ix0 or iy1 <= iy0:
+                return 0.0
+            ov = (ix1 - ix0) * (iy1 - iy0)
+            smaller = max(1.0, min(aw * ah, bw * bh))
+            return ov / smaller
+
+        def _clear_ty(item: dict, items: list[dict], skip_idx: int) -> float:
+            """Find a baseline `ty` for `item` such that its bbox at
+            that ty does NOT collide (>= 20% of smaller area) with any
+            other item's bbox.  Greedy: start at the item's current ty,
+            push down past every conflict's bottom + gap.  Caps push
+            distance at the viewBox-ish range; if we'd land below y=2000
+            give up (return current ty unchanged)."""
+            ty = item["ty"]
+            for _safety in range(50):
+                trial = dict(item, ty=ty)
+                bx, by, bw, bh = _bbox(trial)
+                conflict_bottom = None
+                for k, other in enumerate(items):
+                    if k == skip_idx:
+                        continue
+                    if _overlap_ratio(trial, other) < 0.20:
+                        continue
+                    ox, oy, ow, oh = _bbox(other)
+                    o_bottom = oy + oh
+                    if conflict_bottom is None or o_bottom > conflict_bottom:
+                        conflict_bottom = o_bottom
+                if conflict_bottom is None:
+                    return ty
+                # Place item so its TOP is 4 units below the lowest
+                # conflict's bottom.  Convert back to baseline:
+                # baseline = top + 1.0 * fs (mirrors _bbox's y_top).
+                new_ty = conflict_bottom + 4 + item["fs"]
+                if new_ty <= ty + 0.5:
+                    # No progress (e.g., infeasible) — give up.
+                    return ty
+                ty = new_ty
+                if ty > 2000:
+                    return item["ty"]
+            return ty
+
         for _it in range(max_iterations):
             items = _collect_boxes(svg)
             if len(items) < 2:
                 return svg
             moved = False
             # Greedy: find the first overlapping pair in document order
-            # and fix it.  Re-collect on next iteration since byte
-            # offsets shift after every edit.
+            # and resolve it by placing the LATER item below ALL of its
+            # current conflicts.  Re-collect on next iteration since
+            # byte offsets shift after every edit.
             for i in range(len(items)):
                 a = items[i]
-                ax = a["x_left"]
-                ay = a["ty"] - 0.8 * a["height"]
-                aw, ah = a["width"], a["height"]
-                ax2 = ax + aw
-                ay2 = ay + ah
                 for j in range(i + 1, len(items)):
                     b = items[j]
-                    bx = b["x_left"]
-                    by = b["ty"] - 0.8 * b["height"]
-                    bw, bh = b["width"], b["height"]
-                    bx2 = bx + bw
-                    by2 = by + bh
-                    # Compute overlap area (same as critic).
-                    ix0 = max(ax, bx); ix1 = min(ax2, bx2)
-                    iy0 = max(ay, by); iy1 = min(ay2, by2)
-                    if ix1 <= ix0 or iy1 <= iy0:
+                    if _overlap_ratio(a, b) < 0.20:
                         continue
-                    overlap = (ix1 - ix0) * (iy1 - iy0)
-                    smaller_area = max(1.0, min(aw * ah, bw * bh))
-                    # Match critic's 20% threshold.
-                    if overlap / smaller_area < 0.20:
-                        continue
-                    # Move b's baseline below a's bottom + 4 unit gap.
-                    new_ty_b = ay2 + 4 + 0.8 * b["height"]
+                    # Resolve by moving B clear of every conflict.
+                    new_ty_b = _clear_ty(b, items, skip_idx=j)
                     if abs(new_ty_b - b["ty"]) < 1.0:
-                        # No meaningful shift would help (already
-                        # roughly aligned); skip.
+                        # Couldn't find a clear y — skip this pair
+                        # rather than loop forever.
                         continue
                     new_open = _rewrite_y(b["open_tag"], new_ty_b)
                     if new_open == b["open_tag"]:
-                        # No y attribute to rewrite — skip.
                         continue
                     svg = (svg[:b["open_start"]]
                            + new_open
