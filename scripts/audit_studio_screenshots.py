@@ -102,7 +102,7 @@ def run_one(
     page.wait_for_selector("#send-btn", timeout=5_000)
     page.click("#send-btn")
     # Wait for the figure to finish emerging.
-    btn_text = _wait_for_canvas_ready(page, timeout_s=120.0)
+    btn_text = _wait_for_canvas_ready(page, timeout_s=240.0)
     if btn_text:
         print(f"  [{name}] play-btn now: {btn_text!r}", flush=True)
     else:

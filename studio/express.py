@@ -207,41 +207,77 @@ class _StreamingSvgExtractor:
 # positions each line.  Two overlapping `text_blocks` lines is
 # impossible by construction.
 #
-# Each region is anchored within the canvas (default viewBox 900×620).
-# `x` / `y` mark the START position of the first line (baseline for the
-# first row).  `line_height` is the vertical step between consecutive
-# lines.  `width` is advisory — the renderer doesn't word-wrap; the
-# LLM should keep each line short enough.  `font_size` and `anchor`
-# (text-anchor: start / middle / end) match the region's intended use.
+# Canvas layout (viewBox 900×620): the SHAPE_ZONE is reserved for the
+# LLM's shapes; every text region is placed OUTSIDE the shape zone so
+# text and shapes cannot physically overlap.  This is the design that
+# the first text_blocks attempt missed — earlier regions overlapped
+# the shape area, producing fresh overlap rather than removing it.
+#
+#   ┌────────────────────────────────────────────────────┐
+#   │         TITLE       (y 10-80, full-width, centred) │
+#   ├────────────────────────────────────────────────────┤
+#   │         TOP-BAND    (y 90-175, full-width)         │
+#   ├──────────┬─────────────────────────────┬───────────┤
+#   │  LEFT-   │                             │  RIGHT-   │
+#   │  COLUMN  │       SHAPE ZONE            │  COLUMN   │
+#   │ (x 0-235)│      (x 245-660)            │ (x 670+)  │
+#   │ y 180-   │      y 180-490              │ y 180-490 │
+#   │  490     │   LLM DRAWS HERE ONLY       │           │
+#   ├──────────┴─────────────────────────────┴───────────┤
+#   │         BOTTOM-BAND (y 500-580, full-width)        │
+#   ├────────────────────────────────────────────────────┤
+#   │       CENTER-CAPTION (y 585-615, centred)          │
+#   └────────────────────────────────────────────────────┘
+#
+# `x` / `y` mark the START position of the first line (baseline for
+# the first row).  `line_height` is the vertical step between
+# consecutive lines.  `width` is advisory — the renderer doesn't
+# word-wrap; the LLM should keep each line short enough.
+
+# Reserved shape area: (x_min, y_min, x_max, y_max) in viewBox units.
+# The system prompt instructs the LLM to keep every geometric
+# primitive (circle, rect, path, polygon, line) inside this box.
+# Raw <text> outside this box is permitted (per [project_uae_…
+# session: "accept LLM choice"]) — the LLM may emit annotations
+# anywhere; we don't strip them.  But all text_blocks regions are
+# DISJOINT from this box by design, so the deterministic text never
+# clashes with the shape area.
+SHAPE_ZONE: tuple[float, float, float, float] = (245.0, 180.0, 660.0, 490.0)
 
 TEXT_REGIONS: dict[str, dict[str, Any]] = {
+    # Top of canvas — large centred title.
     "title": {
-        "x": 450, "y": 32, "width": 880, "anchor": "middle",
+        "x": 450, "y": 38, "width": 880, "anchor": "middle",
         "font_size": 20, "line_height": 26,
     },
+    # Below the title, above the shape zone — full-width band for
+    # definitions, problem statements, opening formulas.
     "top-band": {
-        "x": 20, "y": 70, "width": 860, "anchor": "start",
-        "font_size": 14, "line_height": 18,
+        "x": 20, "y": 110, "width": 860, "anchor": "start",
+        "font_size": 14, "line_height": 20,
     },
+    # Left of the shape zone — narrow column for lists, step labels,
+    # short input data.  ~25 chars per line at fs=14.
     "left-column": {
-        "x": 20, "y": 95, "width": 410, "anchor": "start",
+        "x": 15, "y": 200, "width": 220, "anchor": "start",
         "font_size": 14, "line_height": 20,
     },
+    # Right of the shape zone — narrow column for examples,
+    # contrasts, output data.  ~25 chars per line.
     "right-column": {
-        "x": 470, "y": 95, "width": 410, "anchor": "start",
+        "x": 670, "y": 200, "width": 220, "anchor": "start",
         "font_size": 14, "line_height": 20,
     },
+    # Below the shape zone — full-width band for conclusions,
+    # observations, multi-line explanatory prose.
     "bottom-band": {
-        "x": 450, "y": 595, "width": 860, "anchor": "middle",
-        "font_size": 13, "line_height": 17,
+        "x": 20, "y": 520, "width": 860, "anchor": "start",
+        "font_size": 14, "line_height": 20,
     },
-    "legend": {
-        "x": 720, "y": 115, "width": 160, "anchor": "start",
-        "font_size": 12, "line_height": 16,
-    },
+    # Single-line caption near the bottom edge — centred, smaller.
     "center-caption": {
-        "x": 450, "y": 555, "width": 600, "anchor": "middle",
-        "font_size": 14, "line_height": 18,
+        "x": 450, "y": 600, "width": 600, "anchor": "middle",
+        "font_size": 13, "line_height": 17,
     },
 }
 
@@ -515,31 +551,98 @@ _EXPRESS_SYSTEM = (
     "narration alone.  Aim for the depth of a Khan Academy / 3Blue1Brown "
     "explainer, rendered as a static SVG.\n"
     "\n"
-    "TEXT LAYOUT — DETERMINISTIC SLOTS, NOT FREEFORM PLACEMENT.\n"
-    "All multi-line explanatory text MUST go in the `text_blocks` field "
-    "of the response — NOT in raw `<text x=… y=…>` elements inside the "
-    "SVG.  Each text_blocks entry names a REGION (one of: title, "
-    "top-band, left-column, right-column, bottom-band, legend, "
-    "center-caption) and a list of LINES.  Python deterministically "
-    "stacks each line at non-overlapping y-coordinates within that "
-    "region.\n"
+    "TEXT LAYOUT — DETERMINISTIC ZONES, NOT FREEFORM PLACEMENT.\n"
+    "The canvas (viewBox 900×620) is divided into reserved zones.  The "
+    "LLM only chooses content; Python positions it.  Two text lines "
+    "cannot overlap.\n"
     "\n"
-    "Raw <text> in the SVG is ONLY for:\n"
-    "  * Short math labels glued to a geometric point — 'q0', 'x₁', "
-    "'∑', vertex names, single-character cell contents.\n"
-    "  * Inline formula labels under ~20 chars that must sit next to a "
-    "specific shape (e.g. 'a²' inside a square in a Pythagoras figure).\n"
+    "Canvas zone map:\n"
+    "  +----------------------------------------------------+\n"
+    "  |                  TITLE  (y 10-80)                  |  centred, 20pt\n"
+    "  +----------------------------------------------------+\n"
+    "  |              TOP-BAND  (y 90-175)                  |  full-width, 14pt\n"
+    "  +----------+---------------------------+-------------+\n"
+    "  |  LEFT-   |                           |  RIGHT-     |\n"
+    "  |  COLUMN  |      SHAPE ZONE           |  COLUMN     |  side columns 14pt,\n"
+    "  |(x 0-235) |    (x 245-660, y 180-490) |(x 670-900)  |  ~25 chars wide\n"
+    "  | y 180-   |  PUT EVERY SHAPE INSIDE   | y 180-490   |\n"
+    "  | 490      |    THIS BOX               |             |\n"
+    "  +----------+---------------------------+-------------+\n"
+    "  |             BOTTOM-BAND  (y 500-580)               |  full-width, 14pt\n"
+    "  +----------------------------------------------------+\n"
+    "  |          CENTER-CAPTION  (y 585-615)               |  centred, 13pt\n"
+    "  +----------------------------------------------------+\n"
     "\n"
-    "EVERYTHING ELSE — definitions, clause lists, step-by-step prose, "
-    "captions of 4+ words, footnotes, narration-like sentences — goes "
-    "in text_blocks.  Two definitions placed by hand at the same y in "
-    "different x-anchored columns is the #1 source of overlap, and the "
-    "deterministic stacker eliminates the class of bug entirely.  "
-    "Example: a 3SAT proof figure puts the title in `title`, the "
-    "original SAT clauses in `left-column`, the converted 3SAT clauses "
-    "in `right-column`, and the conclusion in `bottom-band` — and "
-    "every clause line is a separate string in the `lines` array.  No "
-    "<text> in the SVG for any of that prose.\n"
+    "RULES:\n"
+    "  1. EVERY shape primitive (<circle>, <rect>, <path>, <polygon>, "
+    "<line>, <polyline>, <ellipse>) MUST be drawn STRICTLY INSIDE the "
+    "SHAPE ZONE: x in [245, 660], y in [180, 490].  Before emitting "
+    "each primitive, mentally check: is its x-range fully inside "
+    "[245, 660]?  Is its y-range fully inside [180, 490]?  A <rect "
+    "x='250' width='420'> ends at x=670 — that's OUTSIDE the zone "
+    "(>660) and will visually clash with the right-column text "
+    "region.  Resize or move it.  Use the full 415×310 area "
+    "generously but DO NOT cross the boundary.\n"
+    "  2. ALL explanatory text (definitions, clause lists, prose, "
+    "captions of 4+ words, conclusions, formulas longer than ~20 "
+    "chars) MUST go in `text_blocks` — never in raw <text> elements.  "
+    "Pick a region from {title, top-band, left-column, right-column, "
+    "bottom-band, center-caption} and emit one string per line.\n"
+    "  3. Raw <text> in the SVG is ALLOWED only for short math labels "
+    "(≤4 chars: 'q0', 'x₁', 'A', '∑') or short inline formulas (<20 "
+    "chars: 'a²=9') glued to a specific geometric point INSIDE the "
+    "shape zone.  Wider prose must use text_blocks.\n"
+    "  4. text_blocks lines should be SHORT — under ~60 chars for "
+    "top/bottom bands, under ~25 chars for left/right columns.  The "
+    "renderer does NOT word-wrap; over-wide lines visually overflow.\n"
+    "  5. ONE CANONICAL HOME PER PIECE OF CONTENT.  Each fact, "
+    "formula, clause string, or label appears in EXACTLY ONE place — "
+    "never twice.  Concrete examples of the bug to avoid:\n"
+    "     * Don't put 'P(Disease)=0.01' in left-column AND inside a "
+    "<rect> in the shape zone — pick one home.\n"
+    "     * Don't put SAT clauses in left-column AND as <text> inside "
+    "clause-boxes in the shape zone — pick one home.\n"
+    "     * Don't put a heading 'Reduction from SAT to 3-SAT' as a "
+    "raw <text> AND in the 'title' text-block region.\n"
+    "  When in doubt, prefer text_blocks for the textual content and "
+    "let the shape zone hold STRUCTURE ONLY (boxes, arrows, "
+    "connectors — without redundant labels naming the items the "
+    "columns already name).  Numbered tags like '①②③' or single "
+    "letters like 'A B C' can label structures in the shape zone — "
+    "those are short and don't duplicate text_blocks content.\n"
+    "\n"
+    "WORKED EXAMPLE — 'Prove that 3SAT is NP-Complete':\n"
+    "  text_blocks: [\n"
+    "    {region: 'title', lines: ['Reduction from SAT to 3-SAT']},\n"
+    "    {region: 'top-band', lines: [\n"
+    "       'SAT is NP-complete (Cook-Levin).',\n"
+    "       'We show 3SAT is NP-hard by polynomial reduction.']},\n"
+    "    {region: 'left-column', lines: [\n"
+    "       'SAT clauses:',\n"
+    "       '(x_1 ∨ x_2 ∨ x_3)',\n"
+    "       '(¬x_1 ∨ x_2)',\n"
+    "       '(x_3 ∨ ¬x_2 ∨ x_4)']},\n"
+    "    {region: 'right-column', lines: [\n"
+    "       '3-SAT clauses:',\n"
+    "       '(x_1 ∨ x_2 ∨ x_3)',\n"
+    "       '(¬x_1 ∨ x_2 ∨ y_1)',\n"
+    "       '(y_1 ∨ ¬x_2 ∨ y_2)',\n"
+    "       '(x_3 ∨ ¬x_2 ∨ x_4)']},\n"
+    "    {region: 'bottom-band', lines: [\n"
+    "       'Reduction preserves satisfiability; runs in polynomial "
+    "time.']},\n"
+    "  ]\n"
+    "  svg: ONLY shapes inside x in [245, 660], y in [180, 490].  For "
+    "example, three small <rect> on the left of the shape zone labelled "
+    "ONLY '①' '②' '③' (vertex tags, ≤4 chars) for the original "
+    "clauses, three more <rect> on the right side of the shape zone "
+    "labelled '①′' '②′' '③′' for the 3-SAT clauses, and three <line> "
+    "arrows connecting corresponding pairs.  Rect widths: keep each "
+    "≤80 units so 'left + width' stays well inside x=660.  The shape "
+    "zone shows the STRUCTURE (boxes + arrows + numeric tags).  The "
+    "text_blocks columns show the CONTENT (the actual clause strings).  "
+    "A learner reads ① in the box, looks left, finds the matching "
+    "clause string in the left-column text-block.\n"
     "\n"
     "SHOW DON'T JUST TELL — STRICT RULE.  Every narration phrase MUST "
     "highlight a VISIBLE element drawn in the SVG.  If the narration "
@@ -5062,10 +5165,32 @@ def resolve_text_overlaps(svg: str, max_iterations: int = 60) -> str:
         text_re = _re.compile(
             r'(<text\b[^>]*>)([^<]*)(</text>)', _re.IGNORECASE
         )
+        # Skip <text> inside <g class="text-region-…"> groups: those
+        # are deterministically positioned by inject_text_blocks() and
+        # must not be moved by the resolver.
+        region_g_re = _re.compile(
+            r'<g\b[^>]*class\s*=\s*["\'][^"\']*text-region-[^"\']*["\']'
+            r'[^>]*>',
+        )
+
+        def _region_ranges(s: str) -> list[tuple[int, int]]:
+            spans: list[tuple[int, int]] = []
+            for gm in region_g_re.finditer(s):
+                close_idx = s.find("</g>", gm.end())
+                if close_idx >= 0:
+                    spans.append((gm.start(), close_idx + 4))
+            return spans
 
         def _collect_boxes(s: str) -> list[dict]:
             items: list[dict] = []
+            skip = _region_ranges(s)
+
+            def _in_region(pos: int) -> bool:
+                return any(a <= pos < b for a, b in skip)
+
             for m in text_re.finditer(s):
+                if _in_region(m.start()):
+                    continue
                 open_tag = m.group(1)
                 content = m.group(2).strip()
                 if not content or len(content) < 2:
@@ -5940,9 +6065,32 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
         for cx, cy, r, cid in circles_with_geom:
             diagram_boxes.append((cx - r, cy - r, 2*r, 2*r, cid))
 
+        # Pre-compute byte ranges occupied by <g class="text-region-…">
+        # groups.  Text inside these groups is deterministically
+        # positioned by inject_text_blocks() and cannot overlap by
+        # construction — flagging it here would generate false
+        # positives that drive useless retries.
+        text_region_ranges: list[tuple[int, int]] = []
+        for gm in re.finditer(
+            r'<g\b[^>]*class\s*=\s*["\'][^"\']*text-region-[^"\']*["\'][^>]*>',
+            svg,
+        ):
+            # Find the matching </g>.  Groups don't nest in our
+            # rendered output (each region is one flat <g>), so a
+            # naive forward search to the next </g> is correct.
+            close_idx = svg.find("</g>", gm.end())
+            if close_idx >= 0:
+                text_region_ranges.append((gm.start(), close_idx + 4))
+
+        def _in_text_region(pos: int) -> bool:
+            return any(s <= pos < e for s, e in text_region_ranges)
+
         # Recompute text boxes (similar to out-of-bounds above).
         text_boxes: list[tuple[float, float, float, float, str]] = []
         for m in re.finditer(r'<text\b([^>]*)>([^<]*)', svg):
+            if _in_text_region(m.start()):
+                # Deterministically-positioned text — skip.
+                continue
             attrs = _attrs(m.group(1) + ">")
             try:
                 tx = float(attrs.get("x", "")); ty = float(attrs.get("y", ""))
