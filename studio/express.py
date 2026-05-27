@@ -1559,14 +1559,14 @@ async def express_figure(
     base_url: str,
     model: str,
     api_key: str | None,
-    # max_retries=2 — vision-review needs more chances to fix
-    # real geometric/overlap issues that take more than one shot.
-    # The earlier max_retries=1 was tuned against TEXT-mode review
-    # which mostly fired on factual claims (cheap to fix in one
-    # round); vision review fires on layout overlaps that genuinely
-    # require multiple rounds.  Hard wall remains the per-call
-    # timeout — even with 2 retries the worst case is ~3 × 40 s.
-    max_retries: int = 2,
+    # max_retries=1 — total budget = 2 attempts.  Was bumped to 2
+    # before best-attempt selection existed; production logs since
+    # then show attempt 0 was consistently the best (or tied with
+    # later attempts), so 3 attempts cost ~30 s for negligible
+    # quality gain.  With best-attempt + patch-retry, 2 attempts
+    # gives us best-of-2 — usually as good as best-of-3 — at half
+    # the worst-case latency (~40-50 s vs ~80-100 s).
+    max_retries: int = 1,
     context_canvases: list[dict[str, Any]] | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
     allow_panels: bool = True,
@@ -2601,10 +2601,13 @@ async def express_figure(
         # regenerate from scratch — in the 3-SAT case attempt 1's
         # fresh emission had 5 overlap pairs vs attempt 0's 1.
         prior_svg = result.get("svg", "")
-        # Cap inline SVG at 12k chars so a single oversized prior
-        # doesn't blow past the model context (gpt-4o = 128k input).
-        if len(prior_svg) > 12000:
-            prior_svg = prior_svg[:12000] + "\n<!-- ...truncated... -->"
+        # Cap inline SVG at 4k chars.  Larger prior-SVG inputs
+        # measurably slow the retry call (attempt 1 was ~2x slower
+        # than attempt 0 in production when prior was 1.7k chars).
+        # 4k covers >95 % of LLM-emitted SVGs without truncation
+        # while keeping the retry prompt lean.
+        if len(prior_svg) > 4000:
+            prior_svg = prior_svg[:4000] + "\n<!-- ...truncated... -->"
         retry_text = (
             "Your previous figure failed review.  Below is the "
             "rendered PNG, a structured list of specific fixes, and "
