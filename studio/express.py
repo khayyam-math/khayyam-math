@@ -197,6 +197,114 @@ class _StreamingSvgExtractor:
             self._svg.append(ch)
 
 
+# ── Deterministic text-region layout ──────────────────────────────────────
+#
+# Free-form `<text x=… y=…>` placement is the dominant source of text-
+# text overlap in figures: the LLM picks pixel coordinates one element
+# at a time and forgets which y-positions are already taken in nearby
+# columns.  Instead, the schema exposes a `text_blocks` field where the
+# LLM names a REGION and a list of LINES; Python deterministically
+# positions each line.  Two overlapping `text_blocks` lines is
+# impossible by construction.
+#
+# Each region is anchored within the canvas (default viewBox 900×620).
+# `x` / `y` mark the START position of the first line (baseline for the
+# first row).  `line_height` is the vertical step between consecutive
+# lines.  `width` is advisory — the renderer doesn't word-wrap; the
+# LLM should keep each line short enough.  `font_size` and `anchor`
+# (text-anchor: start / middle / end) match the region's intended use.
+
+TEXT_REGIONS: dict[str, dict[str, Any]] = {
+    "title": {
+        "x": 450, "y": 32, "width": 880, "anchor": "middle",
+        "font_size": 20, "line_height": 26,
+    },
+    "top-band": {
+        "x": 20, "y": 70, "width": 860, "anchor": "start",
+        "font_size": 14, "line_height": 18,
+    },
+    "left-column": {
+        "x": 20, "y": 95, "width": 410, "anchor": "start",
+        "font_size": 14, "line_height": 20,
+    },
+    "right-column": {
+        "x": 470, "y": 95, "width": 410, "anchor": "start",
+        "font_size": 14, "line_height": 20,
+    },
+    "bottom-band": {
+        "x": 450, "y": 595, "width": 860, "anchor": "middle",
+        "font_size": 13, "line_height": 17,
+    },
+    "legend": {
+        "x": 720, "y": 115, "width": 160, "anchor": "start",
+        "font_size": 12, "line_height": 16,
+    },
+    "center-caption": {
+        "x": 450, "y": 555, "width": 600, "anchor": "middle",
+        "font_size": 14, "line_height": 18,
+    },
+}
+
+
+def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
+    """Convert a list of {region, lines} entries into SVG markup.
+
+    Output is a sequence of <g class="text-region-NAME"> groups, each
+    containing one <text> per line, with y-coordinates auto-stacked at
+    the region's `line_height`.  Unknown regions fall back to
+    "left-column".  Empty lines (whitespace-only) are skipped so the
+    LLM can pad without leaving blank rows.
+    """
+    if not text_blocks:
+        return ""
+    import html as _html
+    pieces: list[str] = []
+    for block in text_blocks:
+        if not isinstance(block, dict):
+            continue
+        region_name = block.get("region") or "left-column"
+        if region_name not in TEXT_REGIONS:
+            region_name = "left-column"
+        region = TEXT_REGIONS[region_name]
+        lines = block.get("lines") or []
+        if not isinstance(lines, list):
+            continue
+        cleaned = [str(line).strip() for line in lines if str(line).strip()]
+        if not cleaned:
+            continue
+        x = region["x"]
+        y0 = region["y"]
+        anchor = region["anchor"]
+        fs = region["font_size"]
+        lh = region["line_height"]
+        pieces.append(f'<g class="text-region-{region_name}">')
+        for i, line in enumerate(cleaned):
+            y = y0 + i * lh
+            escaped = _html.escape(line, quote=False)
+            pieces.append(
+                f'<text x="{x}" y="{y}" font-size="{fs}" '
+                f'text-anchor="{anchor}" fill="#222">{escaped}</text>'
+            )
+        pieces.append("</g>")
+    return "".join(pieces)
+
+
+def inject_text_blocks(svg: str, text_blocks: list[dict[str, Any]]) -> str:
+    """Splice rendered text-block markup into the SVG just before
+    </svg>.  No-op when text_blocks is empty.  When the SVG has no
+    closing tag (malformed), append the markup at the end so it still
+    renders inside the broken document instead of being lost."""
+    rendered = render_text_blocks(text_blocks)
+    if not rendered:
+        return svg
+    if not svg:
+        return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620">{rendered}</svg>'
+    idx = svg.rfind("</svg>")
+    if idx < 0:
+        return svg + rendered
+    return svg[:idx] + rendered + svg[idx:]
+
+
 # ── JSON schema the LLM is forced to follow ───────────────────────────────
 
 EXPRESS_SCHEMA: dict[str, Any] = {
@@ -322,9 +430,59 @@ EXPRESS_SCHEMA: dict[str, Any] = {
                 "required": ["kind", "description", "a", "b"],
             },
         },
+        "text_blocks": {
+            "type": "array",
+            "description": (
+                "DETERMINISTIC TEXT LAYOUT — use this for ANY multi-line "
+                "explanatory text (definitions, lists of clauses, "
+                "step-by-step prose, captions of 4+ words).  Each entry "
+                "names a REGION and a list of LINES; Python positions "
+                "every line at non-overlapping coordinates automatically.  "
+                "Use raw `<text>` in the svg field ONLY for short math "
+                "labels (≤4 chars: 'q0', 'x_1', 'A', '∑', formulas under "
+                "20 chars) that must be anchored to a specific geometric "
+                "point.  EVERY other text MUST go in text_blocks — "
+                "explanatory sentences placed by hand at x/y coordinates "
+                "are the #1 source of overlap.  Empty array if the figure "
+                "needs no captions."
+            ),
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "region": {
+                        "type": "string",
+                        "enum": [
+                            "title", "top-band", "left-column",
+                            "right-column", "bottom-band", "legend",
+                            "center-caption",
+                        ],
+                        "description": (
+                            "Where the lines appear:  "
+                            "title (top centre, 20pt) | "
+                            "top-band (full-width strip y=70) | "
+                            "left-column (x<430, definitions / steps) | "
+                            "right-column (x>470, examples / contrasts) | "
+                            "bottom-band (footer line, full width) | "
+                            "legend (small text, top-right corner) | "
+                            "center-caption (single caption above bottom)."
+                        ),
+                    },
+                    "lines": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "One short line each — keep each under ~60 "
+                            "characters; the renderer does NOT word-wrap."
+                        ),
+                    },
+                },
+                "required": ["region", "lines"],
+            },
+        },
     },
     "required": ["svg", "narration", "title", "problem_statement",
-                 "solution", "math_claims"],
+                 "solution", "math_claims", "text_blocks"],
 }
 
 
@@ -356,6 +514,32 @@ _EXPRESS_SYSTEM = (
     "seen this concept should be able to learn it from the figure + "
     "narration alone.  Aim for the depth of a Khan Academy / 3Blue1Brown "
     "explainer, rendered as a static SVG.\n"
+    "\n"
+    "TEXT LAYOUT — DETERMINISTIC SLOTS, NOT FREEFORM PLACEMENT.\n"
+    "All multi-line explanatory text MUST go in the `text_blocks` field "
+    "of the response — NOT in raw `<text x=… y=…>` elements inside the "
+    "SVG.  Each text_blocks entry names a REGION (one of: title, "
+    "top-band, left-column, right-column, bottom-band, legend, "
+    "center-caption) and a list of LINES.  Python deterministically "
+    "stacks each line at non-overlapping y-coordinates within that "
+    "region.\n"
+    "\n"
+    "Raw <text> in the SVG is ONLY for:\n"
+    "  * Short math labels glued to a geometric point — 'q0', 'x₁', "
+    "'∑', vertex names, single-character cell contents.\n"
+    "  * Inline formula labels under ~20 chars that must sit next to a "
+    "specific shape (e.g. 'a²' inside a square in a Pythagoras figure).\n"
+    "\n"
+    "EVERYTHING ELSE — definitions, clause lists, step-by-step prose, "
+    "captions of 4+ words, footnotes, narration-like sentences — goes "
+    "in text_blocks.  Two definitions placed by hand at the same y in "
+    "different x-anchored columns is the #1 source of overlap, and the "
+    "deterministic stacker eliminates the class of bug entirely.  "
+    "Example: a 3SAT proof figure puts the title in `title`, the "
+    "original SAT clauses in `left-column`, the converted 3SAT clauses "
+    "in `right-column`, and the conclusion in `bottom-band` — and "
+    "every clause line is a separate string in the `lines` array.  No "
+    "<text> in the SVG for any of that prose.\n"
     "\n"
     "SHOW DON'T JUST TELL — STRICT RULE.  Every narration phrase MUST "
     "highlight a VISIBLE element drawn in the SVG.  If the narration "
@@ -2096,6 +2280,27 @@ async def express_figure(
                  f"{'retrying' if attempt < max_retries else 'giving up'}")
             continue
         _log(f"parsed: svg_len={len(result.get('svg',''))} phrases={len(result.get('narration',[]))}")
+        # Deterministic text-block injection — splice <g> groups
+        # containing region-positioned <text> elements into the SVG.
+        # LLM-emitted text_blocks bypass the freeform <text x= y=>
+        # placement that's the #1 source of overlap; each line in each
+        # region is auto-stacked at non-overlapping y-coordinates.
+        try:
+            text_blocks = result.get("text_blocks") or []
+            if text_blocks:
+                pre_len = len(result["svg"])
+                result["svg"] = inject_text_blocks(result["svg"], text_blocks)
+                n_lines = sum(
+                    len([ln for ln in (b.get("lines") or []) if str(ln).strip()])
+                    for b in text_blocks if isinstance(b, dict)
+                )
+                _log(
+                    f"inject_text_blocks: {len(text_blocks)} region(s), "
+                    f"{n_lines} line(s); svg {pre_len} -> "
+                    f"{len(result['svg'])} chars"
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log(f"inject_text_blocks FAILED: {type(exc).__name__}: {exc}")
         # Escape stray & / < the model left raw inside <text> content
         # (LaTeX matrix `&` separators, inequalities like `|x| < d`).
         # Must run FIRST — a malformed SVG breaks every XML-parsing
