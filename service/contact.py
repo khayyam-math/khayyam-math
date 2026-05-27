@@ -263,6 +263,7 @@ _PAGE_HEAD = """<!doctype html><html lang="en"><head>
 <header>
   <a class="brand" href="/">Khayyam Math</a>
   <nav>
+    <a href="/studio">Studio</a>
     <a href="/studio/auth/login">Sign in</a>
     <a href="/terms">Terms</a>
   </nav>
