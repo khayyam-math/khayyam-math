@@ -42,7 +42,7 @@ corrective action in response to any behaviour they deem inappropriate.
 
 Instances of abusive, harassing, or otherwise unacceptable behaviour
 may be reported to the project maintainer at
-**arash.kolankeh [at] cud.ac.ae**. All complaints will be reviewed
+**arash_kermani [at] yahoo.com**. All complaints will be reviewed
 and investigated promptly and fairly.
 
 ## Attribution

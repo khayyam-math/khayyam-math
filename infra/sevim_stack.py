@@ -253,9 +253,7 @@ class SevimStack(Stack):
             # whitelist; only signed-in users whose magic-link cookie
             # carries one of these e-mails can see it.  Everyone else
             # gets a 404, so the route is effectively invisible.
-            "SEVIM_ADMIN_EMAILS": (
-                "arash_kermani@yahoo.com,arash_kermani@yahoo.com"
-            ),
+            "SEVIM_ADMIN_EMAILS": "arash_kermani@yahoo.com",
             "SEVIM_STORAGE_URL": f"s3://{canvas_bucket.bucket_name}",
             "SEVIM_EXPORT_S3_BUCKET": training_bucket.bucket_name,
             "SEVIM_LORA_S3_BUCKET": lora_bucket.bucket_name,

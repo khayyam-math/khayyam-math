@@ -2,7 +2,7 @@
 
 **Last update:** 2026-05-09
 **Status:** Heavy iteration day on perf + UX + Studio.  Repo now hosted
-at `git@github.com:arashkermaniprojects/sevim-plugin.git`; rollback
+at `git@github.com:khayyam-math/khayyam-math.git`; rollback
 tag `success_1` marks the morning's known-good baseline.
 
 ---

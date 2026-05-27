@@ -58,10 +58,18 @@ _DEFAULT_RECIPIENT = "gradersystem@gmail.com"
 
 def _secret() -> bytes:
     s = os.environ.get("SEVIM_AUTH_SECRET")
-    if not s:
-        # Dev fallback so the form can render locally without auth set up.
-        return b"insecure-dev-secret-do-not-use-in-production"
-    return s.encode("utf-8")
+    if s:
+        return s.encode("utf-8")
+    # Refuse the insecure fallback whenever auth is on (i.e. in any real
+    # deploy).  An unset secret here would let an attacker forge captcha
+    # tokens and spam the contact form at scale.
+    from studio.auth import is_required as _auth_required
+    if _auth_required():
+        raise RuntimeError(
+            "SEVIM_AUTH_REQUIRED=1 but SEVIM_AUTH_SECRET is unset.  "
+            "Provision a 32+ byte secret in Secrets Manager and re-deploy."
+        )
+    return b"insecure-dev-secret-do-not-use-in-production"
 
 
 def _b64u(data: bytes) -> str:

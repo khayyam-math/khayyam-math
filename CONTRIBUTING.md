@@ -65,7 +65,7 @@ These are listed roughly in order of "easy first issue" → "hardest":
 
 1. Fork → branch from `main` (`feat/foo` or `fix/bar`)
 2. Implement + add tests
-3. Push, open a PR against `arashkermaniprojects/khayyam-math:main`
+3. Push, open a PR against `khayyam-math/khayyam-math:main`
 4. CI runs the test suite + a small Playwright UX audit
 5. A maintainer reviews; expect a turnaround of 1-3 days
 6. On approval: squash-merge into main

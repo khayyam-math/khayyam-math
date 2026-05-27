@@ -1,8 +1,8 @@
 ================================================================================
-                         SeVim — Citation NOTICE
+                       Khayyam Math — Citation NOTICE
 ================================================================================
 
-This software is the reference implementation for the paper:
+This software builds on the methods described in the paper:
 
     SeVim: Deterministic Semantic-to-Visual Mapping for Real-Time Diagram
     Generation via Hybrid Neuro-Symbolic Reasoning.
@@ -13,21 +13,17 @@ A preprint is openly archived at Zenodo:
     URL:  https://zenodo.org/records/20011107
 
 --------------------------------------------------------------------------------
-Authors
+Software author
 --------------------------------------------------------------------------------
 
     Arash Kermani Kolankeh
         ORCID:    0009-0003-6494-414X
         E-mail:   arash_kermani@yahoo.com
-        Affil.:   School of Engineering, Applied Science, and Technology
-                  (SEAST), Canadian University Dubai, Dubai, UAE.
+        Affil.:   Independent Researcher, Germany.
 
-    Rita Zgheib
-        E-mail:   REDACTED-email
-        Affil.:   School of Engineering, Applied Science, and Technology
-                  (SEAST), Canadian University Dubai, Dubai, UAE.
-
-Corresponding author: Arash Kermani Kolankeh <arash_kermani@yahoo.com>.
+The Khayyam Math software is sole-authored.  The preprint listed above
+is co-authored with Rita Zgheib and that joint authorship is preserved
+on Zenodo; only the software-authorship claim is sole.
 
 --------------------------------------------------------------------------------
 Required citation (BibTeX)
@@ -61,11 +57,9 @@ wins and this file should be regenerated to match.
 Attribution and citation requirement (licence-bound)
 --------------------------------------------------------------------------------
 
-Any person or organisation reusing this software, the five-stage
-pipeline design, the twelve-relation closed grammar, the deterministic
-Sugiyama layout, the frozen Qwen2.5-7B encoder integration, the math
-extension (primitives, relations, and KaTeX-rendered inner labels), or
-any artefact in the bench/eval/ harness (rubric, gold-set, raw JSON
+Any person or organisation reusing this software, the pipeline design,
+the closed relation grammar, the deterministic Sugiyama layout, or any
+artefact in the bench/eval/ harness (rubric, gold-set, raw JSON
 results, cost ledger) — in research, in derivative software, in
 courseware, in commercial evaluation, or in any other form — MUST cite
 the SeVim paper using the BibTeX entry above (or, after acceptance, the

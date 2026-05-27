@@ -416,7 +416,7 @@ machine-readable metadata.
 ## Contributing
 
 We want contributors. Look at the issues labelled
-[`good first issue`](https://github.com/arashkermaniprojects/khayyam-math/labels/good%20first%20issue)
+[`good first issue`](https://github.com/khayyam-math/khayyam-math/labels/good%20first%20issue)
 to get started. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev
 setup, coding style, and the PR review flow.
 

@@ -1,35 +1,30 @@
 cff-version: 1.2.0
-message: "If you use SeVim, please cite the preprint below."
-title: "SeVim: Deterministic Semantic-to-Visual Mapping for Real-Time Diagram Generation via Hybrid Neuro-Symbolic Reasoning"
+message: "If you use Khayyam Math, please cite the preprint below."
+title: "Khayyam Math: Live Diagram Generation for Educational Mathematics via Hybrid Neuro-Symbolic Reasoning"
 authors:
   - family-names: "Kermani Kolankeh"
     given-names: "Arash"
-    affiliation: "School of Engineering, Applied Science, and Technology (SEAST), Canadian University Dubai"
+    affiliation: "Independent Researcher, Germany"
     email: arash_kermani@yahoo.com
-  - family-names: "Zgheib"
-    given-names: "Rita"
-    affiliation: "School of Engineering, Applied Science, and Technology (SEAST), Canadian University Dubai"
-    email: REDACTED-email
 version: "0.1.0"
-repository-code: "https://github.com/arashkermaniprojects/sevim"
+repository-code: "https://github.com/khayyam-math/khayyam-math"
 license: MIT
 type: software
 abstract: >
-  SeVim is a five-stage neuro-symbolic pipeline that converts natural-language
-  educational text into deterministic, byte-reproducible SVG diagrams without
-  hallucination and without external API calls on the default path. It
-  combines a rule-based semantic triple extractor, a frozen Qwen2.5-7B
-  encoder used solely as a feature extractor, a random-weight linear
-  projection to visual parameters seeded at seed=42, and a deterministic
-  Sugiyama-style layout engine. A re-runnable cross-system evaluation
-  harness ships with the implementation under bench/eval/.
+  Khayyam Math converts natural-language mathematics prompts into
+  deterministic, byte-reproducible figures with synchronised narration.
+  The pipeline combines deterministic per-domain templates (Graphviz,
+  matplotlib, SymPy plots) with an LLM fallback gated by a SymPy / Z3 /
+  Lean math-correctness verifier and a 50-criterion pre-deploy quality
+  gate.  See the repository for the architecture overview and the
+  benchmark harness.
 keywords:
-  - knowledge graph
-  - SVG generation
   - educational technology
+  - mathematics
+  - diagram generation
   - neuro-symbolic
   - deterministic layout
-  - information visualization
+  - figure verification
 preferred-citation:
   type: article
   title: "SeVim: Deterministic Semantic-to-Visual Mapping for Real-Time Diagram Generation via Hybrid Neuro-Symbolic Reasoning"

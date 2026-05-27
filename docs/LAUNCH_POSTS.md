@@ -27,7 +27,7 @@ premise + the live demo + the open-source link.
 Show HN: Khayyam Math – voice-narrated math figures, generated live (MIT)
 ```
 
-**URL field**: `https://github.com/arashkermaniprojects/khayyam-math`
+**URL field**: `https://github.com/khayyam-math/khayyam-math`
 
 **First comment** (post this immediately after submission so the
 context lands above the fold):
@@ -41,7 +41,7 @@ vision-audited LLM-SVG path for everything else.
 
 Live demo: https://khayyammath.com (magic-link signin, free)
 60-second video: <YOUTUBE_URL>
-Architecture: github.com/arashkermaniprojects/khayyam-math/blob/main/ARCHITECTURE.md
+Architecture: github.com/khayyam-math/khayyam-math/blob/main/ARCHITECTURE.md
 Paper: https://zenodo.org/records/20011107
 
 A few non-obvious bits:
@@ -79,7 +79,7 @@ Type "draw a DFA for L = (a|b)* ending in ab" → state machine
 appears in ~5 seconds with synchronised voice + visual highlighting.
 
 Live: khayyammath.com
-Code (MIT): github.com/arashkermaniprojects/khayyam-math
+Code (MIT): github.com/khayyam-math/khayyam-math
 🧵
 ```
 
@@ -171,7 +171,7 @@ Things I want contributors for:
 → A TikZ → SVG route for publication-quality figures
 → A real human-labelled scorer corpus
 
-Issues: github.com/arashkermaniprojects/khayyam-math/issues
+Issues: github.com/khayyam-math/khayyam-math/issues
 ```
 
 > Tweet 10 (close + signal):
@@ -180,7 +180,7 @@ Whole thing is MIT-licensed. UAE-built. Solo author + brother
 joining as co-founder.
 
 Star the repo if you'd like to see more of this:
-github.com/arashkermaniprojects/khayyam-math
+github.com/khayyam-math/khayyam-math
 
 — Arash @arash_kermani
 ```
@@ -244,7 +244,7 @@ Why open-source it? Two reasons:
    LLM. Sharing it accelerates the field.
 
 → Live demo: https://khayyammath.com
-→ Code (MIT): https://github.com/arashkermaniprojects/khayyam-math
+→ Code (MIT): https://github.com/khayyam-math/khayyam-math
 → 60-second demo: <YOUTUBE_URL>
 → Paper: https://zenodo.org/records/20011107
 
@@ -293,7 +293,7 @@ DM template:
 ```
 Hi [name], I'm Arash. I just open-sourced an AI math tutor that
 generates voice-narrated figures from one-line prompts. Live at
-khayyammath.com, code (MIT) at github.com/arashkermaniprojects/khayyam-math.
+khayyammath.com, code (MIT) at github.com/khayyam-math/khayyam-math.
 
 Two reasons I think it might interest you: [reason 1, reason 2].
 
