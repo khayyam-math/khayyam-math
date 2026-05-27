@@ -2323,6 +2323,25 @@ async def express_figure(
             except Exception as exc:  # noqa: BLE001
                 _log(f"plan_layout FAILED: {type(exc).__name__}: {exc}")
 
+        # Final deterministic text-overlap resolver.  Handles <text>
+        # ANYWHERE in the SVG (including inside <g> groups, which
+        # reflow_overlapping_text and plan_layout skip by design).
+        # Uses the same bbox estimator the structural critic uses, so
+        # any overlap the critic would flag is what this pass tries to
+        # resolve.  Iterates up to 8 times; greedy by document order.
+        try:
+            pre_len = len(result["svg"])
+            resolved = resolve_text_overlaps(result["svg"])
+            if resolved != result["svg"]:
+                _log(
+                    f"resolve_text_overlaps: rewrote {pre_len} -> "
+                    f"{len(resolved)} chars (deterministic text-overlap fix)"
+                )
+                result["svg"] = resolved
+        except Exception as exc:  # noqa: BLE001
+            _log(f"resolve_text_overlaps FAILED: "
+                 f"{type(exc).__name__}: {exc}")
+
         # Cap oversized <marker> arrowheads.
         try:
             shrunk = shrink_arrowheads(result["svg"])
@@ -4790,6 +4809,159 @@ def strip_narration_prose_text(svg: str) -> str:
             _maybe_strip,
             svg, flags=_re.DOTALL,
         )
+    except Exception:
+        return svg
+
+
+def resolve_text_overlaps(svg: str, max_iterations: int = 8) -> str:
+    """Deterministic final-pass that moves overlapping <text> elements
+    apart by adjusting their `y` attribute.  Handles <text> ANYWHERE in
+    the SVG (including inside <g> groups, which `reflow_overlapping_text`
+    skips by design).
+
+    Uses the same bbox estimator as the structural critic
+    (0.6 × font-size × char-count for width; 1.2 × font-size for
+    height), so any overlap the critic would flag is the same set
+    this function tries to resolve.  Iterates up to ``max_iterations``
+    times: each pass fixes ONE overlapping pair (greedy by document
+    order), re-collects boxes, repeats.  Stops early once no overlaps
+    remain.
+
+    Modifies y attribute IN PLACE in the raw SVG markup.  Does NOT
+    account for parent transforms — that's OK because the critic's
+    detector also ignores them; detection-and-fix agree on the
+    coordinate frame.
+
+    Errors are swallowed: layout polish must never block a working
+    figure.  Returns the original SVG if anything fails.
+    """
+    if not svg or "<text" not in svg:
+        return svg
+    try:
+        import re as _re
+
+        attr_re = _re.compile(
+            r'(\w[\w-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
+        )
+
+        def _local_attrs(open_tag: str) -> dict[str, str]:
+            return {
+                m.group(1): (m.group(2) if m.group(2) is not None
+                             else m.group(3))
+                for m in attr_re.finditer(open_tag)
+            }
+
+        # Match `<text ...>content</text>`. Capture the opening tag,
+        # the inner content, and the closing tag separately so we can
+        # surgically edit only the y attribute of the opening tag.
+        text_re = _re.compile(
+            r'(<text\b[^>]*>)([^<]*)(</text>)', _re.IGNORECASE
+        )
+
+        def _collect_boxes(s: str) -> list[dict]:
+            items: list[dict] = []
+            for m in text_re.finditer(s):
+                open_tag = m.group(1)
+                content = m.group(2).strip()
+                if not content or len(content) < 2:
+                    continue
+                attrs = _local_attrs(open_tag)
+                try:
+                    tx = float(attrs.get("x", ""))
+                    ty = float(attrs.get("y", ""))
+                except ValueError:
+                    continue
+                try:
+                    fs = float(attrs.get("font-size", "16")
+                               .rstrip("pxptem"))
+                except ValueError:
+                    fs = 16.0
+                anchor = (attrs.get("text-anchor") or "start").lower()
+                est_w = max(1.0, len(content) * fs * 0.6)
+                est_h = fs * 1.2
+                x_left = (tx - est_w / 2 if anchor == "middle"
+                          else tx - est_w if anchor == "end"
+                          else tx)
+                items.append({
+                    "open_start": m.start(1),
+                    "open_end": m.end(1),
+                    "tx": tx, "ty": ty, "fs": fs,
+                    "anchor": anchor,
+                    "x_left": x_left,
+                    "width": est_w,
+                    "height": est_h,
+                    "content": content,
+                    "open_tag": open_tag,
+                })
+            return items
+
+        def _rewrite_y(open_tag: str, new_ty: float) -> str:
+            # Replace y="..." (or y='...') ONLY in this opening tag.
+            # If no y attribute is present (shouldn't happen — we
+            # filtered above), the regex misses and we leave it alone.
+            def _replace_one(m: "_re.Match[str]") -> str:
+                q_open = m.group(1)   # opening quote char (" or ')
+                q_close = m.group(3)  # closing quote char
+                return f'y={q_open}{new_ty:.2f}{q_close}'
+            return _re.sub(
+                r'\by\s*=\s*(["\'])([^"\']*)(["\'])',
+                _replace_one,
+                open_tag,
+                count=1,
+            )
+
+        for _it in range(max_iterations):
+            items = _collect_boxes(svg)
+            if len(items) < 2:
+                return svg
+            moved = False
+            # Greedy: find the first overlapping pair in document order
+            # and fix it.  Re-collect on next iteration since byte
+            # offsets shift after every edit.
+            for i in range(len(items)):
+                a = items[i]
+                ax = a["x_left"]
+                ay = a["ty"] - 0.8 * a["height"]
+                aw, ah = a["width"], a["height"]
+                ax2 = ax + aw
+                ay2 = ay + ah
+                for j in range(i + 1, len(items)):
+                    b = items[j]
+                    bx = b["x_left"]
+                    by = b["ty"] - 0.8 * b["height"]
+                    bw, bh = b["width"], b["height"]
+                    bx2 = bx + bw
+                    by2 = by + bh
+                    # Compute overlap area (same as critic).
+                    ix0 = max(ax, bx); ix1 = min(ax2, bx2)
+                    iy0 = max(ay, by); iy1 = min(ay2, by2)
+                    if ix1 <= ix0 or iy1 <= iy0:
+                        continue
+                    overlap = (ix1 - ix0) * (iy1 - iy0)
+                    smaller_area = max(1.0, min(aw * ah, bw * bh))
+                    # Match critic's 20% threshold.
+                    if overlap / smaller_area < 0.20:
+                        continue
+                    # Move b's baseline below a's bottom + 4 unit gap.
+                    new_ty_b = ay2 + 4 + 0.8 * b["height"]
+                    if abs(new_ty_b - b["ty"]) < 1.0:
+                        # No meaningful shift would help (already
+                        # roughly aligned); skip.
+                        continue
+                    new_open = _rewrite_y(b["open_tag"], new_ty_b)
+                    if new_open == b["open_tag"]:
+                        # No y attribute to rewrite — skip.
+                        continue
+                    svg = (svg[:b["open_start"]]
+                           + new_open
+                           + svg[b["open_end"]:])
+                    moved = True
+                    break
+                if moved:
+                    break
+            if not moved:
+                return svg
+        return svg
     except Exception:
         return svg
 
