@@ -277,38 +277,6 @@ _PAGE_FOOT = """
 <footer>
   <p>Khayyam Math · <a href="/">home</a> · <a href="/terms">terms</a></p>
 </footer>
-<div id="cookie-banner" hidden style="
-     position:fixed; bottom:0; left:0; right:0;
-     background:#1a1d24; color:#eef0f3;
-     padding:0.9em 1.2em; padding-bottom:max(0.9em, env(safe-area-inset-bottom));
-     display:flex; flex-wrap:wrap; gap:0.8em; align-items:center;
-     justify-content:center; font-size:0.92em; z-index:1000;
-     box-shadow:0 -2px 12px rgba(0,0,0,0.18);">
-  <span style="flex:1; min-width:14em; line-height:1.45;">
-    Khayyam Math uses one essential cookie for sign-in.  No advertising
-    or analytics trackers.  See the <a href="/terms" style="color:#7eb6ff">Terms</a>.
-  </span>
-  <button id="cookie-ok" type="button" style="
-        padding:0.55em 1.2em; min-height:40px;
-        background:#1f6fe0; color:#fff; border:0;
-        border-radius:6px; font:inherit; cursor:pointer;">Got it</button>
-</div>
-<script>
-(function() {
-  try {
-    if (localStorage.getItem('khayyam_cookie_consent') === '1') return;
-  } catch (_) {}
-  var b = document.getElementById('cookie-banner');
-  if (!b) return;
-  b.hidden = false;
-  document.getElementById('cookie-ok').addEventListener('click', function () {
-    try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
-    b.style.transition = 'opacity 0.25s';
-    b.style.opacity = '0';
-    setTimeout(function () { b.remove(); }, 260);
-  });
-})();
-</script>
 </body></html>
 """
 
