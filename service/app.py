@@ -315,9 +315,13 @@ def favicon():
 
 
 @app.get("/health", include_in_schema=False)
-def health():
+async def health():
     # Load-balancer health check only.  Deliberately exposes no
-    # internal state (canvas counts, model, backend).
+    # internal state (canvas counts, model, backend).  Explicitly
+    # async so it never goes through uvicorn's thread pool — a
+    # CPU-busy express request taking thread-pool capacity must
+    # not delay ALB's 5s health check, or the container gets
+    # killed mid-figure (the "no figure appeared" failure mode).
     return {"status": "ok"}
 
 

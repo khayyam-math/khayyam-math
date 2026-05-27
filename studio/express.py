@@ -244,6 +244,12 @@ class _StreamingSvgExtractor:
 # clashes with the shape area.
 SHAPE_ZONE: tuple[float, float, float, float] = (245.0, 180.0, 660.0, 490.0)
 
+
+class _ShapeCheckSkip(Exception):
+    """Sentinel raised by the structural critic's shape-zone check
+    when the figure isn't using the new zone architecture (no
+    text-region groups present)."""
+
 TEXT_REGIONS: dict[str, dict[str, Any]] = {
     # Top of canvas — large centred title.
     "title": {
@@ -643,6 +649,28 @@ _EXPRESS_SYSTEM = (
     "text_blocks columns show the CONTENT (the actual clause strings).  "
     "A learner reads ① in the box, looks left, finds the matching "
     "clause string in the left-column text-block.\n"
+    "\n"
+    "ANTI-EXAMPLES — common bugs to avoid (do NOT emit these):\n"
+    "  ❌ <rect x='250' y='200' width='400'><text>...x_1 ∨ x_2...</text></rect>\n"
+    "     — Long clause string INSIDE a shape-zone box.  The same text "
+    "is already in left-column text_blocks; this duplicates it AND "
+    "uses up canvas room that should hold arrows/structure.  Fix: emit "
+    "the rect with ONLY a short label '①' (≤4 chars) inside, the "
+    "clause string is in left-column.\n"
+    "  ❌ <rect x='670' y='200' width='200' .../> — A rect that starts "
+    "or extends past x=660.  This invades the right-column text zone; "
+    "the structural critic will flag it.  Fix: make the rect narrower "
+    "and place it inside [245, 660].\n"
+    "  ❌ <text x='450' y='30' font-size='20'>Reduction from SAT</text> "
+    "AND text_blocks title 'Reduction from SAT' — the heading is "
+    "emitted twice (once raw in SVG, once as a text_block).  Fix: pick "
+    "ONE.  Prefer the text_block (deterministic position).\n"
+    "  ❌ <rect x='250' y='200' width='400' height='250' "
+    "fill='#fff'/> with 7 lines of computation <text> inside it — that "
+    "computation is the kind of multi-line prose that belongs in "
+    "top-band / bottom-band / center-caption text_blocks, NOT laid "
+    "out by hand inside a rect.  The rect bbox extending to y=450 "
+    "also crowds the shape zone for any geometry shown alongside.\n"
     "\n"
     "SHOW DON'T JUST TELL — STRICT RULE.  Every narration phrase MUST "
     "highlight a VISIBLE element drawn in the SVG.  If the narration "
@@ -2342,31 +2370,58 @@ async def express_figure(
         # iframe already swaps content cleanly on each chunk, so a
         # retry stream is functionally identical to a fresh stream.
         stream_this_attempt = on_svg_chunk is not None
-        async with httpx.AsyncClient(timeout=180) as client:
-            if stream_this_attempt:
-                content = await _stream_chat_completion(
-                    client=client,
-                    url=f"{base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    payload={**payload, "stream": True},
-                    on_svg_chunk=on_svg_chunk,
-                    log=_log,
-                )
-            else:
-                try:
-                    r = await client.post(
-                        f"{base_url.rstrip('/')}/chat/completions",
-                        headers=headers, json=payload,
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                if stream_this_attempt:
+                    content = await _stream_chat_completion(
+                        client=client,
+                        url=f"{base_url.rstrip('/')}/chat/completions",
+                        headers=headers,
+                        payload={**payload, "stream": True},
+                        on_svg_chunk=on_svg_chunk,
+                        log=_log,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    _log(f"main request errored: {type(exc).__name__}: {exc}")
-                    raise
-                _log(f"main request returned status={r.status_code}")
-                if r.status_code != 200:
-                    body = (await r.aread()).decode(errors="replace")
-                    _log(f"main request body: {body[:500]}")
-                r.raise_for_status()
-                content = r.json()["choices"][0]["message"]["content"]
+                else:
+                    try:
+                        r = await client.post(
+                            f"{base_url.rstrip('/')}/chat/completions",
+                            headers=headers, json=payload,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        _log(f"main request errored: {type(exc).__name__}: {exc}")
+                        raise
+                    _log(f"main request returned status={r.status_code}")
+                    if r.status_code != 200:
+                        body = (await r.aread()).decode(errors="replace")
+                        _log(f"main request body: {body[:500]}")
+                    r.raise_for_status()
+                    content = r.json()["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as http_exc:
+            # OpenAI 5xx / our backend 5xx — transient.  Don't let it
+            # raise out of express_figure and kill the chat-loop SSE
+            # connection; treat as a failed attempt and continue to
+            # the next retry or fall through to best-attempt.  If
+            # this is the FIRST attempt and no prior attempts exist,
+            # the loop will exit with `attempts` empty and the safe
+            # fallthrough at line ~2700 ships an empty SVG (chat-loop
+            # then emits tool_result with error body, browser shows a
+            # diagnostic instead of hanging forever).
+            sc = getattr(http_exc.response, "status_code", "?")
+            _log(
+                f"upstream HTTP {sc} on attempt={attempt}: "
+                f"{type(http_exc).__name__}; "
+                f"{'retrying' if attempt < max_retries else 'falling back to best prior attempt'}"
+            )
+            continue
+        except (httpx.RequestError, httpx.TimeoutException) as net_exc:
+            # Network-level failure (connection reset, timeout,
+            # DNS).  Same treatment as HTTPStatusError above.
+            _log(
+                f"upstream network error on attempt={attempt}: "
+                f"{type(net_exc).__name__}: {net_exc}; "
+                f"{'retrying' if attempt < max_retries else 'falling back to best prior attempt'}"
+            )
+            continue
         _log(f"got content length={len(content)}")
         try:
             result = json.loads(content)
@@ -2416,12 +2471,10 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"escape_bare_xml_in_svg FAILED: {type(exc).__name__}: {exc}")
-        # (strip_narration_prose_text was tried here but rolled back —
-        # too aggressive on proof prompts where the LLM emits the bulk
-        # of the figure as prose <text> blocks.  Removing them left a
-        # near-empty canvas.  See `strip_narration_prose_text` for the
-        # implementation; needs co-occurrence-with-overlap + min-content
-        # guardrails before it can ship.)
+        # (Prose-strip post-processor removed in the Phase 1A cleanup.
+        # The deterministic text-region layout prevents the original
+        # "narration prose stacked at the same y" failure at the
+        # source, so the post-hoc stripper is no longer needed.)
         # Deterministic layout pass — auto-fit every <g>'s outer
         # rectangle to its child elements so a 3×3 matrix drawn with
         # a 200×200 rect but cells extending to (350, 340) gets the
@@ -3025,12 +3078,39 @@ async def express_figure(
         last_narration = best["narration"]
         last_title = best["title"]
     else:
-        # Should be unreachable — every iteration of the loop appends
-        # to `attempts` after the LLM call succeeds.  Fall through
-        # safely with whatever `result` last held.
-        final_svg = result.get("svg", "")
-        last_narration = result.get("narration") or []
-        last_title = result.get("title") or ""
+        # No attempt succeeded.  Reachable when the upstream LLM
+        # (OpenAI) returned 5xx on every retry (rare but happens
+        # during OpenAI outages).  Build a small "we couldn't render
+        # this prompt" SVG so the canvas iframe shows something
+        # readable instead of going blank, and ship a one-phrase
+        # narration explaining the failure.
+        _log("no attempt succeeded — upstream LLM error on every retry; "
+             "shipping fallback error figure")
+        final_svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620">'
+            '<rect x="50" y="200" width="800" height="220" rx="12" '
+            'fill="#fff7ed" stroke="#f59e0b" stroke-width="2"/>'
+            '<text x="450" y="270" text-anchor="middle" '
+            'font-size="22" fill="#7c2d12" font-weight="bold">'
+            "Couldn't render this figure</text>"
+            '<text x="450" y="320" text-anchor="middle" '
+            'font-size="15" fill="#7c2d12">'
+            'The upstream AI service returned an error '
+            '(probably temporary).</text>'
+            '<text x="450" y="350" text-anchor="middle" '
+            'font-size="15" fill="#7c2d12">'
+            'Please try again in a few seconds — your prompt was fine.'
+            "</text>"
+            '</svg>'
+        )
+        last_narration = [{
+            "speak": ("The upstream AI service returned an error and we "
+                      "couldn't render this figure. The problem is on "
+                      "their end, not your prompt. Please try again in "
+                      "a few seconds."),
+            "highlight": [],
+        }]
+        last_title = "Generation failed"
 
     # Salvage step: if the chosen best happens to have a very short
     # narration (LLM over-collapsed when responding to a critique),
@@ -5067,58 +5147,10 @@ def _attempt_score(structural_issues: list[str],
     return len(structural_issues) + (5 if vision_verdict is not None else 0)
 
 
-def strip_narration_prose_text(svg: str) -> str:
-    """Remove top-level <text> blocks that look like narration prose
-    rather than figure labels.
-
-    The LLM occasionally crams multi-sentence explanations into <text>
-    elements that the figure layout doesn't reserve space for; they
-    end up overlapping each other and / or the diagram (the "3-SAT
-    proof — three explanatory paragraphs stacked at the same y"
-    failure mode).  Those sentences are already in the spoken
-    narration, so stripping them from the SVG removes the visual mess
-    without losing information.
-
-    Heuristic: visible content (with nested <tspan> tags removed) of
-    60+ chars and 8+ words, AND either ends with a period or contains
-    a sentence-y connector ("shows that", "thus,", "therefore", "this
-    means", "is at least as hard as", "can be expressed as", ...).
-    Math labels and short captions are untouched.
-    """
-    if not svg or "<text" not in svg:
-        return svg
-    try:
-        import re as _re
-        prose_cues = _re.compile(
-            r"\b(shows that|thus,?|therefore,?|this means|we see|"
-            r"in particular|note that|hence,?|because|"
-            r"establishing|reducing|expressing|converting|"
-            r"is at least as hard as|can be expressed as|"
-            r"by converting|the proof|we can reduce)\b",
-            _re.IGNORECASE,
-        )
-
-        def _maybe_strip(m: "_re.Match[str]") -> str:
-            inner = m.group(2)
-            visible = _re.sub(r"<[^>]+>", " ", inner).strip()
-            if len(visible) < 60:
-                return m.group(0)
-            words = visible.split()
-            if len(words) < 8:
-                return m.group(0)
-            ends_with_period = visible.rstrip().endswith(".")
-            has_cue = bool(prose_cues.search(visible))
-            if ends_with_period or has_cue:
-                return ""  # strip the entire <text>...</text>
-            return m.group(0)
-
-        return _re.sub(
-            r"(<text\b[^>]*>)(.*?)(</text>)",
-            _maybe_strip,
-            svg, flags=_re.DOTALL,
-        )
-    except Exception:
-        return svg
+# (strip_narration_prose_text was removed — it tried to strip <text>
+# blocks the LLM emitted as prose, but went too aggressive on proof
+# prompts and left near-empty canvases.  Replaced by the deterministic
+# text-region layout, which prevents the problem at the source.)
 
 
 def resolve_text_overlaps(svg: str, max_iterations: int = 60) -> str:
@@ -6651,6 +6683,134 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
             )
 
     issues.extend(_verify_arithmetic(svg, narration))
+
+    # Shape-zone-violation check: count shape primitives whose
+    # bounding box extends outside SHAPE_ZONE.  This catches the
+    # "LLM drew clause boxes that bled into the right-column text
+    # area" failure on proof prompts.  Skips primitives inside any
+    # <g class="text-region-*"> group (those are our deterministic
+    # text content, not LLM-emitted shapes).
+    #
+    # GATED: only applies when the figure is using the new zone
+    # architecture (at least one text_blocks region was injected).
+    # Figures that use the full canvas (deterministic templates,
+    # legacy LLM output, simple geometry) are unchanged — only when
+    # the LLM has opted into text_blocks does the shape-zone
+    # boundary become an enforceable contract.
+    try:
+        sx0, sy0, sx1, sy1 = SHAPE_ZONE
+        # Re-find text-region byte ranges (cheap regex).
+        _shape_skip: list[tuple[int, int]] = []
+        for gm in re.finditer(
+            r'<g\b[^>]*class\s*=\s*["\'][^"\']*text-region-[^"\']*["\'][^>]*>',
+            svg,
+        ):
+            ci = svg.find("</g>", gm.end())
+            if ci >= 0:
+                _shape_skip.append((gm.start(), ci + 4))
+
+
+        def _in_shape_skip(p: int) -> bool:
+            return any(a <= p < b for a, b in _shape_skip)
+
+        # Gate: only enforce shape-zone boundaries when the figure
+        # is using the new zone architecture (text_blocks were
+        # injected, producing at least one text-region group).
+        # Figures using the full canvas (deterministic templates,
+        # legacy LLM output, simple geometry) are exempt.
+        violations: list[str] = []
+        if not _shape_skip:
+            # Skip the rest of the check; `if violations:` below
+            # will be False so nothing is appended to `issues`.
+            raise _ShapeCheckSkip()
+
+        def _flag(kind: str, x_min: float, y_min: float,
+                  x_max: float, y_max: float) -> None:
+            # Allow a small margin (5 units) — bbox estimates aren't
+            # exact (e.g. stroke-width contributes).
+            tol = 5.0
+            if (x_max > sx1 + tol or x_min < sx0 - tol
+                    or y_max > sy1 + tol or y_min < sy0 - tol):
+                violations.append(
+                    f"{kind} bbox [{x_min:.0f},{y_min:.0f},"
+                    f"{x_max:.0f},{y_max:.0f}] extends past SHAPE_ZONE "
+                    f"[{int(sx0)},{int(sy0)},{int(sx1)},{int(sy1)}]"
+                )
+
+        # <rect x y width height>
+        for m in re.finditer(r'<rect\b[^>]*?/?>', svg):
+            if _in_shape_skip(m.start()):
+                continue
+            a = _attrs(m.group(0))
+            try:
+                x = float(a.get("x", "0"))
+                y = float(a.get("y", "0"))
+                w = float(a.get("width", "0"))
+                h = float(a.get("height", "0"))
+            except ValueError:
+                continue
+            if w <= 0 or h <= 0:
+                continue
+            _flag("rect", x, y, x + w, y + h)
+        # <circle cx cy r>
+        for m in re.finditer(r'<circle\b[^>]*?/?>', svg):
+            if _in_shape_skip(m.start()):
+                continue
+            a = _attrs(m.group(0))
+            try:
+                cx = float(a.get("cx", "0"))
+                cy = float(a.get("cy", "0"))
+                r = float(a.get("r", "0"))
+            except ValueError:
+                continue
+            if r <= 0:
+                continue
+            _flag("circle", cx - r, cy - r, cx + r, cy + r)
+        # <ellipse cx cy rx ry>
+        for m in re.finditer(r'<ellipse\b[^>]*?/?>', svg):
+            if _in_shape_skip(m.start()):
+                continue
+            a = _attrs(m.group(0))
+            try:
+                cx = float(a.get("cx", "0"))
+                cy = float(a.get("cy", "0"))
+                rx = float(a.get("rx", "0"))
+                ry = float(a.get("ry", "0"))
+            except ValueError:
+                continue
+            if rx <= 0 or ry <= 0:
+                continue
+            _flag("ellipse", cx - rx, cy - ry, cx + rx, cy + ry)
+
+        if violations:
+            # Cap reported violations at 5 so the critique stays
+            # readable.  Most prompts that violate the zone violate
+            # it for the same family of shapes (a 3-SAT proof with
+            # 8 clause rects, all past the right edge).
+            sample = "; ".join(violations[:5])
+            more = (f" (and {len(violations) - 5} more)"
+                    if len(violations) > 5 else "")
+            issues.append(
+                "shape_outside_zone: " + str(len(violations)) +
+                " shape primitive(s) extend past the SHAPE_ZONE — " +
+                sample + more +
+                ".  The SHAPE_ZONE is x in [" + str(int(sx0)) + ", " +
+                str(int(sx1)) + "], y in [" + str(int(sy0)) + ", " +
+                str(int(sy1)) + "].  All shape primitives MUST fit "
+                "inside this box; anything outside collides visually "
+                "with the text regions (left-column / right-column / "
+                "title / bottom-band).  Shrink the offending shapes "
+                "or move them; use the text_blocks regions for "
+                "content that doesn't fit as shapes."
+            )
+    except _ShapeCheckSkip:
+        # Figure isn't using zone architecture (no text-region groups);
+        # no shape-zone violation enforcement.
+        pass
+    except Exception:  # noqa: BLE001
+        # Critic must never raise — silently swallow any unexpected
+        # parsing edge case.
+        pass
 
     return issues
 

@@ -1217,6 +1217,16 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
                     #   * svg_chunk — cumulative snapshots of the
                     #     in-progress SVG; collapsed last-write-wins
                     #     to keep the wire cheap.
+                    # Last-emit timestamp drives the SSE keep-alive
+                    # heartbeat below.  ALB has a 60 s idle timeout; a
+                    # vision-review LLM call can silently consume 40 s
+                    # without any SVG chunk firing, which dropped the
+                    # SSE connection and lost the user's figure.  We
+                    # send an empty `heartbeat` event every 20 s of
+                    # silence so the connection stays alive end-to-end.
+                    import time as _ttime
+                    _last_emit = _ttime.monotonic()
+                    _HEARTBEAT_S = 20.0
                     while not tool_task.done():
                         flushed = False
                         # Primer drain first (small text, low latency).
@@ -1237,6 +1247,19 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
                                 "data": json.dumps({"svg": partial}),
                             }
                             flushed = True
+                        # Keep-alive when nothing real flushed and the
+                        # connection has been idle long enough that ALB
+                        # might close it.  Empty JSON payload; the
+                        # browser ignores `heartbeat` events.
+                        now = _ttime.monotonic()
+                        if not flushed and (now - _last_emit) >= _HEARTBEAT_S:
+                            yield {
+                                "event": "heartbeat",
+                                "data": "{}",
+                            }
+                            flushed = True
+                        if flushed:
+                            _last_emit = now
                         if not flushed:
                             # Nothing pending — sleep briefly so the
                             # tool task can make progress.
