@@ -1622,6 +1622,13 @@ async def express_figure(
     # core distillation signal export_finetune.py turns into DPO/SFT data.
     prev_fail: tuple[str, list[dict[str, Any]], str] | None = None
     repairs: list[dict[str, Any]] = []
+    # Best-attempt accumulator: every fully post-processed attempt
+    # records its svg, narration, title, structural-issue count, and
+    # vision verdict.  If all attempts fail review, the loop exit
+    # picks the lowest-scoring one to ship (NOT the last one) — the
+    # 3-SAT case had attempt 1 with 5 overlap pairs vs attempt 0 with
+    # 1; the old code shipped attempt 2 (worst).  See _attempt_score().
+    attempts: list[dict[str, Any]] = []
 
     import sys as _sys
     def _log(msg: str) -> None:
@@ -2101,6 +2108,20 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"escape_bare_xml_in_svg FAILED: {type(exc).__name__}: {exc}")
+        # Narration-prose stripper.  Removes <text> blocks containing
+        # long sentences (60+ chars, period or prose connector) — they
+        # belong in the spoken narration, not the SVG canvas, and they
+        # are the main cause of the "explanatory paragraphs stacked at
+        # the same y" failure mode the model emits on proof prompts.
+        try:
+            fixed_svg = strip_narration_prose_text(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(f"strip_narration_prose_text: rewrote "
+                     f"{len(result['svg'])} -> {len(fixed_svg)} chars")
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"strip_narration_prose_text FAILED: "
+                 f"{type(exc).__name__}: {exc}")
         # Deterministic layout pass — auto-fit every <g>'s outer
         # rectangle to its child elements so a 3×3 matrix drawn with
         # a 200×200 rect but cells extending to (350, 340) gets the
@@ -2492,25 +2513,33 @@ async def express_figure(
             math_claims=result.get("math_claims"),
         )
 
+        # Snapshot pre-merge state so the best-attempt accumulator
+        # below sees the raw vision verdict (None=PASS) and the raw
+        # structural issue list — the merge below mutates `verdict`
+        # by appending structural complaints to it for the retry
+        # critique, which would otherwise corrupt the score.
+        raw_vision_pass = (verdict is None)
+
         # Merge structural issues into the verdict so a single retry
         # covers both classes.  If vision passed but structural failed,
         # we still need to retry; if vision failed too, the critic
         # checklist gets both kinds of fixes.
         #
-        # Exception: caption_overlaps_diagram alone is a known
-        # asymptotic case — the model rarely fully resolves it across
-        # retries (it just shifts where the overlap happens).  When
-        # that's the ONLY remaining issue AND vision review passed,
-        # accept the figure and stop retrying.  CloudWatch logs show
-        # this scenario costing 60 s of pointless retries per slow
-        # turn ("inverse of a 5×5 matrix" was the canonical example).
-        only_caption_overlap = (
-            verdict is None
+        # Exception: when the vision reviewer (which represents user
+        # perception of the rendered PNG) says PASS and every
+        # remaining structural issue is in the visual-only set
+        # (text_text_overlap, oversized_element, caption_overlaps_…,
+        # …), accept the figure and stop retrying.  Retries on those
+        # often regress the figure — the 3-SAT case had attempt 0
+        # with 1 overlap pair, attempt 1 with 5.  Functional issues
+        # (missing_required_primitive, narration_highlight_id_missing,
+        # math-claim failures) still gate retries.
+        visual_only_after_pass = (
+            raw_vision_pass
             and structural_issues
-            and all(s.startswith("caption_overlaps_diagram")
-                    for s in structural_issues)
+            and _is_visual_only_issues(structural_issues)
         )
-        if structural_issues and not only_caption_overlap:
+        if structural_issues and not visual_only_after_pass:
             structural_block = (
                 "Structural review: FAIL.\n\n"
                 "Apply these specific fixes, in order:\n"
@@ -2521,12 +2550,23 @@ async def express_figure(
                 if verdict is None
                 else verdict + "\n\n" + structural_block
             )
-        elif only_caption_overlap:
+        elif visual_only_after_pass:
             _log(
-                "structural review: caption_overlaps_diagram only "
-                f"({len(structural_issues)} issue(s)) — accepting figure, "
-                "skipping further retries (asymptotic case)"
+                f"structural review: {len(structural_issues)} visual-only "
+                "issue(s) and vision PASSED — accepting figure, skipping "
+                "further retries (retries on these regress quality)"
             )
+
+        # Record this attempt for best-of selection on retry-exhaust.
+        attempts.append({
+            "svg": result["svg"],
+            "narration": result.get("narration") or [],
+            "title": result.get("title") or "",
+            "structural_issues": list(structural_issues),
+            "raw_vision_pass": raw_vision_pass,
+            "score": _attempt_score(structural_issues,
+                                    None if raw_vision_pass else "FAIL"),
+        })
         if verdict is None:  # PASS or unable to review
             # If a previous attempt failed and this one passed, the pair
             # is a repair triple worth keeping for distillation.
@@ -2558,41 +2598,58 @@ async def express_figure(
             verdict,
         )
 
-        # 3. Inject critique + image, ask for a corrected response.
+        # 3. Inject critique + image + prior SVG, ask for a PATCH.
         if attempt >= max_retries:
             break
+        # Patch-retry framing: hand the LLM the prior SVG verbatim
+        # and ask for a MODIFIED copy that fixes only the listed
+        # issues, preserving every working element (same ids,
+        # positions, narration unless an issue names it).  The old
+        # "re-emit corrected svg + narration" framing made the model
+        # regenerate from scratch — in the 3-SAT case attempt 1's
+        # fresh emission had 5 overlap pairs vs attempt 0's 1.
+        prior_svg = result.get("svg", "")
+        # Cap inline SVG at 12k chars so a single oversized prior
+        # doesn't blow past the model context (gpt-4o = 128k input).
+        if len(prior_svg) > 12000:
+            prior_svg = prior_svg[:12000] + "\n<!-- ...truncated... -->"
         retry_text = (
             "Your previous figure failed review.  Below is the "
-            "rendered PNG and a structured list of specific fixes.  "
-            "APPLY EVERY LISTED FIX --- do not just regenerate a "
-            "near-identical SVG.  Each fix names a concrete action, "
-            "the element it applies to, where it goes, and the "
-            "exact content/values to use.\n\n"
+            "rendered PNG, a structured list of specific fixes, and "
+            "your previous SVG verbatim.\n\n"
+            "Return a MODIFIED VERSION of the previous SVG that "
+            "fixes ONLY the listed issues.  Preserve every element "
+            "that isn't called out — same ids, same positions, same "
+            "attributes, same narration unless an issue names it.  "
+            "Edit surgically; do NOT regenerate the figure from "
+            "scratch (fresh regenerations have regressed quality in "
+            "past runs).\n\n"
+            "Each fix names a concrete action, the element it "
+            "applies to, where it goes, and the exact content/values "
+            "to use.\n\n"
             + verdict +
-            "\n\nNow re-emit the corrected svg + narration in the "
-            "same JSON schema, with every numbered fix above "
-            "actually applied to the SVG."
+            "\n\nPrevious SVG (apply patches to this):\n"
+            "```svg\n" + prior_svg + "\n```\n\n"
+            "Now return the patched svg + narration in the same "
+            "JSON schema."
         )
         messages.append({"role": "assistant", "content": content})
-        # Text-only backends can't see the PNG; send the prior SVG
-        # (which they can read literally) + the structured critique.
+        # Text-only backends can't see the PNG — the patch framing
+        # above already includes the prior SVG inline, so they have
+        # everything they need.
         if model in text_only_models:
             messages.append({
                 "role": "user",
-                "content": (
-                    retry_text
-                    + "\n\nFor reference, your previous SVG output was:\n"
-                    + "```svg\n" + result.get("svg", "")[:8000] + "\n```"
-                ),
+                "content": retry_text,
             })
         else:
             # Rasterising can fail if the model emitted malformed XML
             # (unclosed tag, unescaped &, etc.).  Without this guard,
             # the cairosvg ParseError bubbles all the way up and the
             # whole turn crashes — the user sees a tool error instead
-            # of a corrected figure.  When PNG render fails, send only
-            # the text critique + the raw SVG-as-text so the model can
-            # still see what it produced and fix it.
+            # of a corrected figure.  When PNG render fails, the text
+            # critique still includes the prior SVG inline above, so
+            # the model can still see what it produced and fix it.
             try:
                 png = _svg_to_png(result["svg"])
                 b64 = base64.b64encode(png).decode("ascii")
@@ -2614,40 +2671,67 @@ async def express_figure(
                         + "\n\nNote: your previous SVG could not be "
                         "rasterised, likely because the XML is malformed "
                         "(unclosed tag, unescaped & or <, mismatched "
-                        "quotes).  Re-emit a CLEAN, well-formed SVG.  "
-                        "Your previous (broken) output was:\n```svg\n"
-                        + result.get("svg", "")[:8000] + "\n```"
+                        "quotes).  Patch the SVG above to be CLEAN and "
+                        "well-formed."
                     ),
                 })
 
-    # Loop exited with a still-failing figure — return last attempt anyway.
-    # No repair pair recorded: nothing was actually corrected.
-    #
-    # Salvage step: if the retry over-corrected the narration (e.g.,
-    # collapsed it from 6 phrases to 1 in an attempt to fix factual
-    # errors flagged by the reviewer), prefer the earlier attempt's
-    # narration so the spoken explanation stays substantial.  The SVG
-    # itself is always the latest attempt — only the narration is
-    # swapped.  This is what fixes the "I heard just the end of the
-    # narrative" failure mode: the retry's 1-phrase narration plays
-    # for 5 seconds and is gone before the learner registered audio.
-    last_narration = result.get("narration") or []
-    salvaged = False
-    if prev_fail is not None and len(last_narration) < 3:
-        _, prev_narration, _ = prev_fail
-        if len(prev_narration) >= 3 and len(prev_narration) > len(last_narration):
+    # Loop exited with every attempt failing review.  Ship the BEST
+    # of the attempts (lowest _attempt_score) — not the last one.
+    # CloudWatch shows attempts can regress: the 3-SAT proof case had
+    # attempt 0 with 1 overlap pair, attempt 1 with 5; the old code
+    # shipped attempt 2 (worst).  This picks the cleanest figure the
+    # model produced across the retry budget.
+    if attempts:
+        best = min(attempts, key=lambda a: a["score"])
+        best_idx = attempts.index(best)
+        if best_idx != len(attempts) - 1:
             _log(
-                f"narration salvage: last attempt had "
-                f"{len(last_narration)} phrase(s); falling back to the "
-                f"previous attempt's {len(prev_narration)}-phrase narration"
+                f"best-attempt: shipping attempt {best_idx} "
+                f"(score={best['score']}, "
+                f"{len(best['structural_issues'])} structural issue(s), "
+                f"vision_pass={best['raw_vision_pass']}) instead of last "
+                f"attempt {len(attempts) - 1} (score="
+                f"{attempts[-1]['score']})"
             )
-            last_narration = prev_narration
-            salvaged = True
-    final_svg = result.get("svg", "")
+        else:
+            _log(
+                f"best-attempt: last attempt was already the best "
+                f"(score={best['score']})"
+            )
+        final_svg = best["svg"]
+        last_narration = best["narration"]
+        last_title = best["title"]
+    else:
+        # Should be unreachable — every iteration of the loop appends
+        # to `attempts` after the LLM call succeeds.  Fall through
+        # safely with whatever `result` last held.
+        final_svg = result.get("svg", "")
+        last_narration = result.get("narration") or []
+        last_title = result.get("title") or ""
+
+    # Salvage step: if the chosen best happens to have a very short
+    # narration (LLM over-collapsed when responding to a critique),
+    # prefer an earlier attempt's narration so the spoken explanation
+    # stays substantial.  Looks across ALL recorded attempts, not just
+    # the last fail.  Re-binds highlight ids to the chosen SVG.
+    salvaged = False
+    if len(last_narration) < 3 and len(attempts) > 1:
+        candidates = [a["narration"] for a in attempts
+                      if len(a["narration"]) >= 3]
+        if candidates:
+            # Pick the longest available narration as the salvage source.
+            best_narr = max(candidates, key=len)
+            if len(best_narr) > len(last_narration):
+                _log(
+                    f"narration salvage: chosen attempt had "
+                    f"{len(last_narration)} phrase(s); using "
+                    f"{len(best_narr)}-phrase narration from another "
+                    "attempt"
+                )
+                last_narration = best_narr
+                salvaged = True
     if salvaged:
-        # The salvaged narration was bound to an EARLIER attempt's SVG;
-        # re-bind it to the final SVG so its highlight ids resolve to
-        # real elements instead of a previous attempt's id namespace.
         try:
             final_svg, last_narration, _ = bind_narration_to_svg(
                 final_svg, last_narration)
@@ -2656,7 +2740,7 @@ async def express_figure(
     return {
         "svg": final_svg,
         "narration": last_narration,
-        "title": result.get("title") or "",
+        "title": last_title,
         "review_history": review_history,
         "retries_used": max_retries,
         "repairs": repairs,
@@ -4618,6 +4702,101 @@ def reflow_overlapping_groups(svg: str) -> str:
     for s, e, repl in edits:
         out = out[:s] + repl + out[e:]
     return out
+
+
+# Structural-issue classes that are visible-quality complaints, not
+# functional / correctness violations.  When the vision reviewer (which
+# sees the rendered PNG and represents user perception) says PASS, an
+# issue in this set should NOT trigger another retry — retries on
+# these often regress the figure (see the 3-SAT case: attempt 0 had 1
+# overlap pair, attempt 1 had 5).  Functional issues like
+# missing_required_primitive or narration_highlight_id_missing still
+# gate retries even when vision passes.
+_VISUAL_ONLY_ISSUE_PREFIXES: tuple[str, ...] = (
+    "text_text_overlap",
+    "oversized_element",
+    "caption_overlaps_diagram",
+    "bottom_overflow_with_unused_right",
+    "label_inside_wrong_vertex",
+    "lies_on_violation",
+    "duplicate_coords",
+    "math_mode_no_coords",
+)
+
+
+def _is_visual_only_issues(issues: list[str]) -> bool:
+    """All issues are pixel-level / measurement complaints (not
+    functional)?  Used to short-circuit retries when vision passed."""
+    if not issues:
+        return True
+    return all(
+        any(s.startswith(p) for p in _VISUAL_ONLY_ISSUE_PREFIXES)
+        for s in issues
+    )
+
+
+def _attempt_score(structural_issues: list[str],
+                   vision_verdict: str | None) -> int:
+    """Quality score for an attempt — lower is better.  Used for
+    best-attempt selection when all retries fail review: each
+    structural issue counts 1, a vision-FAIL adds 5 (vision-perceived
+    problems carry more weight than measurement-level critic
+    complaints)."""
+    return len(structural_issues) + (5 if vision_verdict is not None else 0)
+
+
+def strip_narration_prose_text(svg: str) -> str:
+    """Remove top-level <text> blocks that look like narration prose
+    rather than figure labels.
+
+    The LLM occasionally crams multi-sentence explanations into <text>
+    elements that the figure layout doesn't reserve space for; they
+    end up overlapping each other and / or the diagram (the "3-SAT
+    proof — three explanatory paragraphs stacked at the same y"
+    failure mode).  Those sentences are already in the spoken
+    narration, so stripping them from the SVG removes the visual mess
+    without losing information.
+
+    Heuristic: visible content (with nested <tspan> tags removed) of
+    60+ chars and 8+ words, AND either ends with a period or contains
+    a sentence-y connector ("shows that", "thus,", "therefore", "this
+    means", "is at least as hard as", "can be expressed as", ...).
+    Math labels and short captions are untouched.
+    """
+    if not svg or "<text" not in svg:
+        return svg
+    try:
+        import re as _re
+        prose_cues = _re.compile(
+            r"\b(shows that|thus,?|therefore,?|this means|we see|"
+            r"in particular|note that|hence,?|because|"
+            r"establishing|reducing|expressing|converting|"
+            r"is at least as hard as|can be expressed as|"
+            r"by converting|the proof|we can reduce)\b",
+            _re.IGNORECASE,
+        )
+
+        def _maybe_strip(m: "_re.Match[str]") -> str:
+            inner = m.group(2)
+            visible = _re.sub(r"<[^>]+>", " ", inner).strip()
+            if len(visible) < 60:
+                return m.group(0)
+            words = visible.split()
+            if len(words) < 8:
+                return m.group(0)
+            ends_with_period = visible.rstrip().endswith(".")
+            has_cue = bool(prose_cues.search(visible))
+            if ends_with_period or has_cue:
+                return ""  # strip the entire <text>...</text>
+            return m.group(0)
+
+        return _re.sub(
+            r"(<text\b[^>]*>)(.*?)(</text>)",
+            _maybe_strip,
+            svg, flags=_re.DOTALL,
+        )
+    except Exception:
+        return svg
 
 
 def reflow_overlapping_text(svg: str) -> str:
