@@ -159,13 +159,13 @@ def _send_magic_link(email: str, link: str) -> None:
         _log("boto3 not installed — skipping SES send")
         return
     body_text = (
-        "Sign in to Khayyam Math by clicking the link below.\n\n"
+        "Click the link below to open Khayyam Math.\n\n"
         f"{link}\n\n"
         "This link is valid for 15 minutes.  If you didn't request it, "
         "you can ignore this email."
     )
     body_html = (
-        "<p>Sign in to Khayyam Math by clicking the link below.</p>"
+        "<p>Click the link below to open Khayyam Math.</p>"
         f"<p><a href=\"{link}\">{link}</a></p>"
         "<p>This link is valid for 15 minutes.  If you didn't request "
         "it, you can ignore this email.</p>"
@@ -176,7 +176,7 @@ def _send_magic_link(email: str, link: str) -> None:
             Source=sender,
             Destination={"ToAddresses": [email]},
             Message={
-                "Subject": {"Data": "Your Khayyam Math sign-in link"},
+                "Subject": {"Data": "Your Khayyam Math link"},
                 "Body": {
                     "Text": {"Data": body_text},
                     "Html": {"Data": body_html},
@@ -259,7 +259,7 @@ def require_user(request: Request) -> str:
     if user is None:
         raise HTTPException(
             status_code=401,
-            detail="Sign in to use Khayyam Math — visit /studio/auth/login",
+            detail="Enter your email at /studio/auth/login to open Khayyam Math",
         )
     return user
 

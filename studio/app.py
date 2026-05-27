@@ -1410,7 +1410,7 @@ _LOGIN_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
-<title>Sign in to Khayyam Math</title>
+<title>Open Khayyam Math</title>
 <style>
  :root {
    color-scheme: light dark;
@@ -1469,16 +1469,16 @@ _LOGIN_HTML = """<!doctype html>
 </style></head><body>
 <div class="card">
   <h1 class="brand">Khayyam Math</h1>
-  <p class="tagline">A live diagram tutor — sign in with email, no password.</p>
+  <p class="tagline">A live diagram tutor — enter your email and we'll send a one-time link.</p>
   <form method="POST" action="/studio/auth/request-link">
     <input type="email" name="email" required autofocus
            placeholder="you@example.com" autocomplete="email"
            autocapitalize="off" spellcheck="false" inputmode="email">
-    <button type="submit">Email me a sign-in link</button>
+    <button type="submit">Email me a link</button>
   </form>
   __NOTICE__
-  <p class="privacy">Your email is used only as a stable identifier so we
-  can track usage against the daily quota. We don't share it.</p>
+  <p class="privacy">No account, no profile, no password. Your email is
+  used only as a stable identifier for the daily quota — we never share it.</p>
   <p class="privacy" style="margin-top:0.6em">
     <a href="/terms">Terms</a> · <a href="/contact">Contact</a>
   </p>
@@ -1497,8 +1497,8 @@ def login_page() -> HTMLResponse:
 def auth_request_link(request: Request, email: str = Form(...)) -> HTMLResponse:
     request_magic_link(email, request)
     notice = (
-        '<p class="ok">If that address is valid, a sign-in link is on '
-        "its way. Check your inbox (and spam folder).</p>"
+        '<p class="ok">If that address is valid, your link is on its '
+        "way. Check your inbox (and spam folder).</p>"
     )
     return HTMLResponse(_LOGIN_HTML.replace("__NOTICE__", notice))
 
