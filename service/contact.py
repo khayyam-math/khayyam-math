@@ -296,7 +296,7 @@ _PAGE_FOOT = """
     try { localStorage.setItem('khayyam_cookie_consent', '1'); } catch (_) {}
     b.style.transition = 'opacity 0.25s';
     b.style.opacity = '0';
-    setTimeout(function () { b.hidden = true; b.style.opacity = ''; }, 260);
+    setTimeout(function () { b.remove(); }, 260);
   });
 })();
 </script>
