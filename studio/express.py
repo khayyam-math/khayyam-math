@@ -2108,20 +2108,12 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"escape_bare_xml_in_svg FAILED: {type(exc).__name__}: {exc}")
-        # Narration-prose stripper.  Removes <text> blocks containing
-        # long sentences (60+ chars, period or prose connector) — they
-        # belong in the spoken narration, not the SVG canvas, and they
-        # are the main cause of the "explanatory paragraphs stacked at
-        # the same y" failure mode the model emits on proof prompts.
-        try:
-            fixed_svg = strip_narration_prose_text(result["svg"])
-            if fixed_svg != result["svg"]:
-                _log(f"strip_narration_prose_text: rewrote "
-                     f"{len(result['svg'])} -> {len(fixed_svg)} chars")
-                result["svg"] = fixed_svg
-        except Exception as exc:  # noqa: BLE001
-            _log(f"strip_narration_prose_text FAILED: "
-                 f"{type(exc).__name__}: {exc}")
+        # (strip_narration_prose_text was tried here but rolled back —
+        # too aggressive on proof prompts where the LLM emits the bulk
+        # of the figure as prose <text> blocks.  Removing them left a
+        # near-empty canvas.  See `strip_narration_prose_text` for the
+        # implementation; needs co-occurrence-with-overlap + min-content
+        # guardrails before it can ship.)
         # Deterministic layout pass — auto-fit every <g>'s outer
         # rectangle to its child elements so a 3×3 matrix drawn with
         # a 200×200 rect but cells extending to (350, 340) gets the
