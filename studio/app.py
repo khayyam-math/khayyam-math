@@ -1659,8 +1659,11 @@ def admin_users_summary(_user: str = Depends(require_admin)) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         out["sessions_error"] = repr(exc)
     try:
+        # NB: avoid the literal '??' in SQL — psycopg sees them as
+        # parameter placeholders.  COALESCE to plain 'XX' as the
+        # "unknown country" sentinel instead.
         rows = tel.query(
-            "SELECT COALESCE(last_login_country, '??') AS cc, "
+            "SELECT COALESCE(last_login_country, 'XX') AS cc, "
             "COALESCE(last_login_city, '') AS city, "
             "COUNT(*) AS n FROM users GROUP BY cc, city "
             "ORDER BY n DESC, cc, city LIMIT 50")
