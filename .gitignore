@@ -99,3 +99,8 @@ infra/cdk.context.json
 # product surface; live in the repo for the author's convenience.
 docs/application_openai_startup.md
 docs/email_openai_education_contact.md
+
+# Per-author dev journal — keeps a chronological record of what
+# landed in each working session.  Useful locally for context
+# continuity, but not part of the open-source product surface.
+SESSION_STATE.md
