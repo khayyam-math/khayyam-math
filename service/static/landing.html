@@ -13,17 +13,33 @@
 <meta name="author" content="Khayyam Math">
 <link rel="canonical" href="https://khayyammath.com/">
 
+<!-- Web app manifest (PWA: name, theme, "Add to Home Screen") -->
+<link rel="manifest" href="/manifest.json">
+
+<!-- Google Search Console verification (HTML-tag method).  Submit
+     sitemap via GSC after this deploys and the Verify check passes. -->
+<meta name="google-site-verification" content="Iz1_GXJVuJ62fC8z0vrc1d6zeAMLxfq2DYlg77pdGPc">
+
 <!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="Khayyam Math — Live diagram tutor">
 <meta property="og:description" content="Type a math question in plain English. Watch a custom diagram appear with synchronised narration. AI-powered, math-correctness verified.">
 <meta property="og:url" content="https://khayyammath.com/">
 <meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:secure_url" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Khayyam Math — a live diagram tutor canvas with a worked example">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Khayyam Math — Live diagram tutor">
 <meta name="twitter:description" content="Type a math question in plain English. Watch a custom diagram appear with synchronised narration.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta name="twitter:image:alt" content="Khayyam Math — a live diagram tutor canvas with a worked example">
 
 <!-- Structured data: WebApplication -->
 <script type="application/ld+json">
@@ -43,6 +59,84 @@
     "availability": "https://schema.org/InStock"
   },
   "inLanguage": "en"
+}
+</script>
+
+<!-- Structured data: Organization (tells Google that this site, the GitHub org,
+     the Hugging Face org, and the Zenodo preprint all describe the same entity) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Khayyam Math",
+  "url": "https://khayyammath.com/",
+  "logo": "https://khayyammath.com/screenshots/social_preview.png",
+  "description": "Open-source, MIT-licensed live diagram tutor for math, geometry, and science.",
+  "sameAs": [
+    "https://github.com/khayyam-math/khayyam-math",
+    "https://huggingface.co/khayyam-math",
+    "https://huggingface.co/spaces/khayyam-math/demo",
+    "https://doi.org/10.5281/zenodo.20367147"
+  ]
+}
+</script>
+
+<!-- Structured data: FAQPage (mirrors the on-page FAQ section so Google can
+     surface the Q&A as an expandable rich result under search listings) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is it free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, while we're in early access. Each signed-in user has a generous daily quota of figures. We'll add paid tiers if/when OpenAI inference costs require it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How accurate is the math?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Every figure passes through an automated math-correctness inspector that reads each narration phrase and on-canvas caption, flags false claims and visual mismatches, and triggers up to three correction rounds before showing the figure. False-positive acceptance rate is low — but a tutor, not an arbiter; check anything you'd cite."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What works on mobile?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Everything. The chat and canvas stack vertically on phones, audio plays through the device speakers, and the layout adapts to iPad portrait, desktop, and everything between."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it remember the conversation?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. After a figure appears, you can ask follow-up questions in plain chat and the model answers without redrawing. Or ask for an edit and the canvas updates incrementally."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What's the data policy?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Your email is the only identifier we keep, used solely for sign-in and per-user usage accounting. Prompts and generated figures are stored to improve the underlying models; no email addresses are ever attached to those records, and we never share your email with third parties."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why \"Khayyam Math\"?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Named after Omar Khayyam (1048–1131), the Persian mathematician and astronomer who solved cubic equations geometrically — by drawing the right curves and reading off the roots where they met. That's exactly what this product does: turn an abstract question into a figure you can see, and let the picture do the explaining."
+      }
+    }
+  ]
 }
 </script>
 

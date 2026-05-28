@@ -200,12 +200,15 @@ def _require_canvas(cid: str, request: Request):
     return c
 
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def root():
     """Public landing page — explains what Sevim is, gives a CTA to
     sign in, and contains the SEO meta + structured data crawlers need
     to surface us in search results.  Authenticated users still get
-    Studio one click away via the Sign-in button."""
+    Studio one click away via the Sign-in button.
+
+    Accepts HEAD so link-preview bots, uptime monitors, and crawlers
+    that probe with HEAD before GET don't see a 405."""
     landing = _STATIC_DIR / "landing.html"
     if not landing.exists():
         from fastapi.responses import RedirectResponse
@@ -295,6 +298,54 @@ def sitemap_xml():
         '</urlset>\n'
     )
     return Response(content=body, media_type="application/xml",
+                    headers={"cache-control": "public, max-age=86400"})
+
+
+@app.get("/manifest.json", include_in_schema=False)
+def web_manifest():
+    """PWA manifest — lets mobile browsers offer "Add to Home Screen"
+    with a real app name + theme colour instead of a generic bookmark.
+    Referenced from landing.html via <link rel="manifest">."""
+    body = (
+        '{\n'
+        '  "name": "Khayyam Math",\n'
+        '  "short_name": "Khayyam Math",\n'
+        '  "description": "Live diagram tutor — ask in words, see math come alive.",\n'
+        '  "start_url": "/",\n'
+        '  "scope": "/",\n'
+        '  "display": "standalone",\n'
+        '  "orientation": "any",\n'
+        '  "background_color": "#fafafa",\n'
+        '  "theme_color": "#fafafa",\n'
+        '  "lang": "en",\n'
+        '  "categories": ["education", "productivity"],\n'
+        '  "icons": [\n'
+        '    {\n'
+        '      "src": "/screenshots/social_preview.png",\n'
+        '      "sizes": "1280x640",\n'
+        '      "type": "image/png",\n'
+        '      "purpose": "any"\n'
+        '    }\n'
+        '  ]\n'
+        '}\n'
+    )
+    return Response(content=body, media_type="application/manifest+json",
+                    headers={"cache-control": "public, max-age=86400"})
+
+
+@app.get("/.well-known/security.txt", include_in_schema=False)
+def security_txt():
+    """RFC 9116 disclosure file — gives security researchers a
+    standards-defined way to report vulnerabilities responsibly.
+    Keep the Expires date well in the future and refresh on rotation."""
+    body = (
+        "# RFC 9116 security disclosure for khayyammath.com\n"
+        "Contact: mailto:arash_kermani@yahoo.com\n"
+        "Expires: 2027-12-31T23:59:59.000Z\n"
+        "Preferred-Languages: en\n"
+        "Canonical: https://khayyammath.com/.well-known/security.txt\n"
+    )
+    return Response(content=body, media_type="text/plain",
                     headers={"cache-control": "public, max-age=86400"})
 
 
