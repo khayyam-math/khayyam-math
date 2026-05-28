@@ -1618,6 +1618,72 @@ def admin_stats(_user: str = Depends(require_admin)) -> dict[str, Any]:
     }
 
 
+@router.get("/admin/users-summary")
+def admin_users_summary(_user: str = Depends(require_admin)) -> dict[str, Any]:
+    """Lifetime usage + geo breakdown.  Sourced from the `users`
+    table (populated at magic-link verify time) and the broader
+    telemetry tables.  Admin-only — same allowlist gate as the rest
+    of /admin.
+    """
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"available": False, "reason": "telemetry disabled"}
+    out: dict[str, Any] = {"available": True}
+    try:
+        rows = tel.query("SELECT COUNT(*) FROM users")
+        out["distinct_emails"] = int(rows[0][0]) if rows else 0
+    except Exception as exc:  # noqa: BLE001
+        out["distinct_emails_error"] = repr(exc)
+    try:
+        rows = tel.query(
+            "SELECT COALESCE(SUM(login_count), 0) FROM users")
+        out["total_logins"] = int(rows[0][0]) if rows else 0
+    except Exception as exc:  # noqa: BLE001
+        out["total_logins_error"] = repr(exc)
+    try:
+        rows = tel.query("SELECT COUNT(*) FROM sessions")
+        out["total_sessions"] = int(rows[0][0]) if rows else 0
+        rows = tel.query(
+            "SELECT COUNT(DISTINCT ip_hash) FROM sessions "
+            "WHERE ip_hash IS NOT NULL")
+        out["distinct_ip_hashes"] = int(rows[0][0]) if rows else 0
+        rows = tel.query("SELECT COUNT(*) FROM turns")
+        out["total_prompts"] = int(rows[0][0]) if rows else 0
+        rows = tel.query("SELECT COUNT(*) FROM canvases")
+        out["total_canvases"] = int(rows[0][0]) if rows else 0
+        rows = tel.query(
+            "SELECT COALESCE(SUM(cost_usd_estimate), 0) FROM sessions")
+        out["total_cost_usd_estimate"] = (
+            round(float(rows[0][0]), 2) if rows else 0.0)
+    except Exception as exc:  # noqa: BLE001
+        out["sessions_error"] = repr(exc)
+    try:
+        rows = tel.query(
+            "SELECT COALESCE(last_login_country, '??') AS cc, "
+            "COALESCE(last_login_city, '') AS city, "
+            "COUNT(*) AS n FROM users GROUP BY cc, city "
+            "ORDER BY n DESC, cc, city LIMIT 50")
+        out["by_country_city"] = [
+            {"country": cc, "city": city, "users": int(n)}
+            for cc, city, n in rows
+        ]
+    except Exception as exc:  # noqa: BLE001
+        out["by_country_error"] = repr(exc)
+    try:
+        active: dict[str, int] = {}
+        for label, secs in (("24h", 86_400), ("7d", 604_800),
+                            ("30d", 2_592_000)):
+            rows = tel.query(
+                f"SELECT COUNT(*) FROM users "
+                f"WHERE last_seen_at > extract(epoch from now()) - {secs}")
+            active[label] = int(rows[0][0]) if rows else 0
+        out["active_emails_by_window"] = active
+    except Exception as exc:  # noqa: BLE001
+        out["active_error"] = repr(exc)
+    return out
+
+
 @router.get("/admin/models")
 def admin_models(_user: str = Depends(require_admin)) -> dict[str, Any]:
     """List the selectable LLM backends — same catalog the routing
