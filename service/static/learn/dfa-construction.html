@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>DFA construction: build an automaton for (a|b)* ending in 'ab' | Khayyam Math</title>
+<meta name="description" content="A worked example of building a deterministic finite automaton (DFA) over the alphabet {a, b} that accepts exactly the strings ending in 'ab'.  Three states, one accept state, full transition table — the same structure that compilers, regex engines, and CI pipelines use under the hood.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/dfa-construction">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="DFA construction: build an automaton for (a|b)* ending in 'ab'">
+<meta property="og:description" content="A minimal three-state deterministic finite automaton that accepts exactly the strings ending in 'ab' — and the systematic way to design it.">
+<meta property="og:url" content="https://khayyammath.com/learn/dfa-construction">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DFA construction: build an automaton for (a|b)* ending in 'ab'">
+<meta name="twitter:description" content="A minimal three-state deterministic finite automaton that accepts exactly the strings ending in 'ab' — and the systematic way to design it.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/dfa-construction",
+      "url": "https://khayyammath.com/learn/dfa-construction",
+      "name": "DFA construction: build an automaton for (a|b)* ending in 'ab'",
+      "description": "A worked example of building a deterministic finite automaton (DFA) over the alphabet {a, b} that accepts exactly the strings ending in 'ab'. Three states, one accept state, full transition table \u2014 the same structure that compilers, regex engines, and CI pipelines use under the hood.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "DFA construction: build an automaton for (a|b)* ending in 'ab'"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "DFA construction: build an automaton for (a|b)* ending in 'ab'",
+      "description": "A worked example of building a deterministic finite automaton (DFA) over the alphabet {a, b} that accepts exactly the strings ending in 'ab'. Three states, one accept state, full transition table \u2014 the same structure that compilers, regex engines, and CI pipelines use under the hood.",
+      "url": "https://khayyammath.com/learn/dfa-construction",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "discrete-math"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Why three states and not two?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Because we need to remember the last symbol read AND whether we just saw 'ab'.  Two states can only distinguish 'accept' from 'reject', and that's not enough \u2014 we also need a 'just saw an a, waiting for b' state.  A formal lower-bound proof uses the Myhill-Nerode theorem to show three is optimal."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What's the difference between a DFA and an NFA?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "An NFA \u2014 nondeterministic finite automaton \u2014 can have multiple transitions on the same symbol from the same state, or transitions with no symbol at all (\u03b5-moves).  Every NFA can be converted to an equivalent DFA, sometimes at the cost of exponentially more states.  DFAs are easier to execute; NFAs are easier to design."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does the order of accept-state check matter?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "After reading the entire input string, look at the current state.  If it's in the accept set, accept; otherwise reject.  Intermediate visits to accept states during reading don't matter \u2014 only the final state."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do real-world regex engines differ?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "They usually start by parsing the regex into an NFA, then either run the NFA directly or convert to a DFA.  Backreferences (\\1, \\2) push you out of regular languages entirely, which is why patterns using them are exponentially slower."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    DFA construction: build an automaton for (a|b)* ending in 'ab'
+  </div>
+
+  <h1>DFA construction: build an automaton for (a|b)* ending in 'ab'</h1>
+  <p class="subtitle">A minimal three-state deterministic finite automaton that accepts exactly the strings ending in 'ab' — and the systematic way to design it.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 360" aria-label="Three-state DFA accepting strings ending in ab"><defs><marker id="arrow" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,-5L10,0L0,5" fill="#1a1a1a"/></marker></defs><line x1="35" y1="200" x2="58" y2="200" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="32" y="192" font-size="11" font-family="serif" text-anchor="end">start</text><circle cx="90" cy="200" r="30" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="90" y="205" font-size="18" font-family="serif" text-anchor="middle">q₀</text><circle cx="270" cy="200" r="30" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="270" y="205" font-size="18" font-family="serif" text-anchor="middle">q₁</text><circle cx="450" cy="200" r="30" fill="white" stroke="#1a1a1a" stroke-width="2"/><circle cx="450" cy="200" r="25" fill="none" stroke="#1a1a1a" stroke-width="1.5"/><text x="450" y="205" font-size="18" font-family="serif" text-anchor="middle">q₂</text><line x1="121" y1="194" x2="239" y2="194" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="180.0" y="188" font-size="14" font-family="serif" text-anchor="middle">a</text><line x1="301" y1="194" x2="419" y2="194" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="360.0" y="188" font-size="14" font-family="serif" text-anchor="middle">b</text><path d="M 75 174 C 40 120, 105 120, 105 174" fill="none" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="90" y="140" font-size="14" font-family="serif" text-anchor="middle">b</text><path d="M 255 174 C 220 120, 285 120, 285 174" fill="none" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="270" y="140" font-size="14" font-family="serif" text-anchor="middle">a</text><path d="M 419 206 Q 360.0 250, 301 206" fill="none" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="360.0" y="262" font-size="14" font-family="serif" text-anchor="middle">a</text><path d="M 450 231 Q 270.0 310, 90 231" fill="none" stroke="#1a1a1a" stroke-width="1.5" marker-end="url(#arrow)"/><text x="270.0" y="322" font-size="14" font-family="serif" text-anchor="middle">b</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=draw%20a%20DFA%20for%20the%20language%20L%20%3D%20%28a%7Cb%29%2A%20ending%20in%20ab"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>A deterministic finite automaton, or DFA, is a tiny rule-based
+machine that reads an input string one symbol at a time and
+either accepts it (says "yes, this is in the language") or
+rejects it.  The machine has a fixed number of states, exactly
+one of which is the start state, some subset of which are
+accept states, and a transition function that says — for every
+state and every input symbol — which state to move to next.</p><p>To accept exactly the strings that end in "ab" over the
+alphabet {a, b}, we need just three states:</p><p>q₀ : we haven't seen "ab" recently — input is junk so far.
+q₁ : we just read an "a" — one more symbol decides things.
+q₂ : we read "ab" as the last two symbols — ACCEPT.</p><p>Transitions:</p><p>q₀ --a--> q₁    q₀ --b--> q₀
+q₁ --a--> q₁    q₁ --b--> q₂
+q₂ --a--> q₁    q₂ --b--> q₀</p><p>Read carefully:  from q₂ we go back to q₁ on 'a' (because
+the last symbol read is now 'a', not "ab"), and to q₀ on
+'b' (the last two symbols are now "bb", not "ab").  Those
+are the easy-to-miss transitions; the figure pins them down.</p><p>This DFA is minimal — three states is the smallest number
+that can do the job, because we need to remember whether the
+last character was 'a' (one bit of state) plus an accept
+flag (another).</p>
+  <h2>Where it shows up</h2>
+    <p>Every regular expression compiles to a DFA.  When you type a
+grep pattern, when a build pipeline runs a glob match, when a
+network firewall checks whether a packet payload matches a
+rule — under the hood, a DFA is reading characters one at a
+time and walking the transition table.</p>
+    <p>DFAs are the simplest member of the formal-languages
+hierarchy.  Stepping up gives push-down automata (for
+context-free languages, like balanced brackets), then linear
+bounded automata (for context-sensitive), then Turing
+machines (for everything computable).  Knowing where the
+boundary sits — what a DFA can and can't recognise — is
+central to understanding why some languages are harder to
+parse than others.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>Why three states and not two?</summary>
+      <p>Because we need to remember the last symbol read AND whether we just saw 'ab'.  Two states can only distinguish 'accept' from 'reject', and that's not enough — we also need a 'just saw an a, waiting for b' state.  A formal lower-bound proof uses the Myhill-Nerode theorem to show three is optimal.</p>
+    </details>
+    <details>
+      <summary>What's the difference between a DFA and an NFA?</summary>
+      <p>An NFA — nondeterministic finite automaton — can have multiple transitions on the same symbol from the same state, or transitions with no symbol at all (ε-moves).  Every NFA can be converted to an equivalent DFA, sometimes at the cost of exponentially more states.  DFAs are easier to execute; NFAs are easier to design.</p>
+    </details>
+    <details>
+      <summary>Does the order of accept-state check matter?</summary>
+      <p>After reading the entire input string, look at the current state.  If it's in the accept set, accept; otherwise reject.  Intermediate visits to accept states during reading don't matter — only the final state.</p>
+    </details>
+    <details>
+      <summary>How do real-world regex engines differ?</summary>
+      <p>They usually start by parsing the regex into an NFA, then either run the NFA directly or convert to a DFA.  Backreferences (\1, \2) push you out of regular languages entirely, which is why patterns using them are exponentially slower.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/matrix-inverse-3x3">Matrix inverse of a 3×3: the adjugate-and-determinant method</a></li>
+      <li><a href="/learn/quadratic-formula">The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

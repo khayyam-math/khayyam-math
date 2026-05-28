@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a | Khayyam Math</title>
+<meta name="description" content="Every quadratic ax² + bx + c = 0 has roots x = (−b ± √(b²−4ac)) / 2a. See the formula, the discriminant b²−4ac, and how a worked example (x² − 5x + 6 = 0) gives two clean integer roots at x = 2 and x = 3.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/quadratic-formula">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a">
+<meta property="og:description" content="Where the formula comes from, what its three pieces mean, and when each gives you two real roots, one repeated root, or none.">
+<meta property="og:url" content="https://khayyammath.com/learn/quadratic-formula">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a">
+<meta name="twitter:description" content="Where the formula comes from, what its three pieces mean, and when each gives you two real roots, one repeated root, or none.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/quadratic-formula",
+      "url": "https://khayyammath.com/learn/quadratic-formula",
+      "name": "The quadratic formula: x = (\u2212b \u00b1 \u221a(b\u00b2 \u2212 4ac)) / 2a",
+      "description": "Every quadratic ax\u00b2 + bx + c = 0 has roots x = (\u2212b \u00b1 \u221a(b\u00b2\u22124ac)) / 2a. See the formula, the discriminant b\u00b2\u22124ac, and how a worked example (x\u00b2 \u2212 5x + 6 = 0) gives two clean integer roots at x = 2 and x = 3.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "The quadratic formula: x = (\u2212b \u00b1 \u221a(b\u00b2 \u2212 4ac)) / 2a"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "The quadratic formula: x = (\u2212b \u00b1 \u221a(b\u00b2 \u2212 4ac)) / 2a",
+      "description": "Every quadratic ax\u00b2 + bx + c = 0 has roots x = (\u2212b \u00b1 \u221a(b\u00b2\u22124ac)) / 2a. See the formula, the discriminant b\u00b2\u22124ac, and how a worked example (x\u00b2 \u2212 5x + 6 = 0) gives two clean integer roots at x = 2 and x = 3.",
+      "url": "https://khayyammath.com/learn/quadratic-formula",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "algebra"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Where does the formula come from?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Completing the square on the general form.  Start with ax\u00b2 + bx + c = 0, divide by a, move c/a to the right, add (b/2a)\u00b2 to both sides to make the left side (x + b/2a)\u00b2, take the square root, and rearrange.  Every quadratic-formula derivation is one of those manipulations."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if a = 0?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Then the equation isn't quadratic \u2014 it's linear, bx + c = 0, with the single solution x = \u2212c/b (assuming b is also non-zero).  The formula has a in the denominator, so it explicitly excludes this case."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why \u00b1?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Because (something)\u00b2 gives the same value as (\u2212something)\u00b2.  When you take \u221a(b\u00b2 \u2212 4ac) you don't know whether the original term was the positive or negative root, so both are valid solutions."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What's the discriminant good for?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Just looking at b\u00b2 \u2212 4ac tells you how many real roots there are without actually solving the equation.  Useful when you only care about existence (e.g., 'will this projectile ever hit the wall?' or 'does this curve cross zero?')."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a
+  </div>
+
+  <h1>The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a</h1>
+  <p class="subtitle">Where the formula comes from, what its three pieces mean, and when each gives you two real roots, one repeated root, or none.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 360" aria-label="Parabola y = x squared minus five x plus six, with roots at x equals 2 and x equals 3"><line x1="50" y1="263.8" x2="470" y2="263.8" stroke="#999" stroke-width="1.2"/><line x1="85.0" y1="20" x2="85.0" y2="320" stroke="#999" stroke-width="1.2"/><line x1="85.0" y1="260.8" x2="85.0" y2="266.8" stroke="#999"/><text x="85.0" y="279.8" font-size="11" font-family="serif" text-anchor="middle">0</text><line x1="155.0" y1="260.8" x2="155.0" y2="266.8" stroke="#999"/><text x="155.0" y="279.8" font-size="11" font-family="serif" text-anchor="middle">1</text><line x1="225.0" y1="260.8" x2="225.0" y2="266.8" stroke="#999"/><text x="225.0" y="279.8" font-size="11" font-family="serif" text-anchor="middle">2</text><line x1="295.0" y1="260.8" x2="295.0" y2="266.8" stroke="#999"/><text x="295.0" y="279.8" font-size="11" font-family="serif" text-anchor="middle">3</text><line x1="365.0" y1="260.8" x2="365.0" y2="266.8" stroke="#999"/><text x="365.0" y="279.8" font-size="11" font-family="serif" text-anchor="middle">4</text><line x1="435.0" y1="260.8" x2="435.0" y2="266.8" stroke="#999"/><text x="435.0" y="279.8" font-size="11" font-family="serif" text-anchor="middle">5</text><line x1="82.0" y1="301.2" x2="88.0" y2="301.2" stroke="#999"/><text x="79.0" y="304.2" font-size="11" font-family="serif" text-anchor="end">-1</text><line x1="82.0" y1="226.2" x2="88.0" y2="226.2" stroke="#999"/><text x="79.0" y="229.2" font-size="11" font-family="serif" text-anchor="end">1</text><line x1="82.0" y1="188.8" x2="88.0" y2="188.8" stroke="#999"/><text x="79.0" y="191.8" font-size="11" font-family="serif" text-anchor="end">2</text><line x1="82.0" y1="151.2" x2="88.0" y2="151.2" stroke="#999"/><text x="79.0" y="154.2" font-size="11" font-family="serif" text-anchor="end">3</text><line x1="82.0" y1="113.8" x2="88.0" y2="113.8" stroke="#999"/><text x="79.0" y="116.8" font-size="11" font-family="serif" text-anchor="end">4</text><line x1="82.0" y1="76.2" x2="88.0" y2="76.2" stroke="#999"/><text x="79.0" y="79.2" font-size="11" font-family="serif" text-anchor="end">5</text><line x1="82.0" y1="38.8" x2="88.0" y2="38.8" stroke="#999"/><text x="79.0" y="41.8" font-size="11" font-family="serif" text-anchor="end">6</text><polyline points="81.5,29.3 86.8,43.4 92.0,57.1 97.2,70.4 102.5,83.3 107.8,95.7 113.0,107.8 118.2,119.4 123.5,130.5 128.8,141.3 134.0,151.6 139.2,161.5 144.5,171.0 149.8,180.1 155.0,188.8 160.2,197.0 165.5,204.8 170.8,212.2 176.0,219.1 181.2,225.7 186.5,231.8 191.8,237.5 197.0,242.7 202.2,247.6 207.5,252.0 212.8,256.0 218.0,259.6 223.2,262.8 228.5,265.5 233.8,267.9 239.0,269.8 244.2,271.2 249.5,272.3 254.8,272.9 260.0,273.1 265.2,272.9 270.5,272.3 275.8,271.2 281.0,269.8 286.2,267.9 291.5,265.5 296.8,262.8 302.0,259.6 307.2,256.0 312.5,252.0 317.8,247.6 323.0,242.8 328.2,237.5 333.5,231.8 338.8,225.7 344.0,219.1 349.2,212.2 354.5,204.8 359.8,197.0 365.0,188.8 370.2,180.1 375.5,171.0 380.8,161.5 386.0,151.6 391.2,141.3 396.5,130.5 401.8,119.4 407.0,107.8 412.2,95.7 417.5,83.3 422.8,70.4 428.0,57.1 433.2,43.4 438.5,29.3" fill="none" stroke="#2a6fd6" stroke-width="2.2"/><circle cx="225.0" cy="263.8" r="5" fill="#c0392b"/><text x="225.0" y="293.8" font-size="13" font-family="serif" fill="#c0392b" text-anchor="middle">x = 2</text><circle cx="295.0" cy="263.8" r="5" fill="#c0392b"/><text x="295.0" y="293.8" font-size="13" font-family="serif" fill="#c0392b" text-anchor="middle">x = 3</text><circle cx="260.0" cy="273.1" r="3" fill="#444"/><text x="268.0" y="277.1" font-size="11" font-family="serif" fill="#444">vertex (2.5, −0.25)</text><text x="250" y="14" font-size="14" font-family="serif" text-anchor="middle">y = x² − 5x + 6</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20parabola%20y%20%3D%20x%5E2%20-%205x%20%2B%206%20with%20its%20roots%20at%20x%3D2%20and%20x%3D3%20labelled%20on%20the%20x-axis"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>A quadratic equation is any equation of the form</p><pre>    ax² + bx + c = 0,</pre><p>where a, b, c are real numbers and a is not zero.  The
+quadratic formula gives the two roots — the x-values that
+satisfy the equation — directly from a, b, and c:</p><pre>    x = (−b ± √(b² − 4ac)) / 2a</pre><p>The ± means there are usually two solutions: one for the
+plus and one for the minus.  The piece under the square
+root, called the discriminant, controls how many real
+solutions you actually get:</p><pre>    b² − 4ac  >  0   →  two distinct real roots
+    b² − 4ac  =  0   →  one repeated real root (the
+                        parabola just touches the x-axis)
+    b² − 4ac  <  0   →  no real roots (the parabola sits
+                        entirely above or below the x-axis;
+                        the roots are complex)</pre><p>The figure plots y = x² − 5x + 6, where a = 1, b = −5, c = 6.
+The discriminant is 25 − 24 = 1, so two distinct real roots,
+which the formula gives as x = (5 ± 1) / 2 = 2 or 3 — exactly
+where the parabola crosses the x-axis on the figure.</p>
+  <h2>Where it shows up</h2>
+    <p>Quadratics show up wherever a quantity grows or shrinks in
+proportion to the square of something else: projectile motion
+(height as a function of time), area-to-side relationships,
+the shape of a hanging cable to a first approximation, the
+Lagrangian of a harmonic oscillator.</p>
+    <p>The formula also lets you reverse-engineer quadratics from
+roots: if you know a parabola has roots at r₁ and r₂, then
+it must be a·(x − r₁)·(x − r₂) for some a.  This is how you
+fit a quadratic curve to two known zeros, useful in physics
+(a projectile's launch and landing points fix the parabola
+up to height scaling) and in finance (break-even analysis
+on cost-vs-revenue curves).</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>Where does the formula come from?</summary>
+      <p>Completing the square on the general form.  Start with ax² + bx + c = 0, divide by a, move c/a to the right, add (b/2a)² to both sides to make the left side (x + b/2a)², take the square root, and rearrange.  Every quadratic-formula derivation is one of those manipulations.</p>
+    </details>
+    <details>
+      <summary>What if a = 0?</summary>
+      <p>Then the equation isn't quadratic — it's linear, bx + c = 0, with the single solution x = −c/b (assuming b is also non-zero).  The formula has a in the denominator, so it explicitly excludes this case.</p>
+    </details>
+    <details>
+      <summary>Why ±?</summary>
+      <p>Because (something)² gives the same value as (−something)².  When you take √(b² − 4ac) you don't know whether the original term was the positive or negative root, so both are valid solutions.</p>
+    </details>
+    <details>
+      <summary>What's the discriminant good for?</summary>
+      <p>Just looking at b² − 4ac tells you how many real roots there are without actually solving the equation.  Useful when you only care about existence (e.g., 'will this projectile ever hit the wall?' or 'does this curve cross zero?').</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/pythagorean-theorem">The Pythagorean theorem: a² + b² = c²</a></li>
+      <li><a href="/learn/unit-circle">The unit circle: sin, cos, tan at standard angles</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

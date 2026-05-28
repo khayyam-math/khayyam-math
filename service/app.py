@@ -237,6 +237,38 @@ def screenshot(name: str):
     )
 
 
+@app.api_route("/learn", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/learn/", methods=["GET", "HEAD"], include_in_schema=False)
+def learn_index_page():
+    """Public topic-index page: lists every baked /learn/<slug> grouped
+    by branch.  Static HTML — re-baked by scripts/bake_learn_pages.py
+    whenever service/learn/topics.yaml changes."""
+    page = _STATIC_DIR / "learn" / "index.html"
+    if not page.exists():
+        raise HTTPException(404)
+    return FileResponse(
+        page, media_type="text/html",
+        headers={"cache-control": "public, max-age=3600"},
+    )
+
+
+@app.api_route("/learn/{slug}", methods=["GET", "HEAD"], include_in_schema=False)
+def learn_topic_page(slug: str):
+    """Public per-topic worked-example page.  Slug whitelist via regex
+    prevents path traversal; the actual file existence check decides
+    404 vs 200."""
+    import re
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", slug):
+        raise HTTPException(404)
+    page = _STATIC_DIR / "learn" / f"{slug}.html"
+    if not page.exists():
+        raise HTTPException(404)
+    return FileResponse(
+        page, media_type="text/html",
+        headers={"cache-control": "public, max-age=86400"},
+    )
+
+
 @app.get("/terms", include_in_schema=False)
 def terms_page():
     """Public terms-and-conditions page.  Static HTML, served from disk
@@ -260,6 +292,8 @@ def robots_txt():
         "Allow: /\n"
         "Allow: /contact\n"
         "Allow: /terms\n"
+        "Allow: /learn/\n"
+        "Allow: /learn\n"
         "Disallow: /studio\n"
         "Disallow: /studio/\n"
         "Disallow: /canvas/\n"
@@ -275,29 +309,52 @@ def robots_txt():
 
 @app.get("/sitemap.xml", include_in_schema=False)
 def sitemap_xml():
-    """One URL today: the landing.  We'll add more as we grow public
-    content (a /pricing page, a /docs page, etc.)."""
-    body = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        '  <url>\n'
-        '    <loc>https://khayyammath.com/</loc>\n'
-        '    <changefreq>weekly</changefreq>\n'
-        '    <priority>1.0</priority>\n'
-        '  </url>\n'
-        '  <url>\n'
-        '    <loc>https://khayyammath.com/contact</loc>\n'
-        '    <changefreq>monthly</changefreq>\n'
-        '    <priority>0.5</priority>\n'
-        '  </url>\n'
-        '  <url>\n'
-        '    <loc>https://khayyammath.com/terms</loc>\n'
-        '    <changefreq>yearly</changefreq>\n'
-        '    <priority>0.3</priority>\n'
-        '  </url>\n'
-        '</urlset>\n'
-    )
-    return Response(content=body, media_type="application/xml",
+    """Homepage + the static pages + every /learn/<slug> topic page
+    (discovered at request time from service/static/learn/*.html so
+    we never need to remember to update this when baking new topics)."""
+    learn_dir = _STATIC_DIR / "learn"
+    learn_slugs = sorted(
+        p.stem for p in learn_dir.glob("*.html")
+        if p.name != "index.html"
+    ) if learn_dir.exists() else []
+
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>\n',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n',
+        '  <url>\n',
+        '    <loc>https://khayyammath.com/</loc>\n',
+        '    <changefreq>weekly</changefreq>\n',
+        '    <priority>1.0</priority>\n',
+        '  </url>\n',
+        '  <url>\n',
+        '    <loc>https://khayyammath.com/contact</loc>\n',
+        '    <changefreq>monthly</changefreq>\n',
+        '    <priority>0.5</priority>\n',
+        '  </url>\n',
+        '  <url>\n',
+        '    <loc>https://khayyammath.com/terms</loc>\n',
+        '    <changefreq>yearly</changefreq>\n',
+        '    <priority>0.3</priority>\n',
+        '  </url>\n',
+    ]
+    if learn_slugs:
+        parts.extend([
+            '  <url>\n',
+            '    <loc>https://khayyammath.com/learn/</loc>\n',
+            '    <changefreq>weekly</changefreq>\n',
+            '    <priority>0.6</priority>\n',
+            '  </url>\n',
+        ])
+        for slug in learn_slugs:
+            parts.extend([
+                '  <url>\n',
+                f'    <loc>https://khayyammath.com/learn/{slug}</loc>\n',
+                '    <changefreq>monthly</changefreq>\n',
+                '    <priority>0.8</priority>\n',
+                '  </url>\n',
+            ])
+    parts.append('</urlset>\n')
+    return Response(content="".join(parts), media_type="application/xml",
                     headers={"cache-control": "public, max-age=86400"})
 
 

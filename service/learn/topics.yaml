@@ -1,0 +1,340 @@
+# /learn/<slug> topic registry — phase 1 (5 topics).
+#
+# Every field is human-written.  No copy is auto-generated, so we
+# cannot ship a hallucinated false claim about a math concept.
+#
+# To add a topic: append an entry below, run scripts/bake_learn_pages.py,
+# commit the resulting service/static/learn/<slug>.html.
+#
+# Slugs are FROZEN once published.  Don't rename — start a new entry
+# and 301-redirect from the old slug if you must change the URL.
+
+- slug: unit-circle
+  branch: trigonometry
+  title: "The unit circle: sin, cos, tan at standard angles"
+  subtitle: "One circle of radius 1 pins down every trig value you'll meet at school or in first-year university."
+  prompt: "show the unit circle with sin and cos labelled at 0, 30, 45, 60, 90 degrees"
+  meta_description: >-
+    The unit circle is the circle of radius 1 centred at the origin.  See
+    sin, cos, and tan values at 0°, 30°, 45°, 60°, 90° on a single live
+    figure, with the geometry that makes each value exact.
+  body_what_this_shows: |
+    The unit circle is the circle of radius 1 centred at the origin
+    of the (x, y) plane.  For any angle θ measured counter-clockwise
+    from the positive x-axis, the point where the angle's terminal
+    ray meets the circle has coordinates (cos θ, sin θ).  Tangent is
+    just sin θ divided by cos θ, which geometrically is the slope of
+    the terminal ray.
+
+    At the five standard angles — 0°, 30°, 45°, 60°, 90° — the
+    coordinates come out to exact algebraic values:
+
+      0°   →  (1, 0)             →  cos 0  = 1,  sin 0  = 0
+      30°  →  (√3/2, 1/2)        →  cos 30 = √3/2, sin 30 = 1/2
+      45°  →  (√2/2, √2/2)       →  cos 45 = √2/2, sin 45 = √2/2
+      60°  →  (1/2, √3/2)        →  cos 60 = 1/2, sin 60 = √3/2
+      90°  →  (0, 1)             →  cos 90 = 0,  sin 90 = 1
+
+    These five values come up so often that memorising them — or,
+    better, being able to re-derive them from the 30-60-90 and
+    45-45-90 right triangles — saves enormous amounts of time.
+  body_applications: |
+    Anywhere an angle isn't part of a right triangle, the unit
+    circle is the natural home for it: signed values for angles
+    above 90°, periodic identities (sin(θ + 360°) = sin θ), the
+    sign pattern of each function across the four quadrants, and
+    the conversion between radians and degrees.
+
+    In physics and engineering the unit circle is the spine of
+    everything that oscillates — alternating current, simple
+    harmonic motion, Fourier decompositions — because rotating a
+    point at constant angular speed around the unit circle
+    projects onto the x-axis as a perfect cosine wave.
+  faq:
+    - q: "Why radius 1?"
+      a: "Because then sin and cos are just the y and x coordinates of the point, with nothing to scale.  Any other radius works too — you just have to divide out the radius to get the trig values back."
+    - q: "What about angles past 90°?"
+      a: "The same rule applies: travel θ degrees counter-clockwise from the positive x-axis, read the coordinates of the meeting point with the circle.  At 180° you reach (-1, 0); at 270°, (0, -1); at 360°, back to (1, 0).  Negative angles go clockwise."
+    - q: "Do I have to memorise the values?"
+      a: "Not strictly — they all come from the 30-60-90 and 45-45-90 right triangles, which you can re-derive in a minute.  But the first time you sit down to learn them, drilling them is faster than re-deriving every time."
+    - q: "Where does tan fit in?"
+      a: "tan θ = sin θ / cos θ, which geometrically is the slope of the terminal ray.  So tan is undefined whenever the ray is vertical — at 90° and 270°.  Some textbooks draw a separate vertical tangent line to the circle at (1, 0) to read tan directly off."
+  related:
+    - pythagorean-theorem
+    - quadratic-formula
+
+- slug: pythagorean-theorem
+  branch: geometry
+  title: "The Pythagorean theorem: a² + b² = c²"
+  subtitle: "Why the squares on the two short sides of a right triangle add up to the square on the long one — with the picture that makes it obvious."
+  prompt: "draw a right triangle with legs 3 and 4 and a square on each side, showing the areas 9, 16, and 25"
+  meta_description: >-
+    In any right triangle the square of the hypotenuse equals the sum of
+    the squares of the other two sides.  See why with a 3-4-5 triangle
+    and the three labelled squares — the picture is the proof.
+  body_what_this_shows: |
+    In a right triangle — one with a 90° angle — let the two legs
+    have lengths a and b and the hypotenuse (the side opposite
+    the right angle) have length c.  The Pythagorean theorem says:
+
+        a² + b² = c²
+
+    The figure builds a literal square on each of the three sides
+    and labels its area.  For the classic 3-4-5 triangle, the
+    squares have areas 9, 16, and 25 — and 9 + 16 = 25.  The
+    theorem holds for every right triangle, not just the
+    integer-sided ones.
+
+    There are over 400 distinct proofs of the theorem on record.
+    The easiest to believe is the "rearrangement" proof: take
+    four copies of the same right triangle, arrange them inside
+    a bigger square in two different ways, and observe that the
+    leftover space in one arrangement is a² + b² and in the
+    other is c².  Both arrangements have the same total area,
+    so the leftover spaces match.
+  body_applications: |
+    The theorem is the working tool behind almost every distance
+    calculation in two or three dimensions: the straight-line
+    distance between two points in the plane is √((x₂ − x₁)² +
+    (y₂ − y₁)²), which is the Pythagorean theorem on the
+    horizontal and vertical legs.  GPS, computer graphics,
+    physics — they all lean on it.
+
+    Pythagorean triples (whole-number solutions: 3-4-5, 5-12-13,
+    8-15-17, …) appear in surveying, in computer-graphics ray
+    intersections, and in cryptography (where they motivate the
+    much harder problem of finding integer solutions to
+    a^n + b^n = c^n, which Fermat famously claimed could never
+    be done for n > 2).
+  faq:
+    - q: "Does it only work for the 3-4-5 triangle?"
+      a: "No — it works for every right triangle.  The 3-4-5 is just a convenient example because all three side lengths are whole numbers.  For arbitrary triangles you can have any positive a and b, and c is whatever √(a² + b²) comes out to."
+    - q: "What if the triangle isn't right-angled?"
+      a: "Then a² + b² ≠ c² in general.  The generalisation is the Law of Cosines: c² = a² + b² − 2ab·cos(C), where C is the angle opposite the side c.  When C is 90°, cos(C) = 0 and the −2ab·cos(C) term vanishes, recovering Pythagoras."
+    - q: "Why is it true?"
+      a: "Many proofs exist.  The cleanest builds two squares of the same outer side length (a + b) and tiles each with four copies of the right triangle.  One arrangement leaves a c-by-c square in the middle; the other leaves an a-by-a square plus a b-by-b square.  Both tilings have the same total area, so c² = a² + b²."
+    - q: "Does it work in 3D?"
+      a: "Yes — the diagonal of a rectangular box with sides a, b, c has length √(a² + b² + c²).  This is just Pythagoras applied twice: once in the base (giving √(a² + b²)) and once vertically with that diagonal as one leg and c as the other."
+  related:
+    - unit-circle
+    - quadratic-formula
+
+- slug: quadratic-formula
+  branch: algebra
+  title: "The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a"
+  subtitle: "Where the formula comes from, what its three pieces mean, and when each gives you two real roots, one repeated root, or none."
+  prompt: "show the parabola y = x^2 - 5x + 6 with its roots at x=2 and x=3 labelled on the x-axis"
+  meta_description: >-
+    Every quadratic ax² + bx + c = 0 has roots x = (−b ± √(b²−4ac)) / 2a.
+    See the formula, the discriminant b²−4ac, and how a worked example
+    (x² − 5x + 6 = 0) gives two clean integer roots at x = 2 and x = 3.
+  body_what_this_shows: |
+    A quadratic equation is any equation of the form
+
+        ax² + bx + c = 0,
+
+    where a, b, c are real numbers and a is not zero.  The
+    quadratic formula gives the two roots — the x-values that
+    satisfy the equation — directly from a, b, and c:
+
+        x = (−b ± √(b² − 4ac)) / 2a
+
+    The ± means there are usually two solutions: one for the
+    plus and one for the minus.  The piece under the square
+    root, called the discriminant, controls how many real
+    solutions you actually get:
+
+        b² − 4ac  >  0   →  two distinct real roots
+        b² − 4ac  =  0   →  one repeated real root (the
+                            parabola just touches the x-axis)
+        b² − 4ac  <  0   →  no real roots (the parabola sits
+                            entirely above or below the x-axis;
+                            the roots are complex)
+
+    The figure plots y = x² − 5x + 6, where a = 1, b = −5, c = 6.
+    The discriminant is 25 − 24 = 1, so two distinct real roots,
+    which the formula gives as x = (5 ± 1) / 2 = 2 or 3 — exactly
+    where the parabola crosses the x-axis on the figure.
+  body_applications: |
+    Quadratics show up wherever a quantity grows or shrinks in
+    proportion to the square of something else: projectile motion
+    (height as a function of time), area-to-side relationships,
+    the shape of a hanging cable to a first approximation, the
+    Lagrangian of a harmonic oscillator.
+
+    The formula also lets you reverse-engineer quadratics from
+    roots: if you know a parabola has roots at r₁ and r₂, then
+    it must be a·(x − r₁)·(x − r₂) for some a.  This is how you
+    fit a quadratic curve to two known zeros, useful in physics
+    (a projectile's launch and landing points fix the parabola
+    up to height scaling) and in finance (break-even analysis
+    on cost-vs-revenue curves).
+  faq:
+    - q: "Where does the formula come from?"
+      a: "Completing the square on the general form.  Start with ax² + bx + c = 0, divide by a, move c/a to the right, add (b/2a)² to both sides to make the left side (x + b/2a)², take the square root, and rearrange.  Every quadratic-formula derivation is one of those manipulations."
+    - q: "What if a = 0?"
+      a: "Then the equation isn't quadratic — it's linear, bx + c = 0, with the single solution x = −c/b (assuming b is also non-zero).  The formula has a in the denominator, so it explicitly excludes this case."
+    - q: "Why ±?"
+      a: "Because (something)² gives the same value as (−something)².  When you take √(b² − 4ac) you don't know whether the original term was the positive or negative root, so both are valid solutions."
+    - q: "What's the discriminant good for?"
+      a: "Just looking at b² − 4ac tells you how many real roots there are without actually solving the equation.  Useful when you only care about existence (e.g., 'will this projectile ever hit the wall?' or 'does this curve cross zero?')."
+  related:
+    - pythagorean-theorem
+    - unit-circle
+
+- slug: dfa-construction
+  branch: discrete-math
+  title: "DFA construction: build an automaton for (a|b)* ending in 'ab'"
+  subtitle: "A minimal three-state deterministic finite automaton that accepts exactly the strings ending in 'ab' — and the systematic way to design it."
+  prompt: "draw a DFA for the language L = (a|b)* ending in ab"
+  meta_description: >-
+    A worked example of building a deterministic finite automaton (DFA)
+    over the alphabet {a, b} that accepts exactly the strings ending
+    in 'ab'.  Three states, one accept state, full transition table —
+    the same structure that compilers, regex engines, and CI pipelines
+    use under the hood.
+  body_what_this_shows: |
+    A deterministic finite automaton, or DFA, is a tiny rule-based
+    machine that reads an input string one symbol at a time and
+    either accepts it (says "yes, this is in the language") or
+    rejects it.  The machine has a fixed number of states, exactly
+    one of which is the start state, some subset of which are
+    accept states, and a transition function that says — for every
+    state and every input symbol — which state to move to next.
+
+    To accept exactly the strings that end in "ab" over the
+    alphabet {a, b}, we need just three states:
+
+      q₀ : we haven't seen "ab" recently — input is junk so far.
+      q₁ : we just read an "a" — one more symbol decides things.
+      q₂ : we read "ab" as the last two symbols — ACCEPT.
+
+    Transitions:
+
+      q₀ --a--> q₁    q₀ --b--> q₀
+      q₁ --a--> q₁    q₁ --b--> q₂
+      q₂ --a--> q₁    q₂ --b--> q₀
+
+    Read carefully:  from q₂ we go back to q₁ on 'a' (because
+    the last symbol read is now 'a', not "ab"), and to q₀ on
+    'b' (the last two symbols are now "bb", not "ab").  Those
+    are the easy-to-miss transitions; the figure pins them down.
+
+    This DFA is minimal — three states is the smallest number
+    that can do the job, because we need to remember whether the
+    last character was 'a' (one bit of state) plus an accept
+    flag (another).
+  body_applications: |
+    Every regular expression compiles to a DFA.  When you type a
+    grep pattern, when a build pipeline runs a glob match, when a
+    network firewall checks whether a packet payload matches a
+    rule — under the hood, a DFA is reading characters one at a
+    time and walking the transition table.
+
+    DFAs are the simplest member of the formal-languages
+    hierarchy.  Stepping up gives push-down automata (for
+    context-free languages, like balanced brackets), then linear
+    bounded automata (for context-sensitive), then Turing
+    machines (for everything computable).  Knowing where the
+    boundary sits — what a DFA can and can't recognise — is
+    central to understanding why some languages are harder to
+    parse than others.
+  faq:
+    - q: "Why three states and not two?"
+      a: "Because we need to remember the last symbol read AND whether we just saw 'ab'.  Two states can only distinguish 'accept' from 'reject', and that's not enough — we also need a 'just saw an a, waiting for b' state.  A formal lower-bound proof uses the Myhill-Nerode theorem to show three is optimal."
+    - q: "What's the difference between a DFA and an NFA?"
+      a: "An NFA — nondeterministic finite automaton — can have multiple transitions on the same symbol from the same state, or transitions with no symbol at all (ε-moves).  Every NFA can be converted to an equivalent DFA, sometimes at the cost of exponentially more states.  DFAs are easier to execute; NFAs are easier to design."
+    - q: "Does the order of accept-state check matter?"
+      a: "After reading the entire input string, look at the current state.  If it's in the accept set, accept; otherwise reject.  Intermediate visits to accept states during reading don't matter — only the final state."
+    - q: "How do real-world regex engines differ?"
+      a: "They usually start by parsing the regex into an NFA, then either run the NFA directly or convert to a DFA.  Backreferences (\\1, \\2) push you out of regular languages entirely, which is why patterns using them are exponentially slower."
+  related:
+    - matrix-inverse-3x3
+    - quadratic-formula
+
+- slug: matrix-inverse-3x3
+  branch: linear-algebra
+  title: "Matrix inverse of a 3×3: the adjugate-and-determinant method"
+  subtitle: "Step-by-step inverse of a 3×3 matrix using cofactors — what the formula does, why each step is necessary, and how to spot when a matrix has no inverse."
+  prompt: "show the inverse of the matrix [[2,1,1],[1,3,2],[1,0,0]] step by step using the adjugate formula"
+  meta_description: >-
+    The inverse of a 3×3 matrix A is (1/det A) times its adjugate
+    (the transposed matrix of cofactors).  Worked example with
+    determinant, cofactor matrix, adjugate, and final inverse —
+    plus when no inverse exists.
+  body_what_this_shows: |
+    For an n×n square matrix A, the inverse A⁻¹ — when it exists —
+    is the matrix that satisfies A · A⁻¹ = A⁻¹ · A = I, the
+    identity matrix.  For a 3×3 matrix the closed-form recipe is:
+
+        A⁻¹ = (1 / det A) · adj(A)
+
+    where det A is the determinant (a single scalar) and adj(A),
+    the adjugate, is the transposed matrix of cofactors.  The
+    cofactor at row i, column j is (−1)^(i+j) times the
+    determinant of the 2×2 submatrix you get by deleting row i
+    and column j from A.
+
+    For a worked example, take
+
+        A = | 2  1  1 |
+            | 1  3  2 |
+            | 1  0  0 |
+
+    Step 1 — determinant.  Expand along the third row (it has
+    two zeros, which makes the arithmetic easy):
+
+        det A = 1·det| 1 1 | − 0·… + 0·…
+                     | 3 2 |
+              = 1·(1·2 − 1·3) = 1·(−1) = −1
+
+    Step 2 — cofactor matrix.  Compute the nine 2×2
+    sub-determinants with the right ± sign pattern:
+
+        | + −  + |       | 0  2   −3 |
+        | − +  − |  →    | 0 −1    1 |
+        | + −  + |       | −1 −3   5 |
+
+    Step 3 — transpose to get the adjugate:
+
+        adj(A) = |  0   0  −1 |
+                 |  2  −1  −3 |
+                 | −3   1   5 |
+
+    Step 4 — divide by the determinant:
+
+        A⁻¹ = (1/−1) · adj(A) = | 0   0   1 |
+                                | −2  1   3 |
+                                | 3  −1  −5 |
+
+    Multiply A·A⁻¹ to confirm you get the identity (you do).
+
+    The matrix has an inverse only when det A ≠ 0.  When det A = 0
+    the matrix is called singular and the equation Ax = b either
+    has infinitely many solutions or none — never exactly one.
+  body_applications: |
+    Matrix inverses are how systems of linear equations are
+    solved when written compactly: Ax = b has the closed-form
+    solution x = A⁻¹b, provided A is invertible.  Computer
+    graphics uses inverses to project from world coordinates to
+    camera coordinates and back.  Statistics uses them to invert
+    covariance matrices in regression.
+
+    In practice, libraries almost never compute A⁻¹ explicitly —
+    they solve Ax = b directly with LU decomposition or Gaussian
+    elimination, which is faster and numerically more stable.
+    The adjugate formula is the right thing to teach, because
+    it shows where the answer comes from, but for large matrices
+    (n ≥ 4) it's wildly inefficient and only used in theory.
+  faq:
+    - q: "What if the determinant is zero?"
+      a: "Then no inverse exists.  Geometrically, the matrix collapses some direction in the input space down to a single point, and there's no way to undo that collapse.  Algebraically, A·A⁻¹ = I would imply det A · det A⁻¹ = 1, which is impossible if det A = 0."
+    - q: "Why the (−1)^(i+j) signs?"
+      a: "They come from the cofactor expansion of the determinant.  The full det A formula is Σⱼ aᵢⱼ · (−1)^(i+j) · Mᵢⱼ where Mᵢⱼ is the minor (the 2×2 sub-determinant after deleting row i, column j).  The same signs reappear in the cofactor matrix because the adjugate is built from those very cofactors."
+    - q: "Is there a faster way?"
+      a: "For 3×3, Gauss-Jordan elimination on the augmented matrix [A | I] is usually faster by hand because it skips the 2×2 sub-determinant arithmetic.  For computer use, LU decomposition is the standard tool — O(n³) instead of the adjugate's effective O(n!)."
+    - q: "Why is the inverse unique when it exists?"
+      a: "If both B and C were inverses of A, then B = B·I = B·(A·C) = (B·A)·C = I·C = C.  So any two candidates must be equal — there's at most one inverse, and the adjugate formula either produces it (when det A ≠ 0) or fails to (when det A = 0)."
+  related:
+    - quadratic-formula
+    - dfa-construction

@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Matrix inverse of a 3×3: the adjugate-and-determinant method | Khayyam Math</title>
+<meta name="description" content="The inverse of a 3×3 matrix A is (1/det A) times its adjugate (the transposed matrix of cofactors).  Worked example with determinant, cofactor matrix, adjugate, and final inverse — plus when no inverse exists.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/matrix-inverse-3x3">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Matrix inverse of a 3×3: the adjugate-and-determinant method">
+<meta property="og:description" content="Step-by-step inverse of a 3×3 matrix using cofactors — what the formula does, why each step is necessary, and how to spot when a matrix has no inverse.">
+<meta property="og:url" content="https://khayyammath.com/learn/matrix-inverse-3x3">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Matrix inverse of a 3×3: the adjugate-and-determinant method">
+<meta name="twitter:description" content="Step-by-step inverse of a 3×3 matrix using cofactors — what the formula does, why each step is necessary, and how to spot when a matrix has no inverse.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/matrix-inverse-3x3",
+      "url": "https://khayyammath.com/learn/matrix-inverse-3x3",
+      "name": "Matrix inverse of a 3\u00d73: the adjugate-and-determinant method",
+      "description": "The inverse of a 3\u00d73 matrix A is (1/det A) times its adjugate (the transposed matrix of cofactors). Worked example with determinant, cofactor matrix, adjugate, and final inverse \u2014 plus when no inverse exists.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Matrix inverse of a 3\u00d73: the adjugate-and-determinant method"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "Matrix inverse of a 3\u00d73: the adjugate-and-determinant method",
+      "description": "The inverse of a 3\u00d73 matrix A is (1/det A) times its adjugate (the transposed matrix of cofactors). Worked example with determinant, cofactor matrix, adjugate, and final inverse \u2014 plus when no inverse exists.",
+      "url": "https://khayyammath.com/learn/matrix-inverse-3x3",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "linear-algebra"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What if the determinant is zero?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Then no inverse exists.  Geometrically, the matrix collapses some direction in the input space down to a single point, and there's no way to undo that collapse.  Algebraically, A\u00b7A\u207b\u00b9 = I would imply det A \u00b7 det A\u207b\u00b9 = 1, which is impossible if det A = 0."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why the (\u22121)^(i+j) signs?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "They come from the cofactor expansion of the determinant.  The full det A formula is \u03a3\u2c7c a\u1d62\u2c7c \u00b7 (\u22121)^(i+j) \u00b7 M\u1d62\u2c7c where M\u1d62\u2c7c is the minor (the 2\u00d72 sub-determinant after deleting row i, column j).  The same signs reappear in the cofactor matrix because the adjugate is built from those very cofactors."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is there a faster way?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "For 3\u00d73, Gauss-Jordan elimination on the augmented matrix [A | I] is usually faster by hand because it skips the 2\u00d72 sub-determinant arithmetic.  For computer use, LU decomposition is the standard tool \u2014 O(n\u00b3) instead of the adjugate's effective O(n!)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why is the inverse unique when it exists?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "If both B and C were inverses of A, then B = B\u00b7I = B\u00b7(A\u00b7C) = (B\u00b7A)\u00b7C = I\u00b7C = C.  So any two candidates must be equal \u2014 there's at most one inverse, and the adjugate formula either produces it (when det A \u2260 0) or fails to (when det A = 0)."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    Matrix inverse of a 3×3: the adjugate-and-determinant method
+  </div>
+
+  <h1>Matrix inverse of a 3×3: the adjugate-and-determinant method</h1>
+  <p class="subtitle">Step-by-step inverse of a 3×3 matrix using cofactors — what the formula does, why each step is necessary, and how to spot when a matrix has no inverse.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 280" aria-label="3x3 matrix A and its inverse, with determinant labelled"><path d="M 56.0 93.0 L 50.0 93.0 L 50.0 187.0 L 56.0 187.0" fill="none" stroke="#1a1a1a" stroke-width="2"/><path d="M 184.0 93.0 L 190.0 93.0 L 190.0 187.0 L 184.0 187.0" fill="none" stroke="#1a1a1a" stroke-width="2"/><text x="80.0" y="118.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">2</text><text x="120.0" y="118.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">1</text><text x="160.0" y="118.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">1</text><text x="80.0" y="144.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">1</text><text x="120.0" y="144.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">3</text><text x="160.0" y="144.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">2</text><text x="80.0" y="170.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">1</text><text x="120.0" y="170.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">0</text><text x="160.0" y="170.0" font-size="16" font-family="serif" fill="#1a1a1a" text-anchor="middle">0</text><text x="120" y="81.0" font-size="18" font-family="serif" fill="#1a1a1a" text-anchor="middle">A</text><text x="270" y="100" font-size="16" font-family="serif" text-anchor="middle">det A = −1</text><text x="270" y="148" font-size="22" font-family="serif" text-anchor="middle">⟶</text><text x="270" y="180" font-size="13" font-family="serif" fill="#666" text-anchor="middle">adjugate / det</text><path d="M 366.0 93.0 L 360.0 93.0 L 360.0 187.0 L 366.0 187.0" fill="none" stroke="#2a6fd6" stroke-width="2"/><path d="M 494.0 93.0 L 500.0 93.0 L 500.0 187.0 L 494.0 187.0" fill="none" stroke="#2a6fd6" stroke-width="2"/><text x="390.0" y="118.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">0</text><text x="430.0" y="118.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">0</text><text x="470.0" y="118.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">1</text><text x="390.0" y="144.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">−2</text><text x="430.0" y="144.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">1</text><text x="470.0" y="144.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">3</text><text x="390.0" y="170.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">3</text><text x="430.0" y="170.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">−1</text><text x="470.0" y="170.0" font-size="16" font-family="serif" fill="#2a6fd6" text-anchor="middle">−5</text><text x="430" y="81.0" font-size="18" font-family="serif" fill="#2a6fd6" text-anchor="middle">A⁻¹</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20inverse%20of%20the%20matrix%20%5B%5B2%2C1%2C1%5D%2C%5B1%2C3%2C2%5D%2C%5B1%2C0%2C0%5D%5D%20step%20by%20step%20using%20the%20adjugate%20formula"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>For an n×n square matrix A, the inverse A⁻¹ — when it exists —
+is the matrix that satisfies A · A⁻¹ = A⁻¹ · A = I, the
+identity matrix.  For a 3×3 matrix the closed-form recipe is:</p><pre>    A⁻¹ = (1 / det A) · adj(A)</pre><p>where det A is the determinant (a single scalar) and adj(A),
+the adjugate, is the transposed matrix of cofactors.  The
+cofactor at row i, column j is (−1)^(i+j) times the
+determinant of the 2×2 submatrix you get by deleting row i
+and column j from A.</p><p>For a worked example, take</p><pre>    A = | 2  1  1 |
+        | 1  3  2 |
+        | 1  0  0 |</pre><p>Step 1 — determinant.  Expand along the third row (it has
+two zeros, which makes the arithmetic easy):</p><pre>    det A = 1·det| 1 1 | − 0·… + 0·…
+                 | 3 2 |
+          = 1·(1·2 − 1·3) = 1·(−1) = −1</pre><p>Step 2 — cofactor matrix.  Compute the nine 2×2
+sub-determinants with the right ± sign pattern:</p><pre>    | + −  + |       | 0  2   −3 |
+    | − +  − |  →    | 0 −1    1 |
+    | + −  + |       | −1 −3   5 |</pre><p>Step 3 — transpose to get the adjugate:</p><pre>    adj(A) = |  0   0  −1 |
+             |  2  −1  −3 |
+             | −3   1   5 |</pre><p>Step 4 — divide by the determinant:</p><pre>    A⁻¹ = (1/−1) · adj(A) = | 0   0   1 |
+                            | −2  1   3 |
+                            | 3  −1  −5 |</pre><p>Multiply A·A⁻¹ to confirm you get the identity (you do).</p><p>The matrix has an inverse only when det A ≠ 0.  When det A = 0
+the matrix is called singular and the equation Ax = b either
+has infinitely many solutions or none — never exactly one.</p>
+  <h2>Where it shows up</h2>
+    <p>Matrix inverses are how systems of linear equations are
+solved when written compactly: Ax = b has the closed-form
+solution x = A⁻¹b, provided A is invertible.  Computer
+graphics uses inverses to project from world coordinates to
+camera coordinates and back.  Statistics uses them to invert
+covariance matrices in regression.</p>
+    <p>In practice, libraries almost never compute A⁻¹ explicitly —
+they solve Ax = b directly with LU decomposition or Gaussian
+elimination, which is faster and numerically more stable.
+The adjugate formula is the right thing to teach, because
+it shows where the answer comes from, but for large matrices
+(n ≥ 4) it's wildly inefficient and only used in theory.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>What if the determinant is zero?</summary>
+      <p>Then no inverse exists.  Geometrically, the matrix collapses some direction in the input space down to a single point, and there's no way to undo that collapse.  Algebraically, A·A⁻¹ = I would imply det A · det A⁻¹ = 1, which is impossible if det A = 0.</p>
+    </details>
+    <details>
+      <summary>Why the (−1)^(i+j) signs?</summary>
+      <p>They come from the cofactor expansion of the determinant.  The full det A formula is Σⱼ aᵢⱼ · (−1)^(i+j) · Mᵢⱼ where Mᵢⱼ is the minor (the 2×2 sub-determinant after deleting row i, column j).  The same signs reappear in the cofactor matrix because the adjugate is built from those very cofactors.</p>
+    </details>
+    <details>
+      <summary>Is there a faster way?</summary>
+      <p>For 3×3, Gauss-Jordan elimination on the augmented matrix [A | I] is usually faster by hand because it skips the 2×2 sub-determinant arithmetic.  For computer use, LU decomposition is the standard tool — O(n³) instead of the adjugate's effective O(n!).</p>
+    </details>
+    <details>
+      <summary>Why is the inverse unique when it exists?</summary>
+      <p>If both B and C were inverses of A, then B = B·I = B·(A·C) = (B·A)·C = I·C = C.  So any two candidates must be equal — there's at most one inverse, and the adjugate formula either produces it (when det A ≠ 0) or fails to (when det A = 0).</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/quadratic-formula">The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a</a></li>
+      <li><a href="/learn/dfa-construction">DFA construction: build an automaton for (a|b)* ending in 'ab'</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

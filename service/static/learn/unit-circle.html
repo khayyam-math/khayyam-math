@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>The unit circle: sin, cos, tan at standard angles | Khayyam Math</title>
+<meta name="description" content="The unit circle is the circle of radius 1 centred at the origin.  See sin, cos, and tan values at 0°, 30°, 45°, 60°, 90° on a single live figure, with the geometry that makes each value exact.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/unit-circle">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="The unit circle: sin, cos, tan at standard angles">
+<meta property="og:description" content="One circle of radius 1 pins down every trig value you'll meet at school or in first-year university.">
+<meta property="og:url" content="https://khayyammath.com/learn/unit-circle">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The unit circle: sin, cos, tan at standard angles">
+<meta name="twitter:description" content="One circle of radius 1 pins down every trig value you'll meet at school or in first-year university.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/unit-circle",
+      "url": "https://khayyammath.com/learn/unit-circle",
+      "name": "The unit circle: sin, cos, tan at standard angles",
+      "description": "The unit circle is the circle of radius 1 centred at the origin. See sin, cos, and tan values at 0\u00b0, 30\u00b0, 45\u00b0, 60\u00b0, 90\u00b0 on a single live figure, with the geometry that makes each value exact.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "The unit circle: sin, cos, tan at standard angles"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "The unit circle: sin, cos, tan at standard angles",
+      "description": "The unit circle is the circle of radius 1 centred at the origin. See sin, cos, and tan values at 0\u00b0, 30\u00b0, 45\u00b0, 60\u00b0, 90\u00b0 on a single live figure, with the geometry that makes each value exact.",
+      "url": "https://khayyammath.com/learn/unit-circle",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "trigonometry"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Why radius 1?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Because then sin and cos are just the y and x coordinates of the point, with nothing to scale.  Any other radius works too \u2014 you just have to divide out the radius to get the trig values back."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What about angles past 90\u00b0?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The same rule applies: travel \u03b8 degrees counter-clockwise from the positive x-axis, read the coordinates of the meeting point with the circle.  At 180\u00b0 you reach (-1, 0); at 270\u00b0, (0, -1); at 360\u00b0, back to (1, 0).  Negative angles go clockwise."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I have to memorise the values?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not strictly \u2014 they all come from the 30-60-90 and 45-45-90 right triangles, which you can re-derive in a minute.  But the first time you sit down to learn them, drilling them is faster than re-deriving every time."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Where does tan fit in?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "tan \u03b8 = sin \u03b8 / cos \u03b8, which geometrically is the slope of the terminal ray.  So tan is undefined whenever the ray is vertical \u2014 at 90\u00b0 and 270\u00b0.  Some textbooks draw a separate vertical tangent line to the circle at (1, 0) to read tan directly off."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    The unit circle: sin, cos, tan at standard angles
+  </div>
+
+  <h1>The unit circle: sin, cos, tan at standard angles</h1>
+  <p class="subtitle">One circle of radius 1 pins down every trig value you'll meet at school or in first-year university.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" aria-label="Unit circle with sin and cos at standard angles"><line x1="40"  y1="250" x2="460" y2="250" stroke="#999" stroke-width="1.2"/><line x1="250" y1="40"  x2="250" y2="460" stroke="#999" stroke-width="1.2"/><text x="465" y="254"  font-size="14" font-family="serif">x</text><text x="246" y="35" font-size="14" font-family="serif" text-anchor="end">y</text><circle cx="250" cy="250" r="180" fill="none" stroke="#2a6fd6" stroke-width="2"/><line x1="250" y1="250" x2="430.0" y2="250.0" stroke="#000" stroke-width="1.8"/><circle cx="430.0" cy="250.0" r="4" fill="#000"/><text x="464.0" y="250.0" font-size="13" font-family="serif" fill="#000" text-anchor="start">0° (1, 0)</text><line x1="250" y1="250" x2="405.9" y2="160.0" stroke="#c0392b" stroke-width="1.8"/><circle cx="405.9" cy="160.0" r="4" fill="#c0392b"/><text x="431.9" y="145.0" font-size="13" font-family="serif" fill="#c0392b" text-anchor="middle">30° (√3/2, 1/2)</text><line x1="250" y1="250" x2="377.3" y2="122.7" stroke="#27ae60" stroke-width="1.8"/><circle cx="377.3" cy="122.7" r="4" fill="#27ae60"/><text x="398.5" y="101.5" font-size="13" font-family="serif" fill="#27ae60" text-anchor="middle">45° (√2/2, √2/2)</text><line x1="250" y1="250" x2="340.0" y2="94.1" stroke="#8e44ad" stroke-width="1.8"/><circle cx="340.0" cy="94.1" r="4" fill="#8e44ad"/><text x="355.0" y="68.1" font-size="13" font-family="serif" fill="#8e44ad" text-anchor="middle">60° (1/2, √3/2)</text><line x1="250" y1="250" x2="250.0" y2="70.0" stroke="#000" stroke-width="1.8"/><circle cx="250.0" cy="70.0" r="4" fill="#000"/><text x="250.0" y="30.0" font-size="13" font-family="serif" fill="#000" text-anchor="middle">90° (0, 1)</text><text x="256" y="266" font-size="12" font-family="serif" fill="#666">O</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20unit%20circle%20with%20sin%20and%20cos%20labelled%20at%200%2C%2030%2C%2045%2C%2060%2C%2090%20degrees"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>The unit circle is the circle of radius 1 centred at the origin
+of the (x, y) plane.  For any angle θ measured counter-clockwise
+from the positive x-axis, the point where the angle's terminal
+ray meets the circle has coordinates (cos θ, sin θ).  Tangent is
+just sin θ divided by cos θ, which geometrically is the slope of
+the terminal ray.</p><p>At the five standard angles — 0°, 30°, 45°, 60°, 90° — the
+coordinates come out to exact algebraic values:</p><p>0°   →  (1, 0)             →  cos 0  = 1,  sin 0  = 0
+30°  →  (√3/2, 1/2)        →  cos 30 = √3/2, sin 30 = 1/2
+45°  →  (√2/2, √2/2)       →  cos 45 = √2/2, sin 45 = √2/2
+60°  →  (1/2, √3/2)        →  cos 60 = 1/2, sin 60 = √3/2
+90°  →  (0, 1)             →  cos 90 = 0,  sin 90 = 1</p><p>These five values come up so often that memorising them — or,
+better, being able to re-derive them from the 30-60-90 and
+45-45-90 right triangles — saves enormous amounts of time.</p>
+  <h2>Where it shows up</h2>
+    <p>Anywhere an angle isn't part of a right triangle, the unit
+circle is the natural home for it: signed values for angles
+above 90°, periodic identities (sin(θ + 360°) = sin θ), the
+sign pattern of each function across the four quadrants, and
+the conversion between radians and degrees.</p>
+    <p>In physics and engineering the unit circle is the spine of
+everything that oscillates — alternating current, simple
+harmonic motion, Fourier decompositions — because rotating a
+point at constant angular speed around the unit circle
+projects onto the x-axis as a perfect cosine wave.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>Why radius 1?</summary>
+      <p>Because then sin and cos are just the y and x coordinates of the point, with nothing to scale.  Any other radius works too — you just have to divide out the radius to get the trig values back.</p>
+    </details>
+    <details>
+      <summary>What about angles past 90°?</summary>
+      <p>The same rule applies: travel θ degrees counter-clockwise from the positive x-axis, read the coordinates of the meeting point with the circle.  At 180° you reach (-1, 0); at 270°, (0, -1); at 360°, back to (1, 0).  Negative angles go clockwise.</p>
+    </details>
+    <details>
+      <summary>Do I have to memorise the values?</summary>
+      <p>Not strictly — they all come from the 30-60-90 and 45-45-90 right triangles, which you can re-derive in a minute.  But the first time you sit down to learn them, drilling them is faster than re-deriving every time.</p>
+    </details>
+    <details>
+      <summary>Where does tan fit in?</summary>
+      <p>tan θ = sin θ / cos θ, which geometrically is the slope of the terminal ray.  So tan is undefined whenever the ray is vertical — at 90° and 270°.  Some textbooks draw a separate vertical tangent line to the circle at (1, 0) to read tan directly off.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/pythagorean-theorem">The Pythagorean theorem: a² + b² = c²</a></li>
+      <li><a href="/learn/quadratic-formula">The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>
