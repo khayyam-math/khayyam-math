@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen_at REAL NOT NULL,
     user_agent   TEXT,
     ip_hash      TEXT,
+    country      TEXT,
+    region       TEXT,
+    city         TEXT,
     request_count INTEGER NOT NULL DEFAULT 0,
     cost_usd_estimate REAL NOT NULL DEFAULT 0.0,
     note TEXT
@@ -171,6 +174,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen_at DOUBLE PRECISION NOT NULL,
     user_agent   TEXT,
     ip_hash      TEXT,
+    country      TEXT,
+    region       TEXT,
+    city         TEXT,
     request_count INTEGER NOT NULL DEFAULT 0,
     cost_usd_estimate DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     note TEXT
@@ -273,6 +279,12 @@ ALTER TABLE repairs  ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gp
 -- Phase C (Lean+Mathlib offline catalog verifier) — store math
 -- claims alongside the canvas so the offline service can read them.
 ALTER TABLE canvases ADD COLUMN IF NOT EXISTS math_claims_json TEXT;
+-- Anonymous-visitor geo (populated at session creation via GeoLite2).
+-- Backfills NULL for existing rows; new rows get the geo when the
+-- session is upserted with an IP that GeoLite2 can resolve.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS country TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS region  TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS city    TEXT;
 
 CREATE TABLE IF NOT EXISTS users (
     email                 TEXT PRIMARY KEY,
@@ -292,6 +304,7 @@ CREATE INDEX IF NOT EXISTS idx_repairs_turn ON repairs (turn_id);
 CREATE INDEX IF NOT EXISTS idx_turns_model ON turns (model_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_users_country ON users (last_login_country);
 CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users (last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_country ON sessions (country);
 """
 
 
@@ -469,20 +482,32 @@ class Telemetry:
         user_agent: str | None = None,
         ip_hash: str | None = None,
         note: str | None = None,
+        country: str | None = None,
+        region: str | None = None,
+        city: str | None = None,
     ) -> None:
         now = time.time()
         # ON CONFLICT … DO UPDATE — supported by SQLite ≥3.24 and Postgres.
+        # Geo columns only get filled if previously NULL, so we never
+        # overwrite an earlier resolved value with NULL from a later
+        # request whose IP didn't resolve (private range, missing
+        # mmdb, etc.).
         self._exec(
             """
             INSERT INTO sessions (session_id, created_at, last_seen_at,
-                                  user_agent, ip_hash, note)
-            VALUES (?, ?, ?, ?, ?, ?)
+                                  user_agent, ip_hash, country, region,
+                                  city, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 last_seen_at = EXCLUDED.last_seen_at,
                 user_agent   = COALESCE(sessions.user_agent, EXCLUDED.user_agent),
-                ip_hash      = COALESCE(sessions.ip_hash,    EXCLUDED.ip_hash)
+                ip_hash      = COALESCE(sessions.ip_hash,    EXCLUDED.ip_hash),
+                country      = COALESCE(sessions.country,    EXCLUDED.country),
+                region       = COALESCE(sessions.region,     EXCLUDED.region),
+                city         = COALESCE(sessions.city,       EXCLUDED.city)
             """,
-            (session_id, now, now, user_agent, ip_hash, note),
+            (session_id, now, now, user_agent, ip_hash,
+             country, region, city, note),
         )
 
     def record_login(

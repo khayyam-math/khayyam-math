@@ -866,11 +866,29 @@ async def chat(
     else:
         client_ip = (request.client.host if request.client else None)
     ip_hash_value = hash_ip(client_ip)
+    # Resolve anonymous-visitor IP to country/region/city via the
+    # locally-loaded GeoLite2 DB.  Fail-safe — if the lookup library
+    # isn't installed or the IP is private/unknown, all three return
+    # None and the upsert just doesn't set those columns.
+    geo_country: str | None = None
+    geo_region: str | None = None
+    geo_city: str | None = None
+    try:
+        from studio.geoip import lookup as _geo_lookup
+        _geo = _geo_lookup(client_ip)
+        geo_country = _geo.country
+        geo_region = _geo.region
+        geo_city = _geo.city
+    except Exception:  # noqa: BLE001
+        pass
     if tel is not None:
         tel.upsert_session(
             session_id=session_id,
             user_agent=request.headers.get("user-agent"),
             ip_hash=ip_hash_value,
+            country=geo_country,
+            region=geo_region,
+            city=geo_city,
         )
 
     # 2. Content filter.
@@ -1684,6 +1702,23 @@ def admin_users_summary(_user: str = Depends(require_admin)) -> dict[str, Any]:
         out["active_emails_by_window"] = active
     except Exception as exc:  # noqa: BLE001
         out["active_error"] = repr(exc)
+    # Anonymous-visitor geo: sessions table is populated for every
+    # visitor (signed-in or not), with country/region/city resolved
+    # at session-creation via GeoLite2.  Sessions that pre-date the
+    # geo wiring or whose IP didn't resolve show up with country
+    # NULL — exposed as 'XX' here so the caller can see the bucket.
+    try:
+        rows = tel.query(
+            "SELECT COALESCE(country, 'XX') AS cc, "
+            "COALESCE(city, '') AS city, "
+            "COUNT(*) AS n FROM sessions GROUP BY cc, city "
+            "ORDER BY n DESC, cc, city LIMIT 50")
+        out["anonymous_by_country_city"] = [
+            {"country": cc, "city": city, "sessions": int(n)}
+            for cc, city, n in rows
+        ]
+    except Exception as exc:  # noqa: BLE001
+        out["anonymous_geo_error"] = repr(exc)
     return out
 
 
