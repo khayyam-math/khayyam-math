@@ -63,8 +63,11 @@ docker network create "$NETWORK" >/dev/null
 docker run -d --name "$PG_NAME" --network "$NETWORK" \
     -e POSTGRES_PASSWORD=verifypass -e POSTGRES_DB=sevim \
     -p "${PG_PORT}:5432" postgres:16-alpine >/dev/null
-# Wait for PG to be ready
-for _ in $(seq 1 30); do
+# Wait for PG to be ready.  60 s budget — Postgres normally takes
+# 5-10 s, but on a cold dev machine (first image pull, slow disk,
+# resource-constrained docker daemon) it can take 30+ s.  60 s
+# tolerates that without lengthening the success path noticeably.
+for _ in $(seq 1 60); do
     if docker exec "$PG_NAME" pg_isready -U postgres >/dev/null 2>&1; then
         break
     fi
