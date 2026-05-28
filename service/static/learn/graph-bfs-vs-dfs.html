@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>BFS vs DFS: two ways to traverse a graph | Khayyam Math</title>
+<meta name="description" content="Breadth-first search (BFS) and depth-first search (DFS) are the two canonical graph traversal algorithms.  See the visit orders side by side on a small seven-node graph, and the queue-vs-stack data-structure difference that produces them.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/graph-bfs-vs-dfs">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="BFS vs DFS: two ways to traverse a graph">
+<meta property="og:description" content="Same graph, two visit orders — breadth-first sweeps level-by-level, depth-first dives down each branch first.">
+<meta property="og:url" content="https://khayyammath.com/learn/graph-bfs-vs-dfs">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="BFS vs DFS: two ways to traverse a graph">
+<meta name="twitter:description" content="Same graph, two visit orders — breadth-first sweeps level-by-level, depth-first dives down each branch first.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/graph-bfs-vs-dfs",
+      "url": "https://khayyammath.com/learn/graph-bfs-vs-dfs",
+      "name": "BFS vs DFS: two ways to traverse a graph",
+      "description": "Breadth-first search (BFS) and depth-first search (DFS) are the two canonical graph traversal algorithms. See the visit orders side by side on a small seven-node graph, and the queue-vs-stack data-structure difference that produces them.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "BFS vs DFS: two ways to traverse a graph"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "BFS vs DFS: two ways to traverse a graph",
+      "description": "Breadth-first search (BFS) and depth-first search (DFS) are the two canonical graph traversal algorithms. See the visit orders side by side on a small seven-node graph, and the queue-vs-stack data-structure difference that produces them.",
+      "url": "https://khayyammath.com/learn/graph-bfs-vs-dfs",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "discrete-math"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Does the start node have to be a specific one?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No \u2014 you can run BFS or DFS from any vertex.  If the graph isn't connected, you'll only visit the component containing the start.  To visit every node, run the traversal once per unvisited node in an outer loop."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What about for weighted graphs?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "BFS only finds shortest paths in *unweighted* graphs (or graphs where every edge has the same weight).  For positive-weight graphs you need Dijkstra's algorithm; for graphs with negative weights, Bellman-Ford.  Both can be seen as generalisations of BFS that respect edge weights."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does the order in which children are queued/pushed matter?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It changes the visit order but not the correctness of either algorithm.  Both still visit every reachable node exactly once.  For deterministic test cases, traversals usually process children in alphabetical or insertion order."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do BFS and DFS relate to Dijkstra and A*?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Dijkstra's algorithm is BFS with a priority queue keyed on accumulated distance, and A* is Dijkstra with a heuristic added to the priority.  All three explore a frontier of nodes; they differ only in how they decide which frontier node to expand next."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    BFS vs DFS: two ways to traverse a graph
+  </div>
+
+  <h1>BFS vs DFS: two ways to traverse a graph</h1>
+  <p class="subtitle">Same graph, two visit orders — breadth-first sweeps level-by-level, depth-first dives down each branch first.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 320" aria-label="A seven-node graph with BFS and DFS visit numbers on each node"><line x1="270" y1="50" x2="140" y2="150" stroke="#1a1a1a" stroke-width="1.6"/><line x1="270" y1="50" x2="400" y2="150" stroke="#1a1a1a" stroke-width="1.6"/><line x1="140" y1="150" x2="60" y2="250" stroke="#1a1a1a" stroke-width="1.6"/><line x1="140" y1="150" x2="210" y2="250" stroke="#1a1a1a" stroke-width="1.6"/><line x1="400" y1="150" x2="340" y2="250" stroke="#1a1a1a" stroke-width="1.6"/><line x1="400" y1="150" x2="470" y2="250" stroke="#1a1a1a" stroke-width="1.6"/><circle cx="270" cy="50" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="270" y="55" font-size="16" font-family="serif" text-anchor="middle">A</text><text x="296" y="32" font-size="10" font-family="serif" fill="#2a6fd6">BFS:1</text><text x="296" y="44" font-size="10" font-family="serif" fill="#c0392b">DFS:1</text><circle cx="140" cy="150" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="140" y="155" font-size="16" font-family="serif" text-anchor="middle">B</text><text x="166" y="132" font-size="10" font-family="serif" fill="#2a6fd6">BFS:2</text><text x="166" y="144" font-size="10" font-family="serif" fill="#c0392b">DFS:2</text><circle cx="400" cy="150" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="400" y="155" font-size="16" font-family="serif" text-anchor="middle">C</text><text x="426" y="132" font-size="10" font-family="serif" fill="#2a6fd6">BFS:3</text><text x="426" y="144" font-size="10" font-family="serif" fill="#c0392b">DFS:5</text><circle cx="60" cy="250" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="60" y="255" font-size="16" font-family="serif" text-anchor="middle">D</text><text x="86" y="232" font-size="10" font-family="serif" fill="#2a6fd6">BFS:4</text><text x="86" y="244" font-size="10" font-family="serif" fill="#c0392b">DFS:3</text><circle cx="210" cy="250" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="210" y="255" font-size="16" font-family="serif" text-anchor="middle">E</text><text x="236" y="232" font-size="10" font-family="serif" fill="#2a6fd6">BFS:5</text><text x="236" y="244" font-size="10" font-family="serif" fill="#c0392b">DFS:4</text><circle cx="340" cy="250" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="340" y="255" font-size="16" font-family="serif" text-anchor="middle">F</text><text x="366" y="232" font-size="10" font-family="serif" fill="#2a6fd6">BFS:6</text><text x="366" y="244" font-size="10" font-family="serif" fill="#c0392b">DFS:6</text><circle cx="470" cy="250" r="22" fill="white" stroke="#1a1a1a" stroke-width="2"/><text x="470" y="255" font-size="16" font-family="serif" text-anchor="middle">G</text><text x="496" y="232" font-size="10" font-family="serif" fill="#2a6fd6">BFS:7</text><text x="496" y="244" font-size="10" font-family="serif" fill="#c0392b">DFS:7</text><text x="270" y="295" font-size="13" font-family="serif" fill="#2a6fd6" text-anchor="middle">BFS order:  A → B → C → D → E → F → G</text><text x="270" y="313" font-size="13" font-family="serif" fill="#c0392b" text-anchor="middle">DFS order:  A → B → D → E → C → F → G</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20BFS%20and%20DFS%20traversals%20on%20a%20small%20graph%20starting%20at%20node%20A"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>Both BFS and DFS visit every node reachable from a starting
+node exactly once, but they pick which node to visit next
+using different rules:</p><pre>    BFS:  use a queue (FIFO).  Visit closer nodes first.
+    DFS:  use a stack (LIFO).  Dive into one branch before
+          backtracking to siblings.</pre><p>On the seven-node tree-like graph in the figure, starting
+from A:</p><pre>    BFS order:  A, B, C, D, E, F, G
+                (level 0: A; level 1: B, C; level 2: D, E, F, G)</pre><pre>    DFS order:  A, B, D, E, C, F, G
+                (dive A → B → D, back up, B → E, back up,
+                 then A → C → F, back up, C → G)</pre><p>The only algorithmic difference is the choice of queue vs
+stack for the "frontier" of nodes still to process.  Everything
+else — the visited set, the loop structure, the per-node
+work — is identical.</p>
+  <h2>Where it shows up</h2>
+    <p>BFS is the right choice when you want the *shortest* path in
+an unweighted graph: the first time BFS reaches a node, it has
+done so along a minimum-edge-count route.  Web crawlers use
+BFS to keep recently-discovered URLs balanced across the
+crawl.</p>
+    <p>DFS is the right choice when you want to explore a tree
+structure compactly (using O(depth) memory instead of
+O(breadth)), to find cycles, to topologically sort a DAG, or
+to compute strongly connected components via Tarjan's or
+Kosaraju's algorithms.  Iterative-deepening DFS combines DFS's
+low memory with BFS's optimality and is the basis of many
+classical AI search algorithms.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>Does the start node have to be a specific one?</summary>
+      <p>No — you can run BFS or DFS from any vertex.  If the graph isn't connected, you'll only visit the component containing the start.  To visit every node, run the traversal once per unvisited node in an outer loop.</p>
+    </details>
+    <details>
+      <summary>What about for weighted graphs?</summary>
+      <p>BFS only finds shortest paths in *unweighted* graphs (or graphs where every edge has the same weight).  For positive-weight graphs you need Dijkstra's algorithm; for graphs with negative weights, Bellman-Ford.  Both can be seen as generalisations of BFS that respect edge weights.</p>
+    </details>
+    <details>
+      <summary>Does the order in which children are queued/pushed matter?</summary>
+      <p>It changes the visit order but not the correctness of either algorithm.  Both still visit every reachable node exactly once.  For deterministic test cases, traversals usually process children in alphabetical or insertion order.</p>
+    </details>
+    <details>
+      <summary>How do BFS and DFS relate to Dijkstra and A*?</summary>
+      <p>Dijkstra's algorithm is BFS with a priority queue keyed on accumulated distance, and A* is Dijkstra with a heuristic added to the priority.  All three explore a frontier of nodes; they differ only in how they decide which frontier node to expand next.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/dfa-construction">DFA construction: build an automaton for (a|b)* ending in 'ab'</a></li>
+      <li><a href="/learn/matrix-inverse-3x3">Matrix inverse of a 3×3: the adjugate-and-determinant method</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

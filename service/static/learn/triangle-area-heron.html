@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Heron's formula: area of a triangle from its three sides | Khayyam Math</title>
+<meta name="description" content="Heron's formula gives the area of a triangle from its three side lengths alone: A = √(s(s−a)(s−b)(s−c)), where s is the semi-perimeter.  Worked example on the 5-6-7 triangle, with s = 9 and A = 6√6.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/triangle-area-heron">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Heron's formula: area of a triangle from its three sides">
+<meta property="og:description" content="A two-thousand-year-old formula that gives the area of any triangle directly from the side lengths — no height needed.">
+<meta property="og:url" content="https://khayyammath.com/learn/triangle-area-heron">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Heron's formula: area of a triangle from its three sides">
+<meta name="twitter:description" content="A two-thousand-year-old formula that gives the area of any triangle directly from the side lengths — no height needed.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/triangle-area-heron",
+      "url": "https://khayyammath.com/learn/triangle-area-heron",
+      "name": "Heron's formula: area of a triangle from its three sides",
+      "description": "Heron's formula gives the area of a triangle from its three side lengths alone: A = \u221a(s(s\u2212a)(s\u2212b)(s\u2212c)), where s is the semi-perimeter. Worked example on the 5-6-7 triangle, with s = 9 and A = 6\u221a6.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Heron's formula: area of a triangle from its three sides"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "Heron's formula: area of a triangle from its three sides",
+      "description": "Heron's formula gives the area of a triangle from its three side lengths alone: A = \u221a(s(s\u2212a)(s\u2212b)(s\u2212c)), where s is the semi-perimeter. Worked example on the 5-6-7 triangle, with s = 9 and A = 6\u221a6.",
+      "url": "https://khayyammath.com/learn/triangle-area-heron",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "geometry"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Why no height?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The usual area formula A = \u00bd\u00b7base\u00b7height needs you to know an altitude, which often isn't given.  Heron's formula trades the altitude for an extra side length, and you usually have all three sides."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does it work for degenerate triangles?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "If one side equals the sum of the other two, the three points are colinear \u2014 no real triangle.  Heron's formula returns zero, which is the right answer: a degenerate triangle has zero area."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Where does the formula come from?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Several derivations exist.  The classical one uses the Pythagorean theorem on the altitude dropped from one vertex.  A more modern derivation expands the cross-product magnitude |b\u2212a \u00d7 c\u2212a| / 2 and rearranges.  Either way you end up at the same symmetric expression in a, b, c."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is there a 3D analogue?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes \u2014 the Cayley-Menger determinant generalises Heron's formula to compute the volume of a tetrahedron from its six edge lengths.  The expression is uglier but follows the same idea: edge lengths alone determine the simplex's content."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    Heron's formula: area of a triangle from its three sides
+  </div>
+
+  <h1>Heron's formula: area of a triangle from its three sides</h1>
+  <p class="subtitle">A two-thousand-year-old formula that gives the area of any triangle directly from the side lengths — no height needed.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 320" aria-label="Triangle with sides 5, 6, 7 and Heron's formula"><polygon points="226.4,124.0 145,250 355,250" fill="#eaf2fc" stroke="#1a1a1a" stroke-width="2.2"/><circle cx="226.4" cy="124.0" r="3.5" fill="#1a1a1a"/><circle cx="145" cy="250" r="3.5" fill="#1a1a1a"/><circle cx="355" cy="250" r="3.5" fill="#1a1a1a"/><text x="226.4" y="114.0" font-size="14" font-family="serif" text-anchor="middle">A</text><text x="135" y="266" font-size="14" font-family="serif" text-anchor="end">B</text><text x="365" y="266" font-size="14" font-family="serif">C</text><text x="250.0" y="274" font-size="14" font-family="serif" fill="#c0392b" text-anchor="middle">a = 7</text><text x="304.7" y="191.0" font-size="14" font-family="serif" fill="#27ae60">b = 6</text><text x="171.7" y="191.0" font-size="14" font-family="serif" fill="#2a6fd6" text-anchor="end">c = 5</text><text x="250" y="22" font-size="14" font-family="serif" text-anchor="middle">Triangle with sides 5, 6, 7</text><text x="570" y="80"  font-size="13" font-family="serif" text-anchor="end">s = (5 + 6 + 7) / 2 = 9</text><text x="570" y="105" font-size="13" font-family="serif" text-anchor="end">A = √(s(s−a)(s−b)(s−c))</text><text x="570" y="130" font-size="13" font-family="serif" text-anchor="end">  = √(9 · 4 · 3 · 2)</text><text x="570" y="155" font-size="13" font-family="serif" text-anchor="end">  = √216  =  6√6</text><text x="570" y="180" font-size="13" font-family="serif" fill="#c0392b" text-anchor="end">  ≈ 14.697</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20a%20triangle%20with%20sides%205%2C%206%2C%207%20and%20compute%20its%20area%20using%20Heron%27s%20formula"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>Heron's formula computes the area of a triangle from the three
+side lengths a, b, c without ever needing to know any of its
+angles or any of its altitudes.  Let</p><pre>    s = (a + b + c) / 2</pre><p>be the semi-perimeter — half the perimeter — and then</p><pre>    A = √(s · (s − a) · (s − b) · (s − c))</pre><p>For the 5-6-7 triangle in the figure:</p><pre>    s        = (5 + 6 + 7) / 2  = 9
+    s − a    = 9 − 5 = 4
+    s − b    = 9 − 6 = 3
+    s − c    = 9 − 7 = 2
+    product  = 9 · 4 · 3 · 2 = 216
+    A        = √216 = 6√6 ≈ 14.697</pre><p>The formula is named after Hero (or Heron) of Alexandria, who
+proved it in his Metrica around 60 CE, though there is evidence
+Archimedes knew it three centuries earlier.  It works for every
+real triangle — equilateral, isosceles, scalene, right-angled
+or obtuse — provided the three lengths actually form a
+triangle (each side strictly less than the sum of the other two).</p>
+  <h2>Where it shows up</h2>
+    <p>Heron's formula is the working tool whenever you know three
+side lengths but not the angles: surveying a plot of land from
+three measured fence-lengths, computing the area of an irregular
+polygon by triangulating it, or sanity-checking a triangle in a
+CAD drawing where the angle annotations might be wrong.</p>
+    <p>The formula also lets you check whether three given lengths
+even *form* a valid triangle.  If the product s(s−a)(s−b)(s−c)
+comes out negative or zero, one of the lengths is too long
+relative to the other two — the triangle inequality fails and
+no triangle exists.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>Why no height?</summary>
+      <p>The usual area formula A = ½·base·height needs you to know an altitude, which often isn't given.  Heron's formula trades the altitude for an extra side length, and you usually have all three sides.</p>
+    </details>
+    <details>
+      <summary>Does it work for degenerate triangles?</summary>
+      <p>If one side equals the sum of the other two, the three points are colinear — no real triangle.  Heron's formula returns zero, which is the right answer: a degenerate triangle has zero area.</p>
+    </details>
+    <details>
+      <summary>Where does the formula come from?</summary>
+      <p>Several derivations exist.  The classical one uses the Pythagorean theorem on the altitude dropped from one vertex.  A more modern derivation expands the cross-product magnitude |b−a × c−a| / 2 and rearranges.  Either way you end up at the same symmetric expression in a, b, c.</p>
+    </details>
+    <details>
+      <summary>Is there a 3D analogue?</summary>
+      <p>Yes — the Cayley-Menger determinant generalises Heron's formula to compute the volume of a tetrahedron from its six edge lengths.  The expression is uglier but follows the same idea: edge lengths alone determine the simplex's content.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/pythagorean-theorem">The Pythagorean theorem: a² + b² = c²</a></li>
+      <li><a href="/learn/unit-circle">The unit circle: sin, cos, tan at standard angles</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

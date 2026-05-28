@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Integration by parts: ∫ u dv = uv − ∫ v du | Khayyam Math</title>
+<meta name="description" content="Integration by parts gives ∫ u dv = uv − ∫ v du.  Worked example evaluating ∫ x·eˣ dx by choosing u = x and dv = eˣdx, yielding x·eˣ − eˣ + C.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/integration-by-parts">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Integration by parts: ∫ u dv = uv − ∫ v du">
+<meta property="og:description" content="The integration counterpart of the product rule — the formula that handles x·eˣ, x·sin(x), x²·ln(x), and a hundred other classroom integrals.">
+<meta property="og:url" content="https://khayyammath.com/learn/integration-by-parts">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Integration by parts: ∫ u dv = uv − ∫ v du">
+<meta name="twitter:description" content="The integration counterpart of the product rule — the formula that handles x·eˣ, x·sin(x), x²·ln(x), and a hundred other classroom integrals.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/integration-by-parts",
+      "url": "https://khayyammath.com/learn/integration-by-parts",
+      "name": "Integration by parts: \u222b u dv = uv \u2212 \u222b v du",
+      "description": "Integration by parts gives \u222b u dv = uv \u2212 \u222b v du. Worked example evaluating \u222b x\u00b7e\u02e3 dx by choosing u = x and dv = e\u02e3dx, yielding x\u00b7e\u02e3 \u2212 e\u02e3 + C.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Integration by parts: \u222b u dv = uv \u2212 \u222b v du"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "Integration by parts: \u222b u dv = uv \u2212 \u222b v du",
+      "description": "Integration by parts gives \u222b u dv = uv \u2212 \u222b v du. Worked example evaluating \u222b x\u00b7e\u02e3 dx by choosing u = x and dv = e\u02e3dx, yielding x\u00b7e\u02e3 \u2212 e\u02e3 + C.",
+      "url": "https://khayyammath.com/learn/integration-by-parts",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "calculus"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How do I choose u and dv?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Use LIATE as a starting guide: among the factors of the integrand, choose u from the highest-priority type listed (Log, Inv-trig, Alg, Trig, Exp) and dv as the rest.  This usually but not always works; if the resulting integral is harder than the original, swap the choices."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if it needs more than one application?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Apply the rule again.  For \u222b x\u00b2\u00b7e\u02e3 dx, first take u = x\u00b2, dv = e\u02e3dx \u2192 x\u00b2e\u02e3 \u2212 \u222b 2x\u00b7e\u02e3 dx; the new integral is then handled by another integration by parts.  A tabular method (sometimes called the DI method) speeds this up by columnising u's derivatives next to v's antiderivatives."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why does the formula not contain an integration constant?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It's hidden inside the indefinite integrals on both sides.  Whatever constant you add on the right cancels the constant on the left.  In practice, write +C only at the very end."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What's the definite-integral version?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "\u222b_a^b u dv = [u\u00b7v]_a^b \u2212 \u222b_a^b v du.  Same formula, with the boundary term evaluated at the limits.  The +C constant disappears because every antiderivative is evaluated between fixed endpoints."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    Integration by parts: ∫ u dv = uv − ∫ v du
+  </div>
+
+  <h1>Integration by parts: ∫ u dv = uv − ∫ v du</h1>
+  <p class="subtitle">The integration counterpart of the product rule — the formula that handles x·eˣ, x·sin(x), x²·ln(x), and a hundred other classroom integrals.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 320" aria-label="Integration by parts applied to integral of x times e to the x dx"><text x="270" y="32" font-size="16" font-family="serif" text-anchor="middle">∫ x · eˣ dx     (integration by parts)</text><rect x="120" y="60" width="300" height="100" rx="6" fill="#eaf2fc" stroke="#2a6fd6" stroke-width="1.5"/><line x1="270" y1="60" x2="270" y2="160" stroke="#2a6fd6" stroke-width="1.2"/><line x1="120" y1="100" x2="420" y2="100" stroke="#2a6fd6" stroke-width="1.2"/><text x="195" y="86" font-size="15" font-family="serif" text-anchor="middle" fill="#2a6fd6">u = x</text><text x="345" y="86" font-size="15" font-family="serif" text-anchor="middle" fill="#2a6fd6">dv = eˣ dx</text><text x="195" y="135" font-size="14" font-family="serif" text-anchor="middle">du = dx</text><text x="345" y="135" font-size="14" font-family="serif" text-anchor="middle">v = eˣ</text><text x="270" y="200" font-size="15" font-family="serif" text-anchor="middle">∫ u dv = u·v − ∫ v du</text><text x="270" y="232" font-size="15" font-family="serif" text-anchor="middle">∫ x · eˣ dx = x · eˣ − ∫ eˣ dx</text><text x="270" y="264" font-size="17" font-family="serif" fill="#c0392b" text-anchor="middle">            = x · eˣ − eˣ + C</text><text x="270" y="298" font-size="12" font-family="serif" fill="#666" text-anchor="middle">(pick u = x because differentiating it simplifies the integrand)</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20integration%20by%20parts%20applied%20to%20integral%20of%20x%20%2A%20e%5Ex%20dx"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>The product rule for differentiation says d(uv) = u dv + v du.
+Integrate both sides:</p><pre>    uv = ∫ u dv + ∫ v du
+    ⟹  ∫ u dv = uv − ∫ v du</pre><p>That is integration by parts.  The skill is in choosing which
+factor of the integrand to call u and which to call dv: pick u
+to be something that becomes simpler when differentiated, and
+dv to be something easy to integrate.  A common mnemonic for
+the priority order is LIATE — Logarithmic, Inverse trig,
+Algebraic, Trig, Exponential — choose u as the leftmost type
+present.</p><p>For ∫ x · eˣ dx (algebraic times exponential, so u is the
+algebraic part):</p><pre>    u  = x           →  du = dx
+    dv = eˣ dx       →  v  = eˣ</pre><pre>    ∫ x·eˣ dx = u·v − ∫ v du
+              = x·eˣ − ∫ eˣ dx
+              = x·eˣ − eˣ + C</pre><p>The single application reduced the original integral (with an
+x factor) to a simpler integral (without one).  That's the
+point of the technique.</p>
+  <h2>Where it shows up</h2>
+    <p>Integration by parts is the standard tool whenever the
+integrand is a product where one factor's derivative is
+simpler than itself: log(x) times anything, polynomials times
+sin/cos, polynomials times exponentials.  Repeated application
+eventually reduces a polynomial-times-exponential integral to
+a pure exponential, which integrates trivially.</p>
+    <p>In probability theory, the expectation of a non-negative
+random variable can be written as E[X] = ∫₀^∞ P(X > t) dt — a
+result that comes from one careful application of integration
+by parts on the definition of expectation.  In Fourier
+analysis, it gives the smoothness-decay relationship between a
+function and its Fourier transform.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>How do I choose u and dv?</summary>
+      <p>Use LIATE as a starting guide: among the factors of the integrand, choose u from the highest-priority type listed (Log, Inv-trig, Alg, Trig, Exp) and dv as the rest.  This usually but not always works; if the resulting integral is harder than the original, swap the choices.</p>
+    </details>
+    <details>
+      <summary>What if it needs more than one application?</summary>
+      <p>Apply the rule again.  For ∫ x²·eˣ dx, first take u = x², dv = eˣdx → x²eˣ − ∫ 2x·eˣ dx; the new integral is then handled by another integration by parts.  A tabular method (sometimes called the DI method) speeds this up by columnising u's derivatives next to v's antiderivatives.</p>
+    </details>
+    <details>
+      <summary>Why does the formula not contain an integration constant?</summary>
+      <p>It's hidden inside the indefinite integrals on both sides.  Whatever constant you add on the right cancels the constant on the left.  In practice, write +C only at the very end.</p>
+    </details>
+    <details>
+      <summary>What's the definite-integral version?</summary>
+      <p>∫_a^b u dv = [u·v]_a^b − ∫_a^b v du.  Same formula, with the boundary term evaluated at the limits.  The +C constant disappears because every antiderivative is evaluated between fixed endpoints.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/derivative-chain-rule">The chain rule: differentiating composite functions</a></li>
+      <li><a href="/learn/taylor-series-sin-x">Taylor series of sin x near 0</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

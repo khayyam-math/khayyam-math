@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ | Khayyam Math</title>
+<meta name="description" content="The binomial probability mass function P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ gives the probability of exactly k successes in n independent trials.  See the symmetric bar chart for n = 10 and p = 0.5, peaking at k = 5.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/binomial-pmf">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ">
+<meta property="og:description" content="The probability of getting exactly k successes in n independent trials — drawn as a bar chart for n = 10 fair-coin flips.">
+<meta property="og:url" content="https://khayyammath.com/learn/binomial-pmf">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ">
+<meta name="twitter:description" content="The probability of getting exactly k successes in n independent trials — drawn as a bar chart for n = 10 fair-coin flips.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/binomial-pmf",
+      "url": "https://khayyammath.com/learn/binomial-pmf",
+      "name": "Binomial PMF: P(X = k) = C(n, k) \u00b7 p\u1d4f \u00b7 (1\u2212p)\u207f\u207b\u1d4f",
+      "description": "The binomial probability mass function P(X = k) = C(n, k) \u00b7 p\u1d4f \u00b7 (1\u2212p)\u207f\u207b\u1d4f gives the probability of exactly k successes in n independent trials. See the symmetric bar chart for n = 10 and p = 0.5, peaking at k = 5.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Binomial PMF: P(X = k) = C(n, k) \u00b7 p\u1d4f \u00b7 (1\u2212p)\u207f\u207b\u1d4f"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "Binomial PMF: P(X = k) = C(n, k) \u00b7 p\u1d4f \u00b7 (1\u2212p)\u207f\u207b\u1d4f",
+      "description": "The binomial probability mass function P(X = k) = C(n, k) \u00b7 p\u1d4f \u00b7 (1\u2212p)\u207f\u207b\u1d4f gives the probability of exactly k successes in n independent trials. See the symmetric bar chart for n = 10 and p = 0.5, peaking at k = 5.",
+      "url": "https://khayyammath.com/learn/binomial-pmf",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "statistics"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What's C(n, k)?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "C(n, k) \u2014 also written \u207fC\u2096 or 'n choose k' \u2014 counts the number of ways to choose k items from n without regard to order.  Computed as n! / (k!\u00b7(n\u2212k)!).  For example C(10, 3) = 10\u00b79\u00b78 / (3\u00b72\u00b71) = 120."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does the distribution have to be symmetric?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Only when p = 0.5.  For p < 0.5 the distribution is right-skewed (the mode and most of the mass sit at low k); for p > 0.5 it's left-skewed.  The skewness disappears as n grows, by the Central Limit Theorem."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What if the trials aren't independent?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Then the binomial isn't the right model.  For sampling without replacement from a finite population, use the hypergeometric distribution.  For correlated trials, you need a more general model (e.g. a beta-binomial when the success probability itself is uncertain)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is there a closed-form for P(X \u2264 k)?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not a simple one \u2014 the cumulative distribution function is a regularised incomplete beta function.  For practical work you either sum the PMF directly (cheap for small n) or use the normal approximation (cheap for large n)."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ
+  </div>
+
+  <h1>Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ</h1>
+  <p class="subtitle">The probability of getting exactly k successes in n independent trials — drawn as a bar chart for n = 10 fair-coin flips.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 320" aria-label="Bar chart of the binomial probability mass function for n equals 10 and p equals one half"><line x1="50" y1="270" x2="520" y2="270" stroke="#999" stroke-width="1.1"/><line x1="50" y1="36" x2="50" y2="270" stroke="#999" stroke-width="1.1"/><text x="270" y="22" font-size="14" font-family="serif" text-anchor="middle">Binomial(n = 10, p = 0.5) — P(X = k) = C(10, k) · 0.5¹⁰</text><rect x="56.4" y="269.1" width="29.9" height="0.9" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="71.4" y="286.0" font-size="11" font-family="serif" text-anchor="middle">0</text><rect x="99.1" y="260.7" width="29.9" height="9.3" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="114.1" y="286.0" font-size="11" font-family="serif" text-anchor="middle">1</text><rect x="141.9" y="228.2" width="29.9" height="41.8" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="156.8" y="286.0" font-size="11" font-family="serif" text-anchor="middle">2</text><rect x="184.6" y="158.6" width="29.9" height="111.4" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="199.5" y="286.0" font-size="11" font-family="serif" text-anchor="middle">3</text><text x="199.5" y="154.6" font-size="10" font-family="serif" fill="#1a4f99" text-anchor="middle">0.117</text><rect x="227.3" y="75.0" width="29.9" height="195.0" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="242.3" y="286.0" font-size="11" font-family="serif" text-anchor="middle">4</text><text x="242.3" y="71.0" font-size="10" font-family="serif" fill="#1a4f99" text-anchor="middle">0.205</text><rect x="270.0" y="36.0" width="29.9" height="234.0" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="285.0" y="286.0" font-size="11" font-family="serif" text-anchor="middle">5</text><text x="285.0" y="32.0" font-size="10" font-family="serif" fill="#1a4f99" text-anchor="middle">0.246</text><rect x="312.8" y="75.0" width="29.9" height="195.0" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="327.7" y="286.0" font-size="11" font-family="serif" text-anchor="middle">6</text><text x="327.7" y="71.0" font-size="10" font-family="serif" fill="#1a4f99" text-anchor="middle">0.205</text><rect x="355.5" y="158.6" width="29.9" height="111.4" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="370.5" y="286.0" font-size="11" font-family="serif" text-anchor="middle">7</text><text x="370.5" y="154.6" font-size="10" font-family="serif" fill="#1a4f99" text-anchor="middle">0.117</text><rect x="398.2" y="228.2" width="29.9" height="41.8" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="413.2" y="286.0" font-size="11" font-family="serif" text-anchor="middle">8</text><rect x="441.0" y="260.7" width="29.9" height="9.3" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="455.9" y="286.0" font-size="11" font-family="serif" text-anchor="middle">9</text><rect x="483.7" y="269.1" width="29.9" height="0.9" fill="#2a6fd6" stroke="#1a4f99" stroke-width="0.6"/><text x="498.6" y="286.0" font-size="11" font-family="serif" text-anchor="middle">10</text><line x1="47" y1="174.9" x2="53" y2="174.9" stroke="#999"/><text x="44" y="178.9" font-size="11" font-family="serif" text-anchor="end">0.1</text><line x1="47" y1="79.8" x2="53" y2="79.8" stroke="#999"/><text x="44" y="83.8" font-size="11" font-family="serif" text-anchor="end">0.2</text><text x="285.0" y="306.0" font-size="12" font-family="serif" text-anchor="middle">k (number of successes)</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20binomial%20pmf%20bar%20chart%20for%20n%20%3D%2010%20trials%20and%20p%20%3D%200.5"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>A binomial random variable X counts the number of "successes"
+in n independent Bernoulli trials, each of which succeeds
+with probability p.  Its probability mass function is</p><pre>    P(X = k)  =  C(n, k) · pᵏ · (1 − p)ⁿ⁻ᵏ</pre><p>for k = 0, 1, 2, …, n.  The C(n, k) factor (the binomial
+coefficient, "n choose k") counts the number of ways the k
+successes can be arranged among the n trials; the pᵏ and
+(1−p)ⁿ⁻ᵏ factors are the probabilities of any one specific
+arrangement.</p><p>For n = 10 and p = 0.5 (ten fair coin flips, counting heads),
+the figure plots P(X = k) for k = 0 through 10.  Values:</p><pre>    k = 0,  10:  1/1024 ≈ 0.001
+    k = 1,   9: 10/1024 ≈ 0.010
+    k = 2,   8: 45/1024 ≈ 0.044
+    k = 3,   7: 120/1024 ≈ 0.117
+    k = 4,   6: 210/1024 ≈ 0.205
+    k = 5    :  252/1024 ≈ 0.246</pre><p>The distribution is symmetric (because p = 0.5), peaking at
+k = 5.  The probabilities sum to exactly 1.</p>
+  <h2>Where it shows up</h2>
+    <p>The binomial distribution is the right model for any "count of
+successes in n independent yes/no trials" — quality-control
+sampling (defects in a batch), A/B testing (clicks out of
+impressions), survey responses (yes-votes out of n people),
+polling.  Its mean is n·p and its variance is n·p·(1 − p).</p>
+    <p>For large n the binomial is well approximated by a normal
+distribution with the same mean and variance — that's the de
+Moivre-Laplace theorem and a special case of the Central Limit
+Theorem.  For large n and small p (with n·p moderate) it's
+better approximated by a Poisson distribution with rate n·p.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>What's C(n, k)?</summary>
+      <p>C(n, k) — also written ⁿCₖ or 'n choose k' — counts the number of ways to choose k items from n without regard to order.  Computed as n! / (k!·(n−k)!).  For example C(10, 3) = 10·9·8 / (3·2·1) = 120.</p>
+    </details>
+    <details>
+      <summary>Does the distribution have to be symmetric?</summary>
+      <p>Only when p = 0.5.  For p < 0.5 the distribution is right-skewed (the mode and most of the mass sit at low k); for p > 0.5 it's left-skewed.  The skewness disappears as n grows, by the Central Limit Theorem.</p>
+    </details>
+    <details>
+      <summary>What if the trials aren't independent?</summary>
+      <p>Then the binomial isn't the right model.  For sampling without replacement from a finite population, use the hypergeometric distribution.  For correlated trials, you need a more general model (e.g. a beta-binomial when the success probability itself is uncertain).</p>
+    </details>
+    <details>
+      <summary>Is there a closed-form for P(X ≤ k)?</summary>
+      <p>Not a simple one — the cumulative distribution function is a regularised incomplete beta function.  For practical work you either sum the PMF directly (cheap for small n) or use the normal approximation (cheap for large n).</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/normal-distribution-68-95-99">The 68–95–99.7 rule for the normal distribution</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

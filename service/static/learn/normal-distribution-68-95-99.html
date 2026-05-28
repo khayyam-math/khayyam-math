@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>The 68–95–99.7 rule for the normal distribution | Khayyam Math</title>
+<meta name="description" content="Under a normal distribution, about 68% of values fall within ±1 standard deviation of the mean, 95% within ±2σ, and 99.7% within ±3σ.  See the bell curve with each band shaded and the rule explained.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/normal-distribution-68-95-99">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="The 68–95–99.7 rule for the normal distribution">
+<meta property="og:description" content="Why almost every observation from a normal distribution sits within three standard deviations of the mean — and how the percentages stack up.">
+<meta property="og:url" content="https://khayyammath.com/learn/normal-distribution-68-95-99">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The 68–95–99.7 rule for the normal distribution">
+<meta name="twitter:description" content="Why almost every observation from a normal distribution sits within three standard deviations of the mean — and how the percentages stack up.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/normal-distribution-68-95-99",
+      "url": "https://khayyammath.com/learn/normal-distribution-68-95-99",
+      "name": "The 68\u201395\u201399.7 rule for the normal distribution",
+      "description": "Under a normal distribution, about 68% of values fall within \u00b11 standard deviation of the mean, 95% within \u00b12\u03c3, and 99.7% within \u00b13\u03c3. See the bell curve with each band shaded and the rule explained.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "The 68\u201395\u201399.7 rule for the normal distribution"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "The 68\u201395\u201399.7 rule for the normal distribution",
+      "description": "Under a normal distribution, about 68% of values fall within \u00b11 standard deviation of the mean, 95% within \u00b12\u03c3, and 99.7% within \u00b13\u03c3. See the bell curve with each band shaded and the rule explained.",
+      "url": "https://khayyammath.com/learn/normal-distribution-68-95-99",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "statistics"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Does this rule apply to non-normal distributions?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Only approximately, and only for distributions that resemble a normal \u2014 symmetric, bell-shaped, with light tails.  For skewed distributions (income, waiting times) the rule overestimates the central mass.  For heavy-tailed distributions (stock returns, earthquake magnitudes) the rule dramatically underestimates the tail probabilities."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why these particular percentages?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "They come from integrating the normal density between \u00b11\u03c3, \u00b12\u03c3, \u00b13\u03c3.  The exact values are 68.27%, 95.45%, 99.73% \u2014 but the rounded 68, 95, 99.7 are easier to memorise and accurate enough for back-of-envelope work."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Where does the normal distribution come from?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "From the Central Limit Theorem: the sum (or average) of many independent random variables, each with finite variance, converges to a normal distribution.  That's why measurement errors, test scores, and many natural quantities turn out to be approximately normal."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What's beyond 3\u03c3?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "About 0.27% \u2014 roughly 1 in 370 observations.  Beyond 4\u03c3: 1 in 16,000.  Beyond 5\u03c3: 1 in 1.7 million.  The tails of a normal are spectacularly thin, which is why real-world data with rare extreme events (financial crashes, viral content) is poorly modelled as normal."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    The 68–95–99.7 rule for the normal distribution
+  </div>
+
+  <h1>The 68–95–99.7 rule for the normal distribution</h1>
+  <p class="subtitle">Why almost every observation from a normal distribution sits within three standard deviations of the mean — and how the percentages stack up.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 320" aria-label="Standard normal bell curve with the 68, 95, and 99.7 percent bands shaded"><polygon points="98.8,267.7 103.2,267.1 107.6,266.4 112.0,265.5 116.4,264.5 120.8,263.3 125.2,261.8 129.6,260.1 134.0,258.2 138.4,255.9 142.8,253.2 147.2,250.2 151.6,246.7 156.0,242.8 160.4,238.5 164.8,233.6 169.2,228.2 173.7,222.3 178.1,215.9 182.5,209.0 186.9,201.5 191.3,193.6 195.7,185.2 200.1,176.4 204.5,167.3 208.9,157.9 213.3,148.4 217.7,138.8 222.1,129.3 226.5,119.9 230.9,110.7 235.3,102.0 239.8,93.8 244.2,86.2 248.6,79.3 253.0,73.3 257.4,68.3 261.8,64.3 266.2,61.4 270.6,59.6 275.0,59.0 279.4,59.6 283.8,61.4 288.2,64.3 292.6,68.3 297.0,73.3 301.4,79.3 305.8,86.2 310.2,93.8 314.7,102.0 319.1,110.7 323.5,119.9 327.9,129.3 332.3,138.8 336.7,148.4 341.1,157.9 345.5,167.3 349.9,176.4 354.3,185.2 358.7,193.6 363.1,201.5 367.5,209.0 371.9,215.9 376.3,222.3 380.8,228.2 385.2,233.6 389.6,238.5 394.0,242.8 398.4,246.7 402.8,250.2 407.2,253.2 411.6,255.9 416.0,258.2 420.4,260.1 424.8,261.8 429.2,263.3 433.6,264.5 438.0,265.5 442.4,266.4 446.8,267.1 451.2,267.7 451.2,270.0 98.8,270.0"   fill="#eaf2fc"/><polygon points="157.5,241.4 160.4,238.5 163.4,235.3 166.3,231.9 169.2,228.2 172.2,224.4 175.1,220.3 178.1,215.9 181.0,211.3 183.9,206.5 186.9,201.5 189.8,196.3 192.8,190.8 195.7,185.2 198.6,179.4 201.6,173.4 204.5,167.3 207.4,161.1 210.4,154.8 213.3,148.4 216.2,142.0 219.2,135.6 222.1,129.3 225.1,123.0 228.0,116.8 230.9,110.7 233.9,104.9 236.8,99.2 239.8,93.8 242.7,88.6 245.6,83.8 248.6,79.3 251.5,75.2 254.4,71.5 257.4,68.3 260.3,65.5 263.2,63.2 266.2,61.4 269.1,60.1 272.1,59.3 275.0,59.0 277.9,59.3 280.9,60.1 283.8,61.4 286.8,63.2 289.7,65.5 292.6,68.3 295.6,71.5 298.5,75.2 301.4,79.3 304.4,83.8 307.3,88.6 310.2,93.8 313.2,99.2 316.1,104.9 319.1,110.7 322.0,116.8 324.9,123.0 327.9,129.3 330.8,135.6 333.8,142.0 336.7,148.4 339.6,154.8 342.6,161.1 345.5,167.3 348.4,173.4 351.4,179.4 354.3,185.2 357.2,190.8 360.2,196.3 363.1,201.5 366.1,206.5 369.0,211.3 371.9,215.9 374.9,220.3 377.8,224.4 380.8,228.2 383.7,231.9 386.6,235.3 389.6,238.5 392.5,241.4 392.5,270.0 157.5,270.0"   fill="#bcd6f5"/><polygon points="216.2,142.0 217.7,138.8 219.2,135.6 220.7,132.4 222.1,129.3 223.6,126.1 225.1,123.0 226.5,119.9 228.0,116.8 229.5,113.7 230.9,110.7 232.4,107.8 233.9,104.9 235.3,102.0 236.8,99.2 238.3,96.4 239.8,93.8 241.2,91.2 242.7,88.6 244.2,86.2 245.6,83.8 247.1,81.5 248.6,79.3 250.0,77.2 251.5,75.2 253.0,73.3 254.4,71.5 255.9,69.9 257.4,68.3 258.8,66.8 260.3,65.5 261.8,64.3 263.2,63.2 264.7,62.2 266.2,61.4 267.7,60.6 269.1,60.1 270.6,59.6 272.1,59.3 273.5,59.1 275.0,59.0 276.5,59.1 277.9,59.3 279.4,59.6 280.9,60.1 282.3,60.6 283.8,61.4 285.3,62.2 286.8,63.2 288.2,64.3 289.7,65.5 291.2,66.8 292.6,68.3 294.1,69.9 295.6,71.5 297.0,73.3 298.5,75.2 300.0,77.2 301.4,79.3 302.9,81.5 304.4,83.8 305.8,86.2 307.3,88.6 308.8,91.2 310.2,93.8 311.7,96.4 313.2,99.2 314.7,102.0 316.1,104.9 317.6,107.8 319.1,110.7 320.5,113.7 322.0,116.8 323.5,119.9 324.9,123.0 326.4,126.1 327.9,129.3 329.3,132.4 330.8,135.6 332.3,138.8 333.8,142.0 333.8,270.0 216.2,270.0"   fill="#7eaff0"/><line x1="40" y1="270.0" x2="510" y2="270.0" stroke="#999" stroke-width="1.1"/><line x1="40.0" y1="267.0" x2="40.0" y2="273.0" stroke="#999"/><text x="40.0" y="286.0" font-size="11" font-family="serif" text-anchor="middle">-4σ</text><line x1="98.8" y1="267.0" x2="98.8" y2="273.0" stroke="#999"/><text x="98.8" y="286.0" font-size="11" font-family="serif" text-anchor="middle">-3σ</text><line x1="157.5" y1="267.0" x2="157.5" y2="273.0" stroke="#999"/><text x="157.5" y="286.0" font-size="11" font-family="serif" text-anchor="middle">-2σ</text><line x1="216.2" y1="267.0" x2="216.2" y2="273.0" stroke="#999"/><text x="216.2" y="286.0" font-size="11" font-family="serif" text-anchor="middle">-1σ</text><line x1="275.0" y1="267.0" x2="275.0" y2="273.0" stroke="#999"/><text x="275.0" y="286.0" font-size="11" font-family="serif" text-anchor="middle">μ</text><line x1="333.8" y1="267.0" x2="333.8" y2="273.0" stroke="#999"/><text x="333.8" y="286.0" font-size="11" font-family="serif" text-anchor="middle">+1σ</text><line x1="392.5" y1="267.0" x2="392.5" y2="273.0" stroke="#999"/><text x="392.5" y="286.0" font-size="11" font-family="serif" text-anchor="middle">+2σ</text><line x1="451.2" y1="267.0" x2="451.2" y2="273.0" stroke="#999"/><text x="451.2" y="286.0" font-size="11" font-family="serif" text-anchor="middle">+3σ</text><line x1="510.0" y1="267.0" x2="510.0" y2="273.0" stroke="#999"/><text x="510.0" y="286.0" font-size="11" font-family="serif" text-anchor="middle">+4σ</text><polyline points="40.0,269.9 42.9,269.9 45.9,269.9 48.8,269.9 51.8,269.8 54.7,269.8 57.6,269.8 60.6,269.7 63.5,269.7 66.4,269.6 69.4,269.5 72.3,269.5 75.2,269.3 78.2,269.2 81.1,269.1 84.1,268.9 87.0,268.7 89.9,268.5 92.9,268.3 95.8,268.0 98.8,267.7 101.7,267.3 104.6,266.9 107.6,266.4 110.5,265.8 113.4,265.2 116.4,264.5 119.3,263.7 122.2,262.8 125.2,261.8 128.1,260.7 131.1,259.5 134.0,258.2 136.9,256.7 139.9,255.0 142.8,253.2 145.8,251.2 148.7,249.1 151.6,246.7 154.6,244.2 157.5,241.4 160.4,238.5 163.4,235.3 166.3,231.9 169.2,228.2 172.2,224.4 175.1,220.3 178.1,215.9 181.0,211.3 183.9,206.5 186.9,201.5 189.8,196.3 192.8,190.8 195.7,185.2 198.6,179.4 201.6,173.4 204.5,167.3 207.4,161.1 210.4,154.8 213.3,148.4 216.2,142.0 219.2,135.6 222.1,129.3 225.1,123.0 228.0,116.8 230.9,110.7 233.9,104.9 236.8,99.2 239.8,93.8 242.7,88.6 245.6,83.8 248.6,79.3 251.5,75.2 254.4,71.5 257.4,68.3 260.3,65.5 263.2,63.2 266.2,61.4 269.1,60.1 272.1,59.3 275.0,59.0 277.9,59.3 280.9,60.1 283.8,61.4 286.8,63.2 289.7,65.5 292.6,68.3 295.6,71.5 298.5,75.2 301.4,79.3 304.4,83.8 307.3,88.6 310.2,93.8 313.2,99.2 316.1,104.9 319.1,110.7 322.0,116.8 324.9,123.0 327.9,129.3 330.8,135.6 333.8,142.0 336.7,148.4 339.6,154.8 342.6,161.1 345.5,167.3 348.4,173.4 351.4,179.4 354.3,185.2 357.2,190.8 360.2,196.3 363.1,201.5 366.1,206.5 369.0,211.3 371.9,215.9 374.9,220.3 377.8,224.4 380.8,228.2 383.7,231.9 386.6,235.3 389.6,238.5 392.5,241.4 395.4,244.2 398.4,246.7 401.3,249.1 404.2,251.2 407.2,253.2 410.1,255.0 413.1,256.7 416.0,258.2 418.9,259.5 421.9,260.7 424.8,261.8 427.8,262.8 430.7,263.7 433.6,264.5 436.6,265.2 439.5,265.8 442.4,266.4 445.4,266.9 448.3,267.3 451.2,267.7 454.2,268.0 457.1,268.3 460.1,268.5 463.0,268.7 465.9,268.9 468.9,269.1 471.8,269.2 474.8,269.3 477.7,269.5 480.6,269.5 483.6,269.6 486.5,269.7 489.4,269.7 492.4,269.8 495.3,269.8 498.2,269.8 501.2,269.9 504.1,269.9 507.1,269.9 510.0,269.9" fill="none" stroke="#2a6fd6" stroke-width="2.2"/><text x="275.0" y="174.8" font-size="13" font-family="serif" text-anchor="middle" fill="#1a1a1a">68%</text><text x="363.1" y="238.3" font-size="11" font-family="serif" text-anchor="middle" fill="#1a1a1a">95% within ±2σ</text><text x="433.6" y="262.1" font-size="10" font-family="serif" text-anchor="middle" fill="#444">99.7% within ±3σ</text><text x="270" y="22" font-size="14" font-family="serif" text-anchor="middle">Normal distribution — the 68 / 95 / 99.7 rule</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20normal%20distribution%20bell%20curve%20with%20the%2068-95-99.7%20rule%20shaded"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>The normal (or Gaussian) distribution is the symmetric
+bell-shaped curve described by f(x) = (1/(σ√(2π)))·exp(−(x −
+μ)²/(2σ²)), with two parameters: the mean μ (where the peak
+sits) and the standard deviation σ (how wide the bell is).</p><p>For ANY normal distribution — regardless of μ and σ — the
+following always holds:</p><pre>    within ±1σ of the mean:  about 68.27% of the probability
+    within ±2σ of the mean:  about 95.45% of the probability
+    within ±3σ of the mean:  about 99.73% of the probability</pre><p>These are exact integrals of the normal density, rounded to
+the familiar 68 / 95 / 99.7 percentages.  The figure shades
+the three bands in nested shades around the mean.</p><p>The rule is the reason σ is such a useful unit for the
+normal: distances from the mean measured in σ have
+distribution-independent meaning.  "Three sigma" is shorthand
+for "an event so rare it should happen well under 1% of the
+time".</p>
+  <h2>Where it shows up</h2>
+    <p>The 68–95–99.7 rule lets you eyeball whether a measurement
+is unusual without consulting a normal-distribution table.  A
+body temperature 2σ above your personal mean is in the top
+2.5% of your distribution — worth taking seriously.  An
+industrial process yielding parts 3σ outside spec is in the
+bottom 0.135%, the classical Six Sigma quality threshold
+(which targets even tighter bounds at 4.5σ).</p>
+    <p>In physics, three-sigma is the threshold for an "evidence"-
+level result and five-sigma is required for a discovery
+claim (probability under a chance fluctuation: 0.00006%).
+Both conventions are direct applications of the same tail-area
+integrals.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>Does this rule apply to non-normal distributions?</summary>
+      <p>Only approximately, and only for distributions that resemble a normal — symmetric, bell-shaped, with light tails.  For skewed distributions (income, waiting times) the rule overestimates the central mass.  For heavy-tailed distributions (stock returns, earthquake magnitudes) the rule dramatically underestimates the tail probabilities.</p>
+    </details>
+    <details>
+      <summary>Why these particular percentages?</summary>
+      <p>They come from integrating the normal density between ±1σ, ±2σ, ±3σ.  The exact values are 68.27%, 95.45%, 99.73% — but the rounded 68, 95, 99.7 are easier to memorise and accurate enough for back-of-envelope work.</p>
+    </details>
+    <details>
+      <summary>Where does the normal distribution come from?</summary>
+      <p>From the Central Limit Theorem: the sum (or average) of many independent random variables, each with finite variance, converges to a normal distribution.  That's why measurement errors, test scores, and many natural quantities turn out to be approximately normal.</p>
+    </details>
+    <details>
+      <summary>What's beyond 3σ?</summary>
+      <p>About 0.27% — roughly 1 in 370 observations.  Beyond 4σ: 1 in 16,000.  Beyond 5σ: 1 in 1.7 million.  The tails of a normal are spectacularly thin, which is why real-world data with rare extreme events (financial crashes, viral content) is poorly modelled as normal.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/binomial-pmf">Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

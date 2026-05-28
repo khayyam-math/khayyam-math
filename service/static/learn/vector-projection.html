@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Vector projection: dropping a onto b | Khayyam Math</title>
+<meta name="description" content="The projection of vector a onto vector b is proj_b(a) = (a·b / |b|²)·b — the component of a that points along b. Worked example with a = (4, 3) and b = (5, 0), giving the projection (4, 0).">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/vector-projection">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Vector projection: dropping a onto b">
+<meta property="og:description" content="The component of one vector that lies along another — the geometric move behind least-squares regression, Gram-Schmidt, and almost every dot-product application.">
+<meta property="og:url" content="https://khayyammath.com/learn/vector-projection">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Vector projection: dropping a onto b">
+<meta name="twitter:description" content="The component of one vector that lies along another — the geometric move behind least-squares regression, Gram-Schmidt, and almost every dot-product application.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/vector-projection",
+      "url": "https://khayyammath.com/learn/vector-projection",
+      "name": "Vector projection: dropping a onto b",
+      "description": "The projection of vector a onto vector b is proj_b(a) = (a\u00b7b / |b|\u00b2)\u00b7b \u2014 the component of a that points along b. Worked example with a = (4, 3) and b = (5, 0), giving the projection (4, 0).",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Vector projection: dropping a onto b"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "Vector projection: dropping a onto b",
+      "description": "The projection of vector a onto vector b is proj_b(a) = (a\u00b7b / |b|\u00b2)\u00b7b \u2014 the component of a that points along b. Worked example with a = (4, 3) and b = (5, 0), giving the projection (4, 0).",
+      "url": "https://khayyammath.com/learn/vector-projection",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "linear-algebra"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What if a is perpendicular to b?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Then a \u00b7 b = 0, the scalar coefficient is 0, and proj_b(a) is the zero vector.  This is exactly what you'd expect \u2014 a has no component along b \u2014 and it's the test that two vectors are perpendicular in the first place."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why divide by |b|\u00b2 instead of |b|?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The dot product a \u00b7 b is proportional to |b|, so to extract the *length* of a along b (a scalar called the scalar projection) you divide by |b|.  To then turn that scalar back into a *vector* along b you multiply by b/|b|.  Combined, you divide once by |b| and once by |b|, i.e. once by |b|\u00b2."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is proj_b(a) the same as proj_a(b)?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Not in general \u2014 the projection of a onto b lives on the line through b, while the projection of b onto a lives on the line through a.  They agree only in trivial cases (e.g., when a and b are parallel)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does this work in 3D?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes \u2014 and in any dimension.  The formula proj_b(a) = (a\u00b7b / |b|\u00b2)\u00b7b is identical; the dot product just sums more components.  The same idea works in function spaces too (e.g. Fourier coefficients are projections onto sin and cos basis functions)."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    Vector projection: dropping a onto b
+  </div>
+
+  <h1>Vector projection: dropping a onto b</h1>
+  <p class="subtitle">The component of one vector that lies along another — the geometric move behind least-squares regression, Gram-Schmidt, and almost every dot-product application.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" aria-label="Projection of vector a = (4, 3) onto vector b = (5, 0)"><defs><marker id="arr" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,-5L10,0L0,5" fill="#1a1a1a"/></marker><marker id="arrB" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,-5L10,0L0,5" fill="#27ae60"/></marker><marker id="arrA" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,-5L10,0L0,5" fill="#2a6fd6"/></marker><marker id="arrP" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,-5L10,0L0,5" fill="#c0392b"/></marker></defs><line x1="40" y1="250" x2="470" y2="250" stroke="#bbb" stroke-width="1"/><line x1="60" y1="40" x2="60" y2="280" stroke="#bbb" stroke-width="1"/><line x1="100" y1="247" x2="100" y2="253" stroke="#bbb"/><text x="100" y="266" font-size="11" font-family="serif" text-anchor="middle" fill="#666">1</text><line x1="140" y1="247" x2="140" y2="253" stroke="#bbb"/><text x="140" y="266" font-size="11" font-family="serif" text-anchor="middle" fill="#666">2</text><line x1="180" y1="247" x2="180" y2="253" stroke="#bbb"/><text x="180" y="266" font-size="11" font-family="serif" text-anchor="middle" fill="#666">3</text><line x1="220" y1="247" x2="220" y2="253" stroke="#bbb"/><text x="220" y="266" font-size="11" font-family="serif" text-anchor="middle" fill="#666">4</text><line x1="260" y1="247" x2="260" y2="253" stroke="#bbb"/><text x="260" y="266" font-size="11" font-family="serif" text-anchor="middle" fill="#666">5</text><line x1="57" y1="210" x2="63" y2="210" stroke="#bbb"/><text x="52" y="214" font-size="11" font-family="serif" text-anchor="end" fill="#666">1</text><line x1="57" y1="170" x2="63" y2="170" stroke="#bbb"/><text x="52" y="174" font-size="11" font-family="serif" text-anchor="end" fill="#666">2</text><line x1="57" y1="130" x2="63" y2="130" stroke="#bbb"/><text x="52" y="134" font-size="11" font-family="serif" text-anchor="end" fill="#666">3</text><line x1="60" y1="250" x2="260" y2="250" stroke="#27ae60" stroke-width="2.5" marker-end="url(#arrB)"/><text x="268" y="254" font-size="14" font-family="serif" fill="#27ae60">b = (5, 0)</text><line x1="60" y1="250" x2="220" y2="130" stroke="#2a6fd6" stroke-width="2.5" marker-end="url(#arrA)"/><text x="214" y="122" font-size="14" font-family="serif" fill="#2a6fd6" text-anchor="end">a = (4, 3)</text><line x1="220" y1="130" x2="220" y2="250" stroke="#888" stroke-width="1.6" stroke-dasharray="5,4"/><line x1="60" y1="250" x2="220" y2="250" stroke="#c0392b" stroke-width="3.2" marker-end="url(#arrP)"/><text x="140.0" y="280" font-size="13" font-family="serif" fill="#c0392b" text-anchor="middle">proj_b(a) = (4, 0)</text><text x="48" y="266" font-size="11" font-family="serif" fill="#666" text-anchor="end">O</text><text x="250" y="22" font-size="14" font-family="serif" text-anchor="middle">proj_b(a) = (a·b / |b|²)·b  =  (20 / 25)·(5, 0)  =  (4, 0)</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20projection%20of%20vector%20a%20%3D%20%284%2C%203%29%20onto%20vector%20b%20%3D%20%285%2C%200%29"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>Given two vectors a and b in the plane, the projection of a
+onto b — written proj_b(a) — is the vector that lies along b
+and reaches the foot of the perpendicular dropped from the tip
+of a onto the line through b.  In formula form:</p><pre>    proj_b(a) = (a · b / |b|²) · b</pre><p>where a · b is the dot product and |b|² = b · b.  The dot
+product captures how much of a points in the b-direction; you
+divide by |b|² to convert that into a length along b, then
+multiply by b itself to make it a vector.</p><p>For a = (4, 3) and b = (5, 0):</p><pre>    a · b   = 4·5 + 3·0 = 20
+    |b|²    = 25 + 0    = 25
+    scalar  = 20 / 25   = 4/5
+    proj    = (4/5) · (5, 0) = (4, 0)</pre><p>Geometrically: b lies on the x-axis, so projecting any vector
+onto b just keeps its x-component.  The figure shows a as the
+full arrow, proj_b(a) as the shorter arrow along b, and a
+dashed perpendicular dropping from the tip of a to the tip of
+the projection.</p>
+  <h2>Where it shows up</h2>
+    <p>Projections are the geometric core of least-squares regression:
+when you fit a line to noisy data, the fitted line minimises
+the sum of squared perpendicular distances, which is exactly
+the projection of the data vector onto the column space of the
+design matrix.</p>
+    <p>They are also the engine of the Gram-Schmidt process, which
+turns any basis into an orthonormal one by successively
+subtracting off projections.  In computer graphics, the
+shading model at every pixel depends on the projection of the
+light direction onto the surface normal — Lambert's cosine
+law in disguise.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>What if a is perpendicular to b?</summary>
+      <p>Then a · b = 0, the scalar coefficient is 0, and proj_b(a) is the zero vector.  This is exactly what you'd expect — a has no component along b — and it's the test that two vectors are perpendicular in the first place.</p>
+    </details>
+    <details>
+      <summary>Why divide by |b|² instead of |b|?</summary>
+      <p>The dot product a · b is proportional to |b|, so to extract the *length* of a along b (a scalar called the scalar projection) you divide by |b|.  To then turn that scalar back into a *vector* along b you multiply by b/|b|.  Combined, you divide once by |b| and once by |b|, i.e. once by |b|².</p>
+    </details>
+    <details>
+      <summary>Is proj_b(a) the same as proj_a(b)?</summary>
+      <p>Not in general — the projection of a onto b lives on the line through b, while the projection of b onto a lives on the line through a.  They agree only in trivial cases (e.g., when a and b are parallel).</p>
+    </details>
+    <details>
+      <summary>Does this work in 3D?</summary>
+      <p>Yes — and in any dimension.  The formula proj_b(a) = (a·b / |b|²)·b is identical; the dot product just sums more components.  The same idea works in function spaces too (e.g. Fourier coefficients are projections onto sin and cos basis functions).</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/matrix-inverse-3x3">Matrix inverse of a 3×3: the adjugate-and-determinant method</a></li>
+      <li><a href="/learn/eigenvalues-2x2">Eigenvalues of a 2×2 matrix from det(A − λI) = 0</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

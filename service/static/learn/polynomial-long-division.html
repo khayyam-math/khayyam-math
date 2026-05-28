@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>Polynomial long division: (x³ − 2x² + 4x − 8) ÷ (x − 2) | Khayyam Math</title>
+<meta name="description" content="Polynomial long division divides one polynomial by another, term by term, exactly like the long-division algorithm for integers. Worked example dividing x³ − 2x² + 4x − 8 by x − 2 to get quotient x² + 4 with zero remainder.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/polynomial-long-division">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Polynomial long division: (x³ − 2x² + 4x − 8) ÷ (x − 2)">
+<meta property="og:description" content="The systematic recipe for dividing one polynomial by another, written out the same way you divided whole numbers in primary school.">
+<meta property="og:url" content="https://khayyammath.com/learn/polynomial-long-division">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Polynomial long division: (x³ − 2x² + 4x − 8) ÷ (x − 2)">
+<meta name="twitter:description" content="The systematic recipe for dividing one polynomial by another, written out the same way you divided whole numbers in primary school.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/polynomial-long-division",
+      "url": "https://khayyammath.com/learn/polynomial-long-division",
+      "name": "Polynomial long division: (x\u00b3 \u2212 2x\u00b2 + 4x \u2212 8) \u00f7 (x \u2212 2)",
+      "description": "Polynomial long division divides one polynomial by another, term by term, exactly like the long-division algorithm for integers. Worked example dividing x\u00b3 \u2212 2x\u00b2 + 4x \u2212 8 by x \u2212 2 to get quotient x\u00b2 + 4 with zero remainder.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "Polynomial long division: (x\u00b3 \u2212 2x\u00b2 + 4x \u2212 8) \u00f7 (x \u2212 2)"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "Polynomial long division: (x\u00b3 \u2212 2x\u00b2 + 4x \u2212 8) \u00f7 (x \u2212 2)",
+      "description": "Polynomial long division divides one polynomial by another, term by term, exactly like the long-division algorithm for integers. Worked example dividing x\u00b3 \u2212 2x\u00b2 + 4x \u2212 8 by x \u2212 2 to get quotient x\u00b2 + 4 with zero remainder.",
+      "url": "https://khayyammath.com/learn/polynomial-long-division",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "algebra"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What if the remainder isn't zero?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Then the divisor isn't a factor of the dividend.  The general result is dividend = (divisor \u00b7 quotient) + remainder, where the remainder polynomial has lower degree than the divisor.  For divisor (x \u2212 r), the remainder is just the constant value of the dividend evaluated at r \u2014 that's the remainder theorem."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I always divide a polynomial by (x \u2212 r)?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes \u2014 for any constant r, polynomial division by the linear factor (x \u2212 r) always succeeds and produces a quotient of degree one less than the dividend, plus a constant remainder equal to dividend(r)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does this compare to synthetic division?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Synthetic division is a shortcut for the specific case where the divisor is (x \u2212 r).  It tracks only the coefficients, in a tabular layout that's faster by hand.  Long division generalises to any divisor degree; synthetic division does not."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why was the remainder zero in the example?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Because x = 2 happens to be a root of x\u00b3 \u2212 2x\u00b2 + 4x \u2212 8.  Substitute: 8 \u2212 8 + 8 \u2212 8 = 0.  The factor theorem then says (x \u2212 2) must divide the polynomial exactly."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    Polynomial long division: (x³ − 2x² + 4x − 8) ÷ (x − 2)
+  </div>
+
+  <h1>Polynomial long division: (x³ − 2x² + 4x − 8) ÷ (x − 2)</h1>
+  <p class="subtitle">The systematic recipe for dividing one polynomial by another, written out the same way you divided whole numbers in primary school.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 290" aria-label="Polynomial long division of x cubed minus two x squared plus four x minus eight, divided by x minus two"><text x="230" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">x²</text><text x="430" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">+ 4</text><line x1="200" y1="64" x2="470" y2="64" stroke="#1a1a1a" stroke-width="1.6"/><line x1="194" y1="64" x2="194" y2="92" stroke="#1a1a1a" stroke-width="1.6"/><text x="186" y="88" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="end">x − 2</text><text x="230" y="88" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">x³</text><text x="300" y="88" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">− 2x²</text><text x="370" y="88" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">+ 4x</text><text x="430" y="88" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">− 8</text><text x="230" y="116" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">−(x³</text><text x="300" y="116" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">− 2x²)</text><line x1="202" y1="124" x2="330" y2="124" stroke="#1a1a1a" stroke-width="1.2"/><text x="300" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">0</text><text x="370" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">+ 4x</text><text x="430" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">− 8</text><text x="370" y="176" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">−(4x</text><text x="430" y="176" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" text-anchor="middle">− 8)</text><line x1="342" y1="184" x2="456" y2="184" stroke="#1a1a1a" stroke-width="1.2"/><text x="430" y="208" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#27ae60" text-anchor="middle">0</text><text x="270" y="252" font-size="15" font-family="serif" text-anchor="middle">x³ − 2x² + 4x − 8 = (x − 2)(x² + 4)</text><text x="270" y="274" font-size="13" font-family="serif" fill="#666" text-anchor="middle">remainder 0, so (x − 2) is a factor</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20polynomial%20long%20division%20of%20x%5E3%20-%202x%5E2%20%2B%204x%20-%208%20by%20x%20-%202%20step%20by%20step"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>Polynomial long division divides one polynomial (the dividend)
+by another (the divisor) to produce a quotient polynomial and a
+remainder polynomial — the same shape of result as integer long
+division.  The algorithm is mechanical:</p><p>1. Divide the leading term of the dividend by the leading</p><pre>     term of the divisor.  That gives the next quotient term.</pre><p>2. Multiply the whole divisor by that quotient term and</p><pre>     subtract from the dividend.</pre><p>3. Repeat with the new (smaller-degree) dividend until the</p><pre>     remaining polynomial has lower degree than the divisor.</pre><p>Working through (x³ − 2x² + 4x − 8) ÷ (x − 2):</p><pre>    Step 1: x³ / x = x².  Multiply: x²·(x − 2) = x³ − 2x².
+            Subtract from dividend:
+            (x³ − 2x² + 4x − 8) − (x³ − 2x²) = 4x − 8.
+    Step 2: 4x / x = 4.   Multiply: 4·(x − 2) = 4x − 8.
+            Subtract: (4x − 8) − (4x − 8) = 0.</pre><p>So x³ − 2x² + 4x − 8 = (x − 2)(x² + 4), exactly — the remainder
+is zero, which means x = 2 is a root of the dividend.  This is
+the converse of the factor theorem: if (x − r) divides a
+polynomial cleanly, then r is a root, and vice versa.</p>
+  <h2>Where it shows up</h2>
+    <p>Long division is the building block of root-finding for higher-
+degree polynomials.  Once you've found one root r by guessing or
+by the rational-root theorem, dividing by (x − r) reduces a
+cubic to a quadratic, a quartic to a cubic, and so on — until
+the residual polynomial is small enough that the quadratic
+formula finishes the job.</p>
+    <p>The same algorithm shows up in computer algebra systems'
+polynomial-GCD routines and in error-correcting codes, where
+cyclic redundancy checks (CRCs) and Reed-Solomon decoders both
+rely on polynomial long division over finite fields.</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>What if the remainder isn't zero?</summary>
+      <p>Then the divisor isn't a factor of the dividend.  The general result is dividend = (divisor · quotient) + remainder, where the remainder polynomial has lower degree than the divisor.  For divisor (x − r), the remainder is just the constant value of the dividend evaluated at r — that's the remainder theorem.</p>
+    </details>
+    <details>
+      <summary>Can I always divide a polynomial by (x − r)?</summary>
+      <p>Yes — for any constant r, polynomial division by the linear factor (x − r) always succeeds and produces a quotient of degree one less than the dividend, plus a constant remainder equal to dividend(r).</p>
+    </details>
+    <details>
+      <summary>How does this compare to synthetic division?</summary>
+      <p>Synthetic division is a shortcut for the specific case where the divisor is (x − r).  It tracks only the coefficients, in a tabular layout that's faster by hand.  Long division generalises to any divisor degree; synthetic division does not.</p>
+    </details>
+    <details>
+      <summary>Why was the remainder zero in the example?</summary>
+      <p>Because x = 2 happens to be a root of x³ − 2x² + 4x − 8.  Substitute: 8 − 8 + 8 − 8 = 0.  The factor theorem then says (x − 2) must divide the polynomial exactly.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/quadratic-formula">The quadratic formula: x = (−b ± √(b² − 4ac)) / 2a</a></li>
+      <li><a href="/learn/omar-khayyam-cubic-roots">Omar Khayyam's geometric solution to the cubic x³ + bx = c</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>

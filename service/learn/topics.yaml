@@ -61,6 +61,7 @@
       a: "tan θ = sin θ / cos θ, which geometrically is the slope of the terminal ray.  So tan is undefined whenever the ray is vertical — at 90° and 270°.  Some textbooks draw a separate vertical tangent line to the circle at (1, 0) to read tan directly off."
   related:
     - pythagorean-theorem
+    - taylor-series-sin-x
     - quadratic-formula
 
 - slug: pythagorean-theorem
@@ -117,6 +118,7 @@
       a: "Yes — the diagonal of a rectangular box with sides a, b, c has length √(a² + b² + c²).  This is just Pythagoras applied twice: once in the base (giving √(a² + b²)) and once vertically with that diagonal as one leg and c as the other."
   related:
     - unit-circle
+    - triangle-area-heron
     - quadratic-formula
 
 - slug: quadratic-formula
@@ -179,8 +181,9 @@
     - q: "What's the discriminant good for?"
       a: "Just looking at b² − 4ac tells you how many real roots there are without actually solving the equation.  Useful when you only care about existence (e.g., 'will this projectile ever hit the wall?' or 'does this curve cross zero?')."
   related:
+    - polynomial-long-division
+    - omar-khayyam-cubic-roots
     - pythagorean-theorem
-    - unit-circle
 
 - slug: dfa-construction
   branch: discrete-math
@@ -249,8 +252,8 @@
     - q: "How do real-world regex engines differ?"
       a: "They usually start by parsing the regex into an NFA, then either run the NFA directly or convert to a DFA.  Backreferences (\\1, \\2) push you out of regular languages entirely, which is why patterns using them are exponentially slower."
   related:
+    - graph-bfs-vs-dfs
     - matrix-inverse-3x3
-    - quadratic-formula
 
 - slug: matrix-inverse-3x3
   branch: linear-algebra
@@ -336,5 +339,677 @@
     - q: "Why is the inverse unique when it exists?"
       a: "If both B and C were inverses of A, then B = B·I = B·(A·C) = (B·A)·C = I·C = C.  So any two candidates must be equal — there's at most one inverse, and the adjugate formula either produces it (when det A ≠ 0) or fails to (when det A = 0)."
   related:
-    - quadratic-formula
+    - vector-projection
+    - eigenvalues-2x2
     - dfa-construction
+
+- slug: triangle-area-heron
+  branch: geometry
+  title: "Heron's formula: area of a triangle from its three sides"
+  subtitle: "A two-thousand-year-old formula that gives the area of any triangle directly from the side lengths — no height needed."
+  prompt: "show a triangle with sides 5, 6, 7 and compute its area using Heron's formula"
+  meta_description: >-
+    Heron's formula gives the area of a triangle from its three side
+    lengths alone: A = √(s(s−a)(s−b)(s−c)), where s is the
+    semi-perimeter.  Worked example on the 5-6-7 triangle, with
+    s = 9 and A = 6√6.
+  body_what_this_shows: |
+    Heron's formula computes the area of a triangle from the three
+    side lengths a, b, c without ever needing to know any of its
+    angles or any of its altitudes.  Let
+
+        s = (a + b + c) / 2
+
+    be the semi-perimeter — half the perimeter — and then
+
+        A = √(s · (s − a) · (s − b) · (s − c))
+
+    For the 5-6-7 triangle in the figure:
+
+        s        = (5 + 6 + 7) / 2  = 9
+        s − a    = 9 − 5 = 4
+        s − b    = 9 − 6 = 3
+        s − c    = 9 − 7 = 2
+        product  = 9 · 4 · 3 · 2 = 216
+        A        = √216 = 6√6 ≈ 14.697
+
+    The formula is named after Hero (or Heron) of Alexandria, who
+    proved it in his Metrica around 60 CE, though there is evidence
+    Archimedes knew it three centuries earlier.  It works for every
+    real triangle — equilateral, isosceles, scalene, right-angled
+    or obtuse — provided the three lengths actually form a
+    triangle (each side strictly less than the sum of the other two).
+  body_applications: |
+    Heron's formula is the working tool whenever you know three
+    side lengths but not the angles: surveying a plot of land from
+    three measured fence-lengths, computing the area of an irregular
+    polygon by triangulating it, or sanity-checking a triangle in a
+    CAD drawing where the angle annotations might be wrong.
+
+    The formula also lets you check whether three given lengths
+    even *form* a valid triangle.  If the product s(s−a)(s−b)(s−c)
+    comes out negative or zero, one of the lengths is too long
+    relative to the other two — the triangle inequality fails and
+    no triangle exists.
+  faq:
+    - q: "Why no height?"
+      a: "The usual area formula A = ½·base·height needs you to know an altitude, which often isn't given.  Heron's formula trades the altitude for an extra side length, and you usually have all three sides."
+    - q: "Does it work for degenerate triangles?"
+      a: "If one side equals the sum of the other two, the three points are colinear — no real triangle.  Heron's formula returns zero, which is the right answer: a degenerate triangle has zero area."
+    - q: "Where does the formula come from?"
+      a: "Several derivations exist.  The classical one uses the Pythagorean theorem on the altitude dropped from one vertex.  A more modern derivation expands the cross-product magnitude |b−a × c−a| / 2 and rearranges.  Either way you end up at the same symmetric expression in a, b, c."
+    - q: "Is there a 3D analogue?"
+      a: "Yes — the Cayley-Menger determinant generalises Heron's formula to compute the volume of a tetrahedron from its six edge lengths.  The expression is uglier but follows the same idea: edge lengths alone determine the simplex's content."
+  related:
+    - pythagorean-theorem
+    - unit-circle
+
+- slug: polynomial-long-division
+  branch: algebra
+  title: "Polynomial long division: (x³ − 2x² + 4x − 8) ÷ (x − 2)"
+  subtitle: "The systematic recipe for dividing one polynomial by another, written out the same way you divided whole numbers in primary school."
+  prompt: "show polynomial long division of x^3 - 2x^2 + 4x - 8 by x - 2 step by step"
+  meta_description: >-
+    Polynomial long division divides one polynomial by another, term
+    by term, exactly like the long-division algorithm for integers.
+    Worked example dividing x³ − 2x² + 4x − 8 by x − 2 to get
+    quotient x² + 4 with zero remainder.
+  body_what_this_shows: |
+    Polynomial long division divides one polynomial (the dividend)
+    by another (the divisor) to produce a quotient polynomial and a
+    remainder polynomial — the same shape of result as integer long
+    division.  The algorithm is mechanical:
+
+      1. Divide the leading term of the dividend by the leading
+         term of the divisor.  That gives the next quotient term.
+      2. Multiply the whole divisor by that quotient term and
+         subtract from the dividend.
+      3. Repeat with the new (smaller-degree) dividend until the
+         remaining polynomial has lower degree than the divisor.
+
+    Working through (x³ − 2x² + 4x − 8) ÷ (x − 2):
+
+        Step 1: x³ / x = x².  Multiply: x²·(x − 2) = x³ − 2x².
+                Subtract from dividend:
+                (x³ − 2x² + 4x − 8) − (x³ − 2x²) = 4x − 8.
+        Step 2: 4x / x = 4.   Multiply: 4·(x − 2) = 4x − 8.
+                Subtract: (4x − 8) − (4x − 8) = 0.
+
+    So x³ − 2x² + 4x − 8 = (x − 2)(x² + 4), exactly — the remainder
+    is zero, which means x = 2 is a root of the dividend.  This is
+    the converse of the factor theorem: if (x − r) divides a
+    polynomial cleanly, then r is a root, and vice versa.
+  body_applications: |
+    Long division is the building block of root-finding for higher-
+    degree polynomials.  Once you've found one root r by guessing or
+    by the rational-root theorem, dividing by (x − r) reduces a
+    cubic to a quadratic, a quartic to a cubic, and so on — until
+    the residual polynomial is small enough that the quadratic
+    formula finishes the job.
+
+    The same algorithm shows up in computer algebra systems'
+    polynomial-GCD routines and in error-correcting codes, where
+    cyclic redundancy checks (CRCs) and Reed-Solomon decoders both
+    rely on polynomial long division over finite fields.
+  faq:
+    - q: "What if the remainder isn't zero?"
+      a: "Then the divisor isn't a factor of the dividend.  The general result is dividend = (divisor · quotient) + remainder, where the remainder polynomial has lower degree than the divisor.  For divisor (x − r), the remainder is just the constant value of the dividend evaluated at r — that's the remainder theorem."
+    - q: "Can I always divide a polynomial by (x − r)?"
+      a: "Yes — for any constant r, polynomial division by the linear factor (x − r) always succeeds and produces a quotient of degree one less than the dividend, plus a constant remainder equal to dividend(r)."
+    - q: "How does this compare to synthetic division?"
+      a: "Synthetic division is a shortcut for the specific case where the divisor is (x − r).  It tracks only the coefficients, in a tabular layout that's faster by hand.  Long division generalises to any divisor degree; synthetic division does not."
+    - q: "Why was the remainder zero in the example?"
+      a: "Because x = 2 happens to be a root of x³ − 2x² + 4x − 8.  Substitute: 8 − 8 + 8 − 8 = 0.  The factor theorem then says (x − 2) must divide the polynomial exactly."
+  related:
+    - quadratic-formula
+    - omar-khayyam-cubic-roots
+
+- slug: vector-projection
+  branch: linear-algebra
+  title: "Vector projection: dropping a onto b"
+  subtitle: "The component of one vector that lies along another — the geometric move behind least-squares regression, Gram-Schmidt, and almost every dot-product application."
+  prompt: "show the projection of vector a = (4, 3) onto vector b = (5, 0)"
+  meta_description: >-
+    The projection of vector a onto vector b is proj_b(a) =
+    (a·b / |b|²)·b — the component of a that points along b.
+    Worked example with a = (4, 3) and b = (5, 0), giving the
+    projection (4, 0).
+  body_what_this_shows: |
+    Given two vectors a and b in the plane, the projection of a
+    onto b — written proj_b(a) — is the vector that lies along b
+    and reaches the foot of the perpendicular dropped from the tip
+    of a onto the line through b.  In formula form:
+
+        proj_b(a) = (a · b / |b|²) · b
+
+    where a · b is the dot product and |b|² = b · b.  The dot
+    product captures how much of a points in the b-direction; you
+    divide by |b|² to convert that into a length along b, then
+    multiply by b itself to make it a vector.
+
+    For a = (4, 3) and b = (5, 0):
+
+        a · b   = 4·5 + 3·0 = 20
+        |b|²    = 25 + 0    = 25
+        scalar  = 20 / 25   = 4/5
+        proj    = (4/5) · (5, 0) = (4, 0)
+
+    Geometrically: b lies on the x-axis, so projecting any vector
+    onto b just keeps its x-component.  The figure shows a as the
+    full arrow, proj_b(a) as the shorter arrow along b, and a
+    dashed perpendicular dropping from the tip of a to the tip of
+    the projection.
+  body_applications: |
+    Projections are the geometric core of least-squares regression:
+    when you fit a line to noisy data, the fitted line minimises
+    the sum of squared perpendicular distances, which is exactly
+    the projection of the data vector onto the column space of the
+    design matrix.
+
+    They are also the engine of the Gram-Schmidt process, which
+    turns any basis into an orthonormal one by successively
+    subtracting off projections.  In computer graphics, the
+    shading model at every pixel depends on the projection of the
+    light direction onto the surface normal — Lambert's cosine
+    law in disguise.
+  faq:
+    - q: "What if a is perpendicular to b?"
+      a: "Then a · b = 0, the scalar coefficient is 0, and proj_b(a) is the zero vector.  This is exactly what you'd expect — a has no component along b — and it's the test that two vectors are perpendicular in the first place."
+    - q: "Why divide by |b|² instead of |b|?"
+      a: "The dot product a · b is proportional to |b|, so to extract the *length* of a along b (a scalar called the scalar projection) you divide by |b|.  To then turn that scalar back into a *vector* along b you multiply by b/|b|.  Combined, you divide once by |b| and once by |b|, i.e. once by |b|²."
+    - q: "Is proj_b(a) the same as proj_a(b)?"
+      a: "Not in general — the projection of a onto b lives on the line through b, while the projection of b onto a lives on the line through a.  They agree only in trivial cases (e.g., when a and b are parallel)."
+    - q: "Does this work in 3D?"
+      a: "Yes — and in any dimension.  The formula proj_b(a) = (a·b / |b|²)·b is identical; the dot product just sums more components.  The same idea works in function spaces too (e.g. Fourier coefficients are projections onto sin and cos basis functions)."
+  related:
+    - matrix-inverse-3x3
+    - eigenvalues-2x2
+
+- slug: eigenvalues-2x2
+  branch: linear-algebra
+  title: "Eigenvalues of a 2×2 matrix from det(A − λI) = 0"
+  subtitle: "The two scalars that survive when a matrix acts on its eigenvectors — found by solving one quadratic equation."
+  prompt: "find the eigenvalues of A = [[2, 1], [1, 2]] by solving det(A - lambda*I) = 0"
+  meta_description: >-
+    The eigenvalues of a 2×2 matrix A are the roots of the
+    characteristic polynomial det(A − λI) = 0.  Worked example
+    on A = [[2, 1], [1, 2]] giving λ = 1 and λ = 3, with
+    eigenvectors (1, −1) and (1, 1).
+  body_what_this_shows: |
+    An eigenvalue of a square matrix A is a scalar λ such that
+    there exists a non-zero vector v with
+
+        A · v = λ · v
+
+    Geometrically: when A acts on v it just stretches v by the
+    factor λ, without rotating it.  The vector v is called an
+    eigenvector for λ.  Eigenvalues exist for any square matrix
+    (complex ones in general, real ones for symmetric matrices).
+
+    The equation Av = λv rearranges to (A − λI)v = 0, and that has
+    a non-zero solution v exactly when (A − λI) is singular — i.e.
+    when det(A − λI) = 0.  Expanding the determinant for a 2×2
+    matrix gives the characteristic polynomial:
+
+        det(A − λI) = λ² − (trace A)·λ + (det A)
+
+    For A = [[2, 1], [1, 2]]:
+
+        trace A = 2 + 2 = 4
+        det A   = 2·2 − 1·1 = 3
+        poly    = λ² − 4λ + 3 = (λ − 1)(λ − 3)
+        roots   = λ = 1, λ = 3
+
+    Plugging each back: (A − 1·I)v = 0 forces v in the direction
+    (1, −1); (A − 3·I)v = 0 forces v in the direction (1, 1).  The
+    two eigenvectors are perpendicular, which is no accident — it
+    always happens for a symmetric matrix.
+  body_applications: |
+    Eigenvalues are the diagonal entries of a matrix once it's been
+    rotated into its eigenbasis.  Whenever you see a fast power
+    iteration, a Markov-chain stationary distribution, a principal
+    component analysis, or a normal-mode decomposition of a
+    vibrating system — eigenvalues are doing the work.
+
+    In differential equations, the eigenvalues of the system's
+    coefficient matrix decide whether a steady state is stable
+    (negative real parts), unstable (positive real parts), or
+    oscillating (purely imaginary).  In statistics, the
+    eigenvalues of a covariance matrix tell you the variance along
+    each principal axis of the data cloud.
+  faq:
+    - q: "What if the discriminant of the characteristic polynomial is negative?"
+      a: "Then the eigenvalues are a complex-conjugate pair.  Real matrices can still have complex eigenvalues — a 90° rotation matrix, for instance, has eigenvalues i and −i.  Its eigenvectors are complex, but they still satisfy Av = λv."
+    - q: "Why does the trace appear in the formula?"
+      a: "Because for any n×n matrix, the sum of the eigenvalues equals the trace, and the product equals the determinant.  For 2×2 those two facts uniquely determine the characteristic polynomial, which is why it's λ² − (trace)·λ + det."
+    - q: "Are eigenvectors unique?"
+      a: "Only up to a scalar.  If v is an eigenvector for λ, so is c·v for any non-zero scalar c.  Conventionally you normalise eigenvectors to have length 1, but the direction is the only thing that matters."
+    - q: "What if both eigenvalues are equal?"
+      a: "You get a repeated eigenvalue.  The matrix may still be diagonalisable (if there are two independent eigenvectors) or it may be defective (if there's only one), in which case you need a Jordan-form generalisation.  The simplest defective example is [[1, 1], [0, 1]], with the single eigenvalue λ = 1."
+  related:
+    - matrix-inverse-3x3
+    - vector-projection
+
+- slug: derivative-chain-rule
+  branch: calculus
+  title: "The chain rule: differentiating composite functions"
+  subtitle: "Differentiate f(g(x)) by multiplying f'(g(x)) and g'(x) — the most-used rule in all of calculus."
+  prompt: "show the chain rule applied to y = (3x^2 + 1)^5"
+  meta_description: >-
+    The chain rule says d/dx [f(g(x))] = f'(g(x)) · g'(x).
+    Worked example with y = (3x² + 1)⁵: outer derivative 5·(3x² + 1)⁴
+    times inner derivative 6x, giving dy/dx = 30x·(3x² + 1)⁴.
+  body_what_this_shows: |
+    A composite function f(g(x)) feeds the output of one function
+    into another.  The chain rule says: differentiate the outer
+    function with the inner function still inside, then multiply by
+    the derivative of the inner function.  Symbolically:
+
+        d/dx [ f(g(x)) ] = f'(g(x)) · g'(x)
+
+    For y = (3x² + 1)⁵, identify the layers:
+
+        outer  f(u) = u⁵        →   f'(u) = 5u⁴
+        inner  g(x) = 3x² + 1   →   g'(x) = 6x
+
+    Apply the rule:
+
+        dy/dx = f'(g(x)) · g'(x)
+              = 5·(3x² + 1)⁴ · 6x
+              = 30x · (3x² + 1)⁴
+
+    Notice: the inner function 3x² + 1 stays unevaluated inside
+    f'.  A common mistake is to also simplify it — but it must
+    remain because (3x² + 1) is the argument of the outer
+    derivative, not a variable to be solved for.
+  body_applications: |
+    The chain rule is the workhorse of every applied calculus
+    problem.  Related rates (a balloon's volume changing through
+    its radius), implicit differentiation (dy/dx for y² + x² = 1),
+    the gradient of any deep-learning loss function (gradient
+    descent IS the chain rule, applied many times) — all of them
+    are chain rule.
+
+    Generalisations include the multivariate chain rule (for
+    functions of several variables), the matrix chain rule (which
+    is exactly back-propagation in neural networks), and the
+    inverse-function theorem (a special case where g and f are
+    inverses).
+  faq:
+    - q: "What if there are more than two layers?"
+      a: "Apply the chain rule repeatedly, from the outside in.  For h(g(f(x))) you get h'(g(f(x))) · g'(f(x)) · f'(x).  Each layer contributes its derivative evaluated at whatever was inside it."
+    - q: "Why does it work?"
+      a: "From the definition of the derivative: Δy/Δx = (Δy/Δu)·(Δu/Δx) when u depends smoothly on x.  Letting Δx → 0 makes both ratios into derivatives, and the product becomes the chain rule.  A rigorous proof handles the case Δu = 0 separately to avoid dividing by zero."
+    - q: "How is it related to back-propagation in neural networks?"
+      a: "A neural network is a deeply nested composition of layers, each parameterised by weights.  Back-propagation computes the gradient of the loss with respect to each weight by repeated application of the chain rule, working backwards from the loss layer to the input layer.  The order of multiplication is what gives back-propagation its O(n) cost instead of O(n²)."
+    - q: "What's the multivariate version?"
+      a: "If z = f(x, y) where x = g(t) and y = h(t), then dz/dt = (∂f/∂x)·(dx/dt) + (∂f/∂y)·(dy/dt).  Each path from t to z contributes a product of partial derivatives along the path; sum over all paths."
+  related:
+    - integration-by-parts
+    - taylor-series-sin-x
+
+- slug: integration-by-parts
+  branch: calculus
+  title: "Integration by parts: ∫ u dv = uv − ∫ v du"
+  subtitle: "The integration counterpart of the product rule — the formula that handles x·eˣ, x·sin(x), x²·ln(x), and a hundred other classroom integrals."
+  prompt: "show integration by parts applied to integral of x * e^x dx"
+  meta_description: >-
+    Integration by parts gives ∫ u dv = uv − ∫ v du.  Worked
+    example evaluating ∫ x·eˣ dx by choosing u = x and dv = eˣdx,
+    yielding x·eˣ − eˣ + C.
+  body_what_this_shows: |
+    The product rule for differentiation says d(uv) = u dv + v du.
+    Integrate both sides:
+
+        uv = ∫ u dv + ∫ v du
+        ⟹  ∫ u dv = uv − ∫ v du
+
+    That is integration by parts.  The skill is in choosing which
+    factor of the integrand to call u and which to call dv: pick u
+    to be something that becomes simpler when differentiated, and
+    dv to be something easy to integrate.  A common mnemonic for
+    the priority order is LIATE — Logarithmic, Inverse trig,
+    Algebraic, Trig, Exponential — choose u as the leftmost type
+    present.
+
+    For ∫ x · eˣ dx (algebraic times exponential, so u is the
+    algebraic part):
+
+        u  = x           →  du = dx
+        dv = eˣ dx       →  v  = eˣ
+
+        ∫ x·eˣ dx = u·v − ∫ v du
+                  = x·eˣ − ∫ eˣ dx
+                  = x·eˣ − eˣ + C
+
+    The single application reduced the original integral (with an
+    x factor) to a simpler integral (without one).  That's the
+    point of the technique.
+  body_applications: |
+    Integration by parts is the standard tool whenever the
+    integrand is a product where one factor's derivative is
+    simpler than itself: log(x) times anything, polynomials times
+    sin/cos, polynomials times exponentials.  Repeated application
+    eventually reduces a polynomial-times-exponential integral to
+    a pure exponential, which integrates trivially.
+
+    In probability theory, the expectation of a non-negative
+    random variable can be written as E[X] = ∫₀^∞ P(X > t) dt — a
+    result that comes from one careful application of integration
+    by parts on the definition of expectation.  In Fourier
+    analysis, it gives the smoothness-decay relationship between a
+    function and its Fourier transform.
+  faq:
+    - q: "How do I choose u and dv?"
+      a: "Use LIATE as a starting guide: among the factors of the integrand, choose u from the highest-priority type listed (Log, Inv-trig, Alg, Trig, Exp) and dv as the rest.  This usually but not always works; if the resulting integral is harder than the original, swap the choices."
+    - q: "What if it needs more than one application?"
+      a: "Apply the rule again.  For ∫ x²·eˣ dx, first take u = x², dv = eˣdx → x²eˣ − ∫ 2x·eˣ dx; the new integral is then handled by another integration by parts.  A tabular method (sometimes called the DI method) speeds this up by columnising u's derivatives next to v's antiderivatives."
+    - q: "Why does the formula not contain an integration constant?"
+      a: "It's hidden inside the indefinite integrals on both sides.  Whatever constant you add on the right cancels the constant on the left.  In practice, write +C only at the very end."
+    - q: "What's the definite-integral version?"
+      a: "∫_a^b u dv = [u·v]_a^b − ∫_a^b v du.  Same formula, with the boundary term evaluated at the limits.  The +C constant disappears because every antiderivative is evaluated between fixed endpoints."
+  related:
+    - derivative-chain-rule
+    - taylor-series-sin-x
+
+- slug: taylor-series-sin-x
+  branch: calculus
+  title: "Taylor series of sin x near 0"
+  subtitle: "A polynomial that hugs sin(x) closer and closer as you add more terms — the bridge between calculus and approximation."
+  prompt: "show the Taylor polynomials of sin(x) of degree 1, 3, 5 around x = 0"
+  meta_description: >-
+    The Taylor series of sin x at 0 is x − x³/6 + x⁵/120 − x⁷/5040
+    + ⋯.  See how the degree-1, degree-3, and degree-5 partial
+    sums hug the true sin(x) curve, with each new term extending
+    the agreement to a wider interval.
+  body_what_this_shows: |
+    The Taylor series of a smooth function f around 0 is the
+    infinite polynomial whose nth coefficient is f⁽ⁿ⁾(0)/n!:
+
+        f(x) ≈ f(0) + f'(0)·x + f''(0)·x²/2! + f'''(0)·x³/3! + ⋯
+
+    For sin x the derivatives at 0 cycle through 0, 1, 0, −1, 0,
+    1, …, so all even-power terms vanish and you get the famous
+    series:
+
+        sin x  =  x − x³/3!  + x⁵/5!  − x⁷/7!  + ⋯
+              =  x − x³/6   + x⁵/120 − x⁷/5040 + ⋯
+
+    The figure overlays sin x (solid curve) with three of its
+    partial sums:
+
+        T₁(x) = x                      —  fits near x = 0 only
+        T₃(x) = x − x³/6              —  fits roughly to |x| ≈ 1
+        T₅(x) = x − x³/6 + x⁵/120    —  fits roughly to |x| ≈ 2
+
+    Each higher-degree polynomial extends the region of agreement
+    further, but never quite catches the true sin function
+    everywhere — for that you need the full infinite sum.
+  body_applications: |
+    Taylor series are how transcendental functions (sin, cos, eˣ,
+    log) are actually computed inside calculators and CPUs.  A
+    finite truncation gives an answer to machine precision over a
+    chosen interval, with the truncation error bounded by the next
+    omitted term.
+
+    They are also the foundation of perturbation methods in
+    physics (expanding the equations of motion in a small
+    parameter and keeping the leading-order term), of error
+    analysis in numerical methods (a forward-difference scheme is
+    a Taylor-truncation error analysis), and of the proofs of
+    L'Hôpital's rule and limit-of-derivatives theorems.
+  faq:
+    - q: "Why does the series only contain odd powers of x?"
+      a: "Because sin is an odd function: sin(−x) = −sin(x).  Any Taylor series of an odd function around 0 must itself be odd, which forces every even-power coefficient to be zero."
+    - q: "Does the series converge everywhere?"
+      a: "Yes — for every real (and in fact every complex) x, the series converges to sin(x).  The radius of convergence is infinite.  This is not true of every Taylor series; for instance, log(1 + x) only converges for |x| ≤ 1."
+    - q: "How many terms do I need for a given accuracy?"
+      a: "Use the alternating-series error bound: the error after stopping at a term is at most the absolute value of the next term.  To get sin(x) to within 10⁻⁶ for |x| ≤ 1, you need the x⁹/9! term to be below that, which holds since 1/362880 ≈ 2.8·10⁻⁶ — so degree-9 suffices."
+    - q: "Is the Taylor series unique?"
+      a: "Yes — for any smooth function, the Taylor coefficients are uniquely determined by the derivatives at the centre.  Two different power series can only equal the same function on an interval if their coefficients agree term by term."
+  related:
+    - derivative-chain-rule
+    - unit-circle
+
+- slug: graph-bfs-vs-dfs
+  branch: discrete-math
+  title: "BFS vs DFS: two ways to traverse a graph"
+  subtitle: "Same graph, two visit orders — breadth-first sweeps level-by-level, depth-first dives down each branch first."
+  prompt: "show BFS and DFS traversals on a small graph starting at node A"
+  meta_description: >-
+    Breadth-first search (BFS) and depth-first search (DFS) are
+    the two canonical graph traversal algorithms.  See the visit
+    orders side by side on a small seven-node graph, and the
+    queue-vs-stack data-structure difference that produces them.
+  body_what_this_shows: |
+    Both BFS and DFS visit every node reachable from a starting
+    node exactly once, but they pick which node to visit next
+    using different rules:
+
+        BFS:  use a queue (FIFO).  Visit closer nodes first.
+        DFS:  use a stack (LIFO).  Dive into one branch before
+              backtracking to siblings.
+
+    On the seven-node tree-like graph in the figure, starting
+    from A:
+
+        BFS order:  A, B, C, D, E, F, G
+                    (level 0: A; level 1: B, C; level 2: D, E, F, G)
+
+        DFS order:  A, B, D, E, C, F, G
+                    (dive A → B → D, back up, B → E, back up,
+                     then A → C → F, back up, C → G)
+
+    The only algorithmic difference is the choice of queue vs
+    stack for the "frontier" of nodes still to process.  Everything
+    else — the visited set, the loop structure, the per-node
+    work — is identical.
+  body_applications: |
+    BFS is the right choice when you want the *shortest* path in
+    an unweighted graph: the first time BFS reaches a node, it has
+    done so along a minimum-edge-count route.  Web crawlers use
+    BFS to keep recently-discovered URLs balanced across the
+    crawl.
+
+    DFS is the right choice when you want to explore a tree
+    structure compactly (using O(depth) memory instead of
+    O(breadth)), to find cycles, to topologically sort a DAG, or
+    to compute strongly connected components via Tarjan's or
+    Kosaraju's algorithms.  Iterative-deepening DFS combines DFS's
+    low memory with BFS's optimality and is the basis of many
+    classical AI search algorithms.
+  faq:
+    - q: "Does the start node have to be a specific one?"
+      a: "No — you can run BFS or DFS from any vertex.  If the graph isn't connected, you'll only visit the component containing the start.  To visit every node, run the traversal once per unvisited node in an outer loop."
+    - q: "What about for weighted graphs?"
+      a: "BFS only finds shortest paths in *unweighted* graphs (or graphs where every edge has the same weight).  For positive-weight graphs you need Dijkstra's algorithm; for graphs with negative weights, Bellman-Ford.  Both can be seen as generalisations of BFS that respect edge weights."
+    - q: "Does the order in which children are queued/pushed matter?"
+      a: "It changes the visit order but not the correctness of either algorithm.  Both still visit every reachable node exactly once.  For deterministic test cases, traversals usually process children in alphabetical or insertion order."
+    - q: "How do BFS and DFS relate to Dijkstra and A*?"
+      a: "Dijkstra's algorithm is BFS with a priority queue keyed on accumulated distance, and A* is Dijkstra with a heuristic added to the priority.  All three explore a frontier of nodes; they differ only in how they decide which frontier node to expand next."
+  related:
+    - dfa-construction
+    - matrix-inverse-3x3
+
+- slug: normal-distribution-68-95-99
+  branch: statistics
+  title: "The 68–95–99.7 rule for the normal distribution"
+  subtitle: "Why almost every observation from a normal distribution sits within three standard deviations of the mean — and how the percentages stack up."
+  prompt: "show the normal distribution bell curve with the 68-95-99.7 rule shaded"
+  meta_description: >-
+    Under a normal distribution, about 68% of values fall within
+    ±1 standard deviation of the mean, 95% within ±2σ, and 99.7%
+    within ±3σ.  See the bell curve with each band shaded and the
+    rule explained.
+  body_what_this_shows: |
+    The normal (or Gaussian) distribution is the symmetric
+    bell-shaped curve described by f(x) = (1/(σ√(2π)))·exp(−(x −
+    μ)²/(2σ²)), with two parameters: the mean μ (where the peak
+    sits) and the standard deviation σ (how wide the bell is).
+
+    For ANY normal distribution — regardless of μ and σ — the
+    following always holds:
+
+        within ±1σ of the mean:  about 68.27% of the probability
+        within ±2σ of the mean:  about 95.45% of the probability
+        within ±3σ of the mean:  about 99.73% of the probability
+
+    These are exact integrals of the normal density, rounded to
+    the familiar 68 / 95 / 99.7 percentages.  The figure shades
+    the three bands in nested shades around the mean.
+
+    The rule is the reason σ is such a useful unit for the
+    normal: distances from the mean measured in σ have
+    distribution-independent meaning.  "Three sigma" is shorthand
+    for "an event so rare it should happen well under 1% of the
+    time".
+  body_applications: |
+    The 68–95–99.7 rule lets you eyeball whether a measurement
+    is unusual without consulting a normal-distribution table.  A
+    body temperature 2σ above your personal mean is in the top
+    2.5% of your distribution — worth taking seriously.  An
+    industrial process yielding parts 3σ outside spec is in the
+    bottom 0.135%, the classical Six Sigma quality threshold
+    (which targets even tighter bounds at 4.5σ).
+
+    In physics, three-sigma is the threshold for an "evidence"-
+    level result and five-sigma is required for a discovery
+    claim (probability under a chance fluctuation: 0.00006%).
+    Both conventions are direct applications of the same tail-area
+    integrals.
+  faq:
+    - q: "Does this rule apply to non-normal distributions?"
+      a: "Only approximately, and only for distributions that resemble a normal — symmetric, bell-shaped, with light tails.  For skewed distributions (income, waiting times) the rule overestimates the central mass.  For heavy-tailed distributions (stock returns, earthquake magnitudes) the rule dramatically underestimates the tail probabilities."
+    - q: "Why these particular percentages?"
+      a: "They come from integrating the normal density between ±1σ, ±2σ, ±3σ.  The exact values are 68.27%, 95.45%, 99.73% — but the rounded 68, 95, 99.7 are easier to memorise and accurate enough for back-of-envelope work."
+    - q: "Where does the normal distribution come from?"
+      a: "From the Central Limit Theorem: the sum (or average) of many independent random variables, each with finite variance, converges to a normal distribution.  That's why measurement errors, test scores, and many natural quantities turn out to be approximately normal."
+    - q: "What's beyond 3σ?"
+      a: "About 0.27% — roughly 1 in 370 observations.  Beyond 4σ: 1 in 16,000.  Beyond 5σ: 1 in 1.7 million.  The tails of a normal are spectacularly thin, which is why real-world data with rare extreme events (financial crashes, viral content) is poorly modelled as normal."
+  related:
+    - binomial-pmf
+
+- slug: binomial-pmf
+  branch: statistics
+  title: "Binomial PMF: P(X = k) = C(n, k) · pᵏ · (1−p)ⁿ⁻ᵏ"
+  subtitle: "The probability of getting exactly k successes in n independent trials — drawn as a bar chart for n = 10 fair-coin flips."
+  prompt: "show the binomial pmf bar chart for n = 10 trials and p = 0.5"
+  meta_description: >-
+    The binomial probability mass function P(X = k) = C(n, k) ·
+    pᵏ · (1−p)ⁿ⁻ᵏ gives the probability of exactly k successes
+    in n independent trials.  See the symmetric bar chart for
+    n = 10 and p = 0.5, peaking at k = 5.
+  body_what_this_shows: |
+    A binomial random variable X counts the number of "successes"
+    in n independent Bernoulli trials, each of which succeeds
+    with probability p.  Its probability mass function is
+
+        P(X = k)  =  C(n, k) · pᵏ · (1 − p)ⁿ⁻ᵏ
+
+    for k = 0, 1, 2, …, n.  The C(n, k) factor (the binomial
+    coefficient, "n choose k") counts the number of ways the k
+    successes can be arranged among the n trials; the pᵏ and
+    (1−p)ⁿ⁻ᵏ factors are the probabilities of any one specific
+    arrangement.
+
+    For n = 10 and p = 0.5 (ten fair coin flips, counting heads),
+    the figure plots P(X = k) for k = 0 through 10.  Values:
+
+        k = 0,  10:  1/1024 ≈ 0.001
+        k = 1,   9: 10/1024 ≈ 0.010
+        k = 2,   8: 45/1024 ≈ 0.044
+        k = 3,   7: 120/1024 ≈ 0.117
+        k = 4,   6: 210/1024 ≈ 0.205
+        k = 5    :  252/1024 ≈ 0.246
+
+    The distribution is symmetric (because p = 0.5), peaking at
+    k = 5.  The probabilities sum to exactly 1.
+  body_applications: |
+    The binomial distribution is the right model for any "count of
+    successes in n independent yes/no trials" — quality-control
+    sampling (defects in a batch), A/B testing (clicks out of
+    impressions), survey responses (yes-votes out of n people),
+    polling.  Its mean is n·p and its variance is n·p·(1 − p).
+
+    For large n the binomial is well approximated by a normal
+    distribution with the same mean and variance — that's the de
+    Moivre-Laplace theorem and a special case of the Central Limit
+    Theorem.  For large n and small p (with n·p moderate) it's
+    better approximated by a Poisson distribution with rate n·p.
+  faq:
+    - q: "What's C(n, k)?"
+      a: "C(n, k) — also written ⁿCₖ or 'n choose k' — counts the number of ways to choose k items from n without regard to order.  Computed as n! / (k!·(n−k)!).  For example C(10, 3) = 10·9·8 / (3·2·1) = 120."
+    - q: "Does the distribution have to be symmetric?"
+      a: "Only when p = 0.5.  For p < 0.5 the distribution is right-skewed (the mode and most of the mass sit at low k); for p > 0.5 it's left-skewed.  The skewness disappears as n grows, by the Central Limit Theorem."
+    - q: "What if the trials aren't independent?"
+      a: "Then the binomial isn't the right model.  For sampling without replacement from a finite population, use the hypergeometric distribution.  For correlated trials, you need a more general model (e.g. a beta-binomial when the success probability itself is uncertain)."
+    - q: "Is there a closed-form for P(X ≤ k)?"
+      a: "Not a simple one — the cumulative distribution function is a regularised incomplete beta function.  For practical work you either sum the PMF directly (cheap for small n) or use the normal approximation (cheap for large n)."
+  related:
+    - normal-distribution-68-95-99
+
+- slug: omar-khayyam-cubic-roots
+  branch: algebra
+  title: "Omar Khayyam's geometric solution to the cubic x³ + bx = c"
+  subtitle: "Six centuries before Cardano, the 11th-century Persian poet-mathematician solved every positive-coefficient cubic by intersecting a parabola and a circle."
+  prompt: "show Omar Khayyam's geometric solution to x^3 + 3x = 14 by intersecting a parabola and a circle"
+  meta_description: >-
+    Omar Khayyam (1048-1131) solved the cubic x³ + bx = c
+    geometrically by intersecting the parabola y = x²/√b with a
+    circle through the origin of diameter c/b.  The x-coordinate
+    of the non-trivial intersection is the real root.
+  body_what_this_shows: |
+    Six hundred years before Cardano and Ferrari brought symbolic
+    cubic-root formulas to Europe, Omar Khayyam (Nishapur,
+    1048–1131) gave a complete geometric construction for every
+    cubic equation with positive coefficients.  His Treatise on
+    Demonstration of Problems of Algebra classifies cubics into
+    fourteen cases and shows how to solve each by intersecting
+    two conic sections.
+
+    For the case x³ + b·x = c (with b, c > 0), Khayyam's
+    construction is:
+
+        Parabola:  y = x² / √b
+        Circle:    x² + y² = (c / b) · x
+                   — passes through the origin,
+                   centre at (c/(2b), 0), radius c/(2b)
+
+    Substituting the parabola's y² = x⁴/b into the circle's
+    equation and simplifying gives x⁴ + bx² = cx, which factors
+    as x·(x³ + bx − c) = 0.  Discarding the trivial root x = 0
+    leaves x³ + bx = c — so the x-coordinate of the non-trivial
+    intersection of the two conics IS the real root of the
+    cubic.
+
+    The figure shows this for x³ + 3x = 14.  Khayyam's parabola
+    is y = x² / √3; the circle has centre (14/6, 0) ≈ (2.33, 0)
+    and radius 7/3.  They meet (other than at the origin) at
+    x = 2, the exact real root (check: 8 + 6 = 14).
+  body_applications: |
+    Khayyam's construction is the high-water mark of pre-symbolic
+    algebra — a complete classification of cubics that wouldn't be
+    superseded until the Italian renaissance algebraists worked
+    out radical formulas in the 16th century.  It is also the
+    first systematic use of conic sections as algorithmic tools
+    rather than purely geometric objects.
+
+    The technique generalises beautifully: every algebraic
+    equation whose solution can be expressed using square and cube
+    roots admits a ruler-compass-and-conic-section construction,
+    which is exactly the class of constructions Khayyam's method
+    exhibits.  This idea — the relationship between algebraic
+    extension degree and geometric constructibility — anticipates
+    Galois theory by 800 years.
+  faq:
+    - q: "Why did Khayyam not just use the algebraic formula?"
+      a: "There wasn't one.  Symbolic algebra as we know it didn't exist in the 11th century — equations were stated in words, and Khayyam himself remarked that no Islamic mathematician had found a general algebraic solution for cubics.  His geometric construction was the closest thing to a general method until Cardano's formula appeared in 1545."
+    - q: "Does the construction always give a real root?"
+      a: "For x³ + bx = c with b, c positive, yes — the cubic always has exactly one positive real root, and the parabola-and-circle intersection produces it.  Khayyam treats the case of negative coefficients (and equations with three real roots) in separate sub-cases, each with its own pair of conics."
+    - q: "Did Khayyam know how many roots a cubic could have?"
+      a: "He understood that a cubic could have one or three real roots depending on the case, and his fourteen-case classification reflects that.  He did not, however, accept negative numbers or zero as solutions — the geometric construction inherently produces only positive lengths."
+    - q: "Why is Khayyam famous as a poet and mathematician?"
+      a: "He's the same person in both contexts.  Khayyam wrote the Rubaiyat (quatrains) that Edward FitzGerald translated into English in 1859, and he simultaneously did first-rate mathematics — this cubic-equation work, calendar reform achieving accuracy comparable to the modern Gregorian, and the first systematic exposition of parallel-postulate alternatives to Euclid."
+  related:
+    - quadratic-formula
+    - polynomial-long-division

@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+
+<title>The chain rule: differentiating composite functions | Khayyam Math</title>
+<meta name="description" content="The chain rule says d/dx [f(g(x))] = f'(g(x)) · g'(x). Worked example with y = (3x² + 1)⁵: outer derivative 5·(3x² + 1)⁴ times inner derivative 6x, giving dy/dx = 30x·(3x² + 1)⁴.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Khayyam Math">
+<link rel="canonical" href="https://khayyammath.com/learn/derivative-chain-rule">
+<link rel="manifest" href="/manifest.json">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="The chain rule: differentiating composite functions">
+<meta property="og:description" content="Differentiate f(g(x)) by multiplying f'(g(x)) and g'(x) — the most-used rule in all of calculus.">
+<meta property="og:url" content="https://khayyammath.com/learn/derivative-chain-rule">
+<meta property="og:site_name" content="Khayyam Math">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://khayyammath.com/screenshots/social_preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The chain rule: differentiating composite functions">
+<meta name="twitter:description" content="Differentiate f(g(x)) by multiplying f'(g(x)) and g'(x) — the most-used rule in all of calculus.">
+<meta name="twitter:image" content="https://khayyammath.com/screenshots/social_preview.png">
+
+<!-- WebPage + BreadcrumbList + LearningResource + FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://khayyammath.com/learn/derivative-chain-rule",
+      "url": "https://khayyammath.com/learn/derivative-chain-rule",
+      "name": "The chain rule: differentiating composite functions",
+      "description": "The chain rule says d/dx [f(g(x))] = f'(g(x)) \u00b7 g'(x). Worked example with y = (3x\u00b2 + 1)\u2075: outer derivative 5\u00b7(3x\u00b2 + 1)\u2074 times inner derivative 6x, giving dy/dx = 30x\u00b7(3x\u00b2 + 1)\u2074.",
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://khayyammath.com/",
+        "name": "Khayyam Math"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://khayyammath.com/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Learn",
+          "item": "https://khayyammath.com/learn/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "The chain rule: differentiating composite functions"
+        }
+      ]
+    },
+    {
+      "@type": "LearningResource",
+      "name": "The chain rule: differentiating composite functions",
+      "description": "The chain rule says d/dx [f(g(x))] = f'(g(x)) \u00b7 g'(x). Worked example with y = (3x\u00b2 + 1)\u2075: outer derivative 5\u00b7(3x\u00b2 + 1)\u2074 times inner derivative 6x, giving dy/dx = 30x\u00b7(3x\u00b2 + 1)\u2074.",
+      "url": "https://khayyammath.com/learn/derivative-chain-rule",
+      "learningResourceType": "WorkedExample",
+      "educationalLevel": "https://schema.org/HighSchool",
+      "inLanguage": "en",
+      "isAccessibleForFree": true,
+      "about": "calculus"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What if there are more than two layers?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Apply the chain rule repeatedly, from the outside in.  For h(g(f(x))) you get h'(g(f(x))) \u00b7 g'(f(x)) \u00b7 f'(x).  Each layer contributes its derivative evaluated at whatever was inside it."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why does it work?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "From the definition of the derivative: \u0394y/\u0394x = (\u0394y/\u0394u)\u00b7(\u0394u/\u0394x) when u depends smoothly on x.  Letting \u0394x \u2192 0 makes both ratios into derivatives, and the product becomes the chain rule.  A rigorous proof handles the case \u0394u = 0 separately to avoid dividing by zero."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How is it related to back-propagation in neural networks?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A neural network is a deeply nested composition of layers, each parameterised by weights.  Back-propagation computes the gradient of the loss with respect to each weight by repeated application of the chain rule, working backwards from the loss layer to the input layer.  The order of multiplication is what gives back-propagation its O(n) cost instead of O(n\u00b2)."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What's the multivariate version?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "If z = f(x, y) where x = g(t) and y = h(t), then dz/dt = (\u2202f/\u2202x)\u00b7(dx/dt) + (\u2202f/\u2202y)\u00b7(dy/dt).  Each path from t to z contributes a product of partial derivatives along the path; sum over all paths."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #555;
+    --border: #e0e0e0;
+    --accent: #2a6fd6;
+    --code-bg: #f3f3f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #f0f0f0;
+      --muted: #aaa;
+      --border: #2a2a2a;
+      --accent: #79a9ff;
+      --code-bg: #242424;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55;
+  }
+  header { padding: 1.5em 2em; border-bottom: 1px solid var(--border); }
+  header a.brand { font-weight: 700; color: var(--fg); text-decoration: none; }
+  header nav { float: right; font-size: 0.95em; }
+  header nav a { margin-left: 1.2em; color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 2em 2em 4em; }
+  .breadcrumb { font-size: 0.9em; color: var(--muted); margin-bottom: 0.8em; }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--accent); }
+  h1 { font-size: 2em; margin: 0 0 0.3em; line-height: 1.2; }
+  .subtitle { font-size: 1.1em; color: var(--muted); margin-bottom: 1.6em; }
+  .figure-frame {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.2em; margin: 1.5em 0;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { .figure-frame { background: #222; } }
+  .figure-frame svg { width: 100%; height: auto; display: block; }
+  .try-live {
+    display: inline-block; padding: 0.6em 1.2em; margin-top: 0.5em;
+    background: var(--accent); color: white;
+    border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .try-live:hover { opacity: 0.9; }
+  h2 { font-size: 1.4em; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+  pre {
+    background: var(--code-bg); padding: 0.8em 1em; border-radius: 6px;
+    overflow-x: auto; font-size: 0.92em; line-height: 1.45;
+  }
+  details {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+  }
+  details summary { font-weight: 600; cursor: pointer; }
+  details p { margin: 0.6em 0 0; color: var(--muted); font-size: 0.95em; }
+  .related-list { padding-left: 1.2em; }
+  .related-list li { margin: 0.3em 0; }
+  footer {
+    border-top: 1px solid var(--border); padding: 1.5em 2em;
+    color: var(--muted); font-size: 0.9em; text-align: center;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">Khayyam Math</a>
+  <nav>
+    <a href="/learn/">Topics</a>
+    <a href="/">Home</a>
+    <a href="/studio">Open the tutor</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="breadcrumb">
+    <a href="/">Home</a> &rsaquo;
+    <a href="/learn/">Learn</a> &rsaquo;
+    The chain rule: differentiating composite functions
+  </div>
+
+  <h1>The chain rule: differentiating composite functions</h1>
+  <p class="subtitle">Differentiate f(g(x)) by multiplying f'(g(x)) and g'(x) — the most-used rule in all of calculus.</p>
+
+  <div class="figure-frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" aria-label="Chain rule applied to y equals (3 x squared plus 1) to the fifth power"><defs><marker id="arrCh" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,-5L10,0L0,5" fill="#1a1a1a"/></marker></defs><rect x="40" y="70" width="90" height="50" rx="6" ry="6" fill="#eaf2fc" stroke="#2a6fd6" stroke-width="1.6"/><text x="85.0" y="100" font-size="15" font-family="serif" text-anchor="middle">x</text><text x="85.0" y="62" font-size="11" font-family="serif" fill="#666" text-anchor="middle">input</text><rect x="180" y="70" width="90" height="50" rx="6" ry="6" fill="#eaf2fc" stroke="#2a6fd6" stroke-width="1.6"/><text x="225.0" y="100" font-size="15" font-family="serif" text-anchor="middle">g(x) = 3x² + 1</text><text x="225.0" y="62" font-size="11" font-family="serif" fill="#666" text-anchor="middle">inner</text><rect x="370" y="70" width="90" height="50" rx="6" ry="6" fill="#eaf2fc" stroke="#2a6fd6" stroke-width="1.6"/><text x="415.0" y="100" font-size="15" font-family="serif" text-anchor="middle">f(u) = u⁵</text><text x="415.0" y="62" font-size="11" font-family="serif" fill="#666" text-anchor="middle">outer</text><rect x="520" y="70" width="90" height="50" rx="6" ry="6" fill="#eaf2fc" stroke="#2a6fd6" stroke-width="1.6"/><text x="565.0" y="100" font-size="15" font-family="serif" text-anchor="middle">y</text><text x="565.0" y="62" font-size="11" font-family="serif" fill="#666" text-anchor="middle">output</text><line x1="133" y1="95.0" x2="177" y2="95.0" stroke="#1a1a1a" stroke-width="1.6" marker-end="url(#arrCh)"/><line x1="273" y1="95.0" x2="367" y2="95.0" stroke="#1a1a1a" stroke-width="1.6" marker-end="url(#arrCh)"/><line x1="463" y1="95.0" x2="517" y2="95.0" stroke="#1a1a1a" stroke-width="1.6" marker-end="url(#arrCh)"/><text x="320" y="180" font-size="15" font-family="serif" text-anchor="middle">dy/dx = f'(g(x)) · g'(x) = 5·(3x² + 1)⁴ · 6x</text><text x="320" y="218" font-size="17" font-family="serif" fill="#c0392b" text-anchor="middle">dy/dx = 30x · (3x² + 1)⁴</text><text x="320" y="256" font-size="12" font-family="serif" fill="#666" text-anchor="middle">outer derivative at inner value, times inner derivative</text></svg>
+  </div>
+
+  <p>
+    <a class="try-live"
+       href="/studio?prompt=show%20the%20chain%20rule%20applied%20to%20y%20%3D%20%283x%5E2%20%2B%201%29%5E5"
+       title="Open the live tutor with this prompt">Try this live →</a>
+  </p>
+
+  <h2>What this shows</h2>
+<p>A composite function f(g(x)) feeds the output of one function
+into another.  The chain rule says: differentiate the outer
+function with the inner function still inside, then multiply by
+the derivative of the inner function.  Symbolically:</p><pre>    d/dx [ f(g(x)) ] = f'(g(x)) · g'(x)</pre><p>For y = (3x² + 1)⁵, identify the layers:</p><pre>    outer  f(u) = u⁵        →   f'(u) = 5u⁴
+    inner  g(x) = 3x² + 1   →   g'(x) = 6x</pre><p>Apply the rule:</p><pre>    dy/dx = f'(g(x)) · g'(x)
+          = 5·(3x² + 1)⁴ · 6x
+          = 30x · (3x² + 1)⁴</pre><p>Notice: the inner function 3x² + 1 stays unevaluated inside
+f'.  A common mistake is to also simplify it — but it must
+remain because (3x² + 1) is the argument of the outer
+derivative, not a variable to be solved for.</p>
+  <h2>Where it shows up</h2>
+    <p>The chain rule is the workhorse of every applied calculus
+problem.  Related rates (a balloon's volume changing through
+its radius), implicit differentiation (dy/dx for y² + x² = 1),
+the gradient of any deep-learning loss function (gradient
+descent IS the chain rule, applied many times) — all of them
+are chain rule.</p>
+    <p>Generalisations include the multivariate chain rule (for
+functions of several variables), the matrix chain rule (which
+is exactly back-propagation in neural networks), and the
+inverse-function theorem (a special case where g and f are
+inverses).</p>
+
+  <h2>Frequently asked questions</h2>
+    <details>
+      <summary>What if there are more than two layers?</summary>
+      <p>Apply the chain rule repeatedly, from the outside in.  For h(g(f(x))) you get h'(g(f(x))) · g'(f(x)) · f'(x).  Each layer contributes its derivative evaluated at whatever was inside it.</p>
+    </details>
+    <details>
+      <summary>Why does it work?</summary>
+      <p>From the definition of the derivative: Δy/Δx = (Δy/Δu)·(Δu/Δx) when u depends smoothly on x.  Letting Δx → 0 makes both ratios into derivatives, and the product becomes the chain rule.  A rigorous proof handles the case Δu = 0 separately to avoid dividing by zero.</p>
+    </details>
+    <details>
+      <summary>How is it related to back-propagation in neural networks?</summary>
+      <p>A neural network is a deeply nested composition of layers, each parameterised by weights.  Back-propagation computes the gradient of the loss with respect to each weight by repeated application of the chain rule, working backwards from the loss layer to the input layer.  The order of multiplication is what gives back-propagation its O(n) cost instead of O(n²).</p>
+    </details>
+    <details>
+      <summary>What's the multivariate version?</summary>
+      <p>If z = f(x, y) where x = g(t) and y = h(t), then dz/dt = (∂f/∂x)·(dx/dt) + (∂f/∂y)·(dy/dt).  Each path from t to z contributes a product of partial derivatives along the path; sum over all paths.</p>
+    </details>
+
+  <h2>Related topics</h2>
+  <ul class="related-list">
+      <li><a href="/learn/integration-by-parts">Integration by parts: ∫ u dv = uv − ∫ v du</a></li>
+      <li><a href="/learn/taylor-series-sin-x">Taylor series of sin x near 0</a></li>
+  </ul>
+
+</main>
+
+<footer>
+  <a href="/">Khayyam Math</a> &middot;
+  <a href="https://github.com/khayyam-math/khayyam-math">GitHub</a> &middot;
+  <a href="https://doi.org/10.5281/zenodo.20367147">Paper</a>
+</footer>
+
+</body>
+</html>
