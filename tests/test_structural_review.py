@@ -18,7 +18,8 @@ def test_highlight_ids_present_pass():
     narration = [
         {"speak": "look at v1", "highlight": ["v1"]},
         {"speak": "look at v2", "highlight": ["v2"]},
-        {"speak": "neither in particular", "highlight": []},
+        # Final phrase must STATE the result (missing_conclusion check).
+        {"speak": "Therefore v1 and v2 are adjacent.", "highlight": []},
     ]
     assert _structural_review(svg, narration) == []
 
@@ -27,7 +28,9 @@ def test_highlight_id_missing_flags():
     svg = '<svg><circle id="v1"/></svg>'
     narration = [
         {"speak": "look at v1", "highlight": ["v1"]},
-        {"speak": "look at v999", "highlight": ["v999"]},  # bogus id
+        # Closer that satisfies missing_conclusion so the test only
+        # asserts the one issue it's actually checking.
+        {"speak": "Therefore v999 = v1.", "highlight": ["v999"]},  # bogus id
     ]
     issues = _structural_review(svg, narration)
     assert len(issues) == 1

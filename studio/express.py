@@ -373,8 +373,15 @@ EXPRESS_SCHEMA: dict[str, Any] = {
                 "sentence or independent clause; piper synthesises one WAV "
                 "per phrase.  Cover the figure systematically: state what's "
                 "shown, name each labelled piece, walk through the relation "
-                "or computation, end with the conclusion.  10-25 phrases "
-                "for a non-trivial figure."
+                "or computation, and END WITH A CONCLUSION PHRASE that "
+                "STATES THE RESULT (not just 'this completes the proof' or "
+                "'we have shown the figure').  The last phrase MUST name "
+                "the concrete answer the learner now knows — e.g. "
+                "\"Therefore the derivative is 3x squared.\", "
+                "\"So the area equals nine pi.\", "
+                "\"Thus 3SAT is NP-complete because every SAT instance "
+                "reduces to it in polynomial time.\".  10-25 phrases for a "
+                "non-trivial figure."
             ),
             "items": {
                 "type": "object",
@@ -671,6 +678,38 @@ _EXPRESS_SYSTEM = (
     "top-band / bottom-band / center-caption text_blocks, NOT laid "
     "out by hand inside a rect.  The rect bbox extending to y=450 "
     "also crowds the shape zone for any geometry shown alongside.\n"
+    "\n"
+    "EVERY NARRATION MUST END WITH A CONCLUSION — STRICT, NO EXCEPTIONS.\n"
+    "The LAST phrase of the narration list MUST state the concrete "
+    "RESULT the learner now knows.  Not a recap, not a sign-off, not "
+    "'this completes the explanation' — the ANSWER itself.\n"
+    "\n"
+    "Every figure exists to deliver a result.  A derivative figure "
+    "ends with the derivative.  A 3-4-5-triangle Pythagoras figure "
+    "ends with '9 + 16 = 25, so the hypotenuse is 5'.  A 3SAT proof "
+    "ends with 'therefore 3SAT is NP-complete'.  A unit-circle figure "
+    "ends with 'so sin(30°) = 0.5 and cos(30°) = √3/2'.  The walkthrough "
+    "stops being valuable to the learner the moment it doesn't lead to "
+    "a stated conclusion they can write down.\n"
+    "\n"
+    "Required form for the last phrase:\n"
+    "  * Starts with a conclusion connector: 'Therefore', 'So', "
+    "'Hence', 'Thus', 'Which gives', 'And so', 'We conclude that'.\n"
+    "  * Contains the concrete value, equation, classification, or "
+    "named result — never just the technique name.\n"
+    "  * Is highlighted on the visible element that DISPLAYS the "
+    "result (the final cell, the equality, the boxed answer).\n"
+    "\n"
+    "  ❌ 'And that is how we prove the Pythagorean theorem.'  "
+    "(Names the technique, not the result.)\n"
+    "  ❌ 'This completes the reduction.'  (Recaps without stating "
+    "the conclusion the reduction shows.)\n"
+    "  ❌ 'We have now seen the integration by parts formula.'  "
+    "(Visible-obvious recap; no answer.)\n"
+    "  ✓ 'So the derivative of sin x squared is 2x cos of x squared.'\n"
+    "  ✓ 'Therefore 9 plus 16 equals 25, so the hypotenuse is five.'\n"
+    "  ✓ 'Hence 3SAT is NP-complete because SAT, which is NP-complete, "
+    "reduces to it in polynomial time.'\n"
     "\n"
     "SHOW DON'T JUST TELL — STRICT RULE.  Every narration phrase MUST "
     "highlight a VISIBLE element drawn in the SVG.  If the narration "
@@ -5754,6 +5793,68 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
                 "array with the id of that element. At minimum, one or "
                 "two phrases should reference a concrete id."
             )
+
+    # 1c. Conclusion-check: the final narration phrase must STATE the
+    # result the figure delivers, not merely sign off ("this completes
+    # the proof", "we have shown the figure").  Detected by:
+    #   (a) a conclusion connector at or near the start ("therefore",
+    #       "so", "thus", "hence", "and so", "which gives", "we
+    #       conclude", "finally", "in conclusion"), OR
+    #   (b) an equals sign / equation in the phrase (a stated value), OR
+    #   (c) a definitive verb naming the result ("is", "equals",
+    #       "becomes") together with a numeric/symbolic token.
+    # Phrases that ONLY recap the technique ("this completes the
+    # explanation", "we have now seen the integration formula") are
+    # flagged.
+    if narration and len(narration) >= 2:
+        last = narration[-1] if isinstance(narration[-1], dict) else {}
+        last_text = (last.get("speak") or "").strip()
+        if last_text:
+            lower = last_text.lower()
+            conclusion_connectors = (
+                "therefore", "so ", "so,", "thus", "hence", "and so",
+                "which gives", "we conclude", "finally", "in conclusion",
+                "the answer is", "the result is", "the value is",
+                "we get", "we have", "this gives",
+            )
+            recap_phrases = (
+                "this completes",
+                "this concludes",
+                "we have shown the figure",
+                "this is how we",
+                "and that is how",
+                "we have now seen",
+                "this illustrates",
+                "this explains",
+                "as shown in the figure",
+                "this completes the proof",
+                "this completes the explanation",
+                "this completes the walkthrough",
+                "this completes our",
+            )
+            has_connector = any(c in lower for c in conclusion_connectors)
+            has_equation = ("=" in last_text or "→" in last_text
+                            or "⇒" in last_text)
+            looks_like_recap = any(r in lower for r in recap_phrases)
+            # Reject as a conclusion if it's pure recap, OR if it lacks
+            # both a connector and an equation.
+            if looks_like_recap or not (has_connector or has_equation):
+                snippet = (last_text[:80] + "…"
+                           if len(last_text) > 80 else last_text)
+                issues.append(
+                    "missing_conclusion: the final narration phrase "
+                    "does not state the result the figure delivers — "
+                    f"it currently reads {snippet!r}.  Every walkthrough "
+                    "MUST end with a phrase that names the concrete "
+                    "answer (derivative value, computed sum, "
+                    "classification, named result), preferably opened "
+                    "by a conclusion connector ('Therefore', 'So', "
+                    "'Hence', 'Thus', 'Which gives', 'And so').  Recap "
+                    "phrases like 'this completes the proof' or 'we "
+                    "have shown the figure' do not count.  Replace the "
+                    "last phrase with one that states the answer the "
+                    "learner now knows."
+                )
 
     # 2. Graph-completeness heuristic: a figure with many <circle>
     # vertices but very few <text> elements is almost certainly
