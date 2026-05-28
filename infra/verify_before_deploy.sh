@@ -63,13 +63,30 @@ docker network create "$NETWORK" >/dev/null
 docker run -d --name "$PG_NAME" --network "$NETWORK" \
     -e POSTGRES_PASSWORD=verifypass -e POSTGRES_DB=sevim \
     -p "${PG_PORT}:5432" postgres:16-alpine >/dev/null
-# Wait for PG to be ready.  60 s budget — Postgres normally takes
-# 5-10 s, but on a cold dev machine (first image pull, slow disk,
-# resource-constrained docker daemon) it can take 30+ s.  60 s
-# tolerates that without lengthening the success path noticeably.
-for _ in $(seq 1 60); do
+# Wait for PG to be ready.  Subtle: the postgres:16-alpine image
+# runs TWO postgres processes — a transient init-phase server that
+# initdb's the data dir and creates the requested database, then
+# shuts down so the entrypoint can exec the real foreground server.
+# pg_isready returns true during init (the init server listens on
+# the Unix socket), then false in the ~50-200 ms gap where init-PG
+# has stopped and real-PG hasn't started yet, then true again
+# once real-PG is up.  A simple "break on first success" loop
+# would race that gap and report failure.
+#
+# Fix: require N consecutive successful checks before declaring
+# ready.  5 successes at 1 s interval comfortably covers the
+# transition window without slowing the typical path much.  Budget
+# 90 s for the whole wait (init + gap + real-start + 5 stable s).
+REQUIRED_STABLE=5
+stable=0
+for _ in $(seq 1 90); do
     if docker exec "$PG_NAME" pg_isready -U postgres >/dev/null 2>&1; then
-        break
+        stable=$((stable + 1))
+        if [ "$stable" -ge "$REQUIRED_STABLE" ]; then
+            break
+        fi
+    else
+        stable=0
     fi
     sleep 1
 done
