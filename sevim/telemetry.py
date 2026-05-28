@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_by TEXT
 );
 
--- Additive migration for pre-existing deployments (Postgres-only;
+-- Additive migration for pre-existing deployments (Postgres-only,
 -- SQLite developer DBs get the column at CREATE-time above). All
 -- historical rows backfill to 'gpt-4o' (the only backend used to date).
 ALTER TABLE turns    ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gpt-4o';
@@ -280,7 +280,7 @@ ALTER TABLE repairs  ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT 'gp
 -- claims alongside the canvas so the offline service can read them.
 ALTER TABLE canvases ADD COLUMN IF NOT EXISTS math_claims_json TEXT;
 -- Anonymous-visitor geo (populated at session creation via GeoLite2).
--- Backfills NULL for existing rows; new rows get the geo when the
+-- Backfills NULL for existing rows. New rows get the geo when the
 -- session is upserted with an IP that GeoLite2 can resolve.
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS country TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS region  TEXT;
@@ -371,10 +371,21 @@ class _PostgresBackend:
         return cur
 
     def executescript(self, sql: str) -> None:
-        # psycopg has no executescript; split on `;` works for our DDL
-        # because it doesn't embed semicolons inside literals.
+        # psycopg has no executescript; we split on `;` ourselves.
+        # IMPORTANT: a `;` inside an SQL comment (`-- like this;`)
+        # would otherwise terminate the "statement" mid-comment and
+        # leave a fragment ("new rows get the geo when the") that
+        # blows up the next execute().  Strip SQL line-comments
+        # (`--` to end-of-line) BEFORE splitting.  Our DDL doesn't
+        # embed `--` inside string literals, so this is safe; the
+        # day that changes, switch to a real SQL parser.
+        cleaned_lines = []
+        for raw in sql.splitlines():
+            idx = raw.find("--")
+            cleaned_lines.append(raw if idx < 0 else raw[:idx])
+        cleaned = "\n".join(cleaned_lines)
         cur = self._conn.cursor()
-        for stmt in sql.split(";"):
+        for stmt in cleaned.split(";"):
             s = stmt.strip()
             if s:
                 cur.execute(s)
