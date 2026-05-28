@@ -70,13 +70,30 @@ case "$cmd" in
         echo
 
         # ── GeoLite2 refresh ────────────────────────────────────
-        # Pull the freshest GeoLite2-City.mmdb from MaxMind so the
-        # image baked by `cdk deploy` ships this week's database.
-        # Falls through gracefully if no credentials are configured
-        # (keeps any existing on-disk copy).
         ./refresh_geolite.sh || {
             echo "[deploy.sh] ⚠️  refresh_geolite.sh failed — continuing with existing mmdb (if any)."
         }
+
+        # ── Pre-deploy verifier ─────────────────────────────────
+        # Runs the actual prod container against a REAL Postgres
+        # locally, hits every critical endpoint, catches container-
+        # start crashes / SQL bugs / endpoint regressions BEFORE
+        # they hit production.  Catches what pytest can't (Postgres-
+        # specific SQL, telemetry init, real container boot path).
+        # Bypass with SEVIM_SKIP_VERIFIER=1 (emergency hotfix only).
+        if [[ "${SEVIM_SKIP_VERIFIER:-0}" == "1" ]]; then
+            echo "[deploy.sh] ⚠️  SEVIM_SKIP_VERIFIER=1 — skipping pre-deploy verifier."
+        else
+            echo "[deploy.sh] Running pre-deploy verifier (docker + Postgres + endpoint smoke tests)…"
+            if ! ./verify_before_deploy.sh; then
+                echo
+                echo "[deploy.sh] ❌ Pre-deploy verifier FAILED — deploy blocked."
+                echo "[deploy.sh] Fix the failure above, or (emergency hotfix only):"
+                echo "[deploy.sh]   SEVIM_SKIP_VERIFIER=1 ./deploy.sh"
+                exit 2
+            fi
+            echo
+        fi
 
         # ── Quality gate ────────────────────────────────────────
         # Run the test battery against the LOCAL build before any
@@ -99,7 +116,66 @@ case "$cmd" in
             echo
         fi
 
-        exec npx aws-cdk deploy --require-approval=never "$@"
+        # Record the PREVIOUS task def so we can auto-rollback if
+        # post-deploy health checks fail.  Best-effort: if we can't
+        # read it, the auto-rollback step below will be a no-op.
+        PREV_TD=$(AWS_PROFILE="$AWS_PROFILE" aws ecs describe-services \
+            --cluster REDACTED-CLUSTER \
+            --service REDACTED-SERVICE \
+            --region "$CDK_DEFAULT_REGION" \
+            --query 'services[0].taskDefinition' --output text 2>/dev/null || echo "")
+        if [[ -n "$PREV_TD" && "$PREV_TD" != "None" ]]; then
+            echo "[deploy.sh] Previous task def (for auto-rollback): $PREV_TD"
+        fi
+
+        # Run cdk deploy — NOT exec'd, so the post-deploy verifier
+        # below can run.
+        if ! npx aws-cdk deploy --require-approval=never "$@"; then
+            echo
+            echo "[deploy.sh] ❌ cdk deploy itself failed; aborting (no auto-rollback needed — nothing changed)."
+            exit 3
+        fi
+
+        # ── Post-deploy auto-rollback watch ─────────────────────
+        # Watch /health for 60 s after deploy.  If 3 consecutive
+        # checks fail (10 s apart), automatically revert the ECS
+        # service to the previous task definition.  Skip with
+        # SEVIM_SKIP_AUTO_ROLLBACK=1.
+        if [[ "${SEVIM_SKIP_AUTO_ROLLBACK:-0}" == "1" || -z "$PREV_TD" || "$PREV_TD" == "None" ]]; then
+            echo "[deploy.sh] auto-rollback watch SKIPPED (flag set or no PREV_TD recorded)."
+        else
+            URL="https://${SEVIM_DOMAIN}/health"
+            echo "[deploy.sh] Post-deploy watch: probing $URL for 60 s (3 consecutive failures = rollback)"
+            consec_fail=0
+            for _ in 1 2 3 4 5 6; do
+                code=$(curl -s -o /dev/null -m 5 -w "%{http_code}" "$URL" || echo "000")
+                if [[ "$code" == "200" ]]; then
+                    consec_fail=0
+                    echo "[deploy.sh]   /health → $code"
+                else
+                    consec_fail=$((consec_fail + 1))
+                    echo "[deploy.sh]   /health → $code  (consecutive failures: $consec_fail)"
+                    if [[ "$consec_fail" -ge 3 ]]; then
+                        echo
+                        echo "[deploy.sh] 🚨 3 consecutive /health failures — rolling back to $PREV_TD"
+                        AWS_PROFILE="$AWS_PROFILE" aws ecs update-service \
+                            --cluster REDACTED-CLUSTER \
+                            --service REDACTED-SERVICE \
+                            --task-definition "$PREV_TD" \
+                            --region "$CDK_DEFAULT_REGION" \
+                            --query 'service.taskDefinition' --output text
+                        AWS_PROFILE="$AWS_PROFILE" aws ecs wait services-stable \
+                            --cluster REDACTED-CLUSTER \
+                            --services REDACTED-SERVICE \
+                            --region "$CDK_DEFAULT_REGION"
+                        echo "[deploy.sh] ⏪  Auto-rollback complete.  Inspect logs to fix the underlying issue."
+                        exit 4
+                    fi
+                fi
+                sleep 10
+            done
+            echo "[deploy.sh] ✅ Post-deploy watch passed — service healthy."
+        fi
         ;;
     *)
         # Pass-through for any other cdk subcommand (e.g. destroy, ls).
