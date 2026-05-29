@@ -59,8 +59,7 @@
   /* When the JS hasn't filled status yet, hide the dot to avoid a
      mysterious empty green bullet during boot. */
   .chat-header .status:empty::before { display: none; }
-  .chat-header #canvas-badge { font-size: 0.7em; color: var(--muted);
-    font-family: ui-monospace, monospace; }
+  .chat-header #canvas-badge { display: none; }
   .chat-header #clear-btn {
     background: transparent; border: 1px solid var(--border);
     color: var(--muted); border-radius: 4px; padding: 0.25em 0.55em;
