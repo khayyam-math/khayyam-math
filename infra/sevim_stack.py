@@ -315,6 +315,15 @@ class SevimStack(Stack):
                 ),
             ),
             certificate=cert,
+            # ELBSecurityPolicy-2016-08 (the CDK default) caps the listener at
+            # TLS 1.0–1.2 and refuses TLS 1.3.  Some corporate / school proxies
+            # (esp. Canadian education and gov networks running Zscaler /
+            # Fortinet / Palo Alto) flag TLS-1.0/1.1-capable endpoints as
+            # insecure and block the page with a generic "security concerns"
+            # warning.  RECOMMENDED_TLS resolves to
+            # ELBSecurityPolicy-TLS13-1-2-2021-06: TLS 1.2 minimum, TLS 1.3
+            # enabled, no TLS 1.0/1.1.
+            ssl_policy=elbv2.SslPolicy.RECOMMENDED_TLS,
             domain_name=domain,
             domain_zone=zone,
             redirect_http=bool(domain),  # only when we have HTTPS
