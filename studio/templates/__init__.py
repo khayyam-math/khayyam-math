@@ -27,6 +27,7 @@ from studio.templates.primary import place_value, multiplication_array
 from studio.templates.venn import venn_diagram
 from studio.templates.fraction import fraction
 from studio.templates.trig import unit_circle, triangle
+from studio.templates.newton import newton_method
 
 __all__ = [
     "matrix_multiplication",
@@ -45,4 +46,5 @@ __all__ = [
     "fraction",
     "unit_circle",
     "triangle",
+    "newton_method",
 ]

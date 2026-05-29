@@ -166,6 +166,37 @@ Supported templates:
     asks for the regions / intersections to be labelled; for 2 sets
     use only keys a, b, ab.
 
+  newton_method — "Newton's method", "Newton-Raphson", "find the
+    root of f using Newton's method", "show Newton iteration on f",
+    "use Newton's method to compute the cube/square root of N",
+    "where does the tangent line lead", "show me Newton converging".
+    args: {
+      "f": "<SymPy-parseable expression in x>",
+      "x0": <number>,
+      "n_iter": <int, 3 to 6, default 4>,
+      "title": "<short title, optional>"
+    }
+    PARSE f from the prompt.  Accept both "**" and "^" exponentiation
+    and implicit multiplication ("2x" → 2*x).  Examples:
+      • "Newton's method on f(x) = x^3 - 2 from x = 2"
+            → f="x**3 - 2", x0=2
+      • "Find the cube root of 2 with Newton's method"
+            → f="x**3 - 2", x0=2
+      • "Find the square root of 5 with Newton from x = 3"
+            → f="x**2 - 5", x0=3
+      • "Solve cos(x) = x near x = 0.5"
+            → f="cos(x) - x", x0=0.5
+      • "Newton's method on x*exp(x) = 1 starting at 0.5"
+            → f="x*exp(x) - 1", x0=0.5
+    If the prompt asks for "the cube root of N" / "the Nth root of M"
+    / "square root of N" using Newton, rewrite as f(x)=x^k - N and
+    invent a reasonable starting point (round up from the true root).
+    USE THIS TEMPLATE for any "Newton" / "Newton-Raphson" / "Newton
+    iteration" prompt that names a function and a starting value
+    (explicit or implicit).  The LLM SVG path has consistently drawn
+    tangent lines that aren't actually tangent, so this template
+    must be preferred.
+
 Rules:
 1. **Prefer matching over rejecting.**  If the prompt mentions a matrix operation (inverse, determinant, transpose, multiplication, solving Ax=b), a finite-state machine / DFA / NFA, the Pythagorean theorem, or elementary addition/subtraction, return the appropriate template even when the prompt is phrased loosely ("show me", "illustrate", "how do you find", "explain with an example").  We render a worked example with concrete numbers — that's MORE useful than abstract LLM-drawn diagrams.
 2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
@@ -249,6 +280,7 @@ def _build_dispatch() -> None:
         state_diagram, pythagoras, number_line, data_table,
         adjacency_matrix, place_value, multiplication_array,
         venn_diagram, fraction, unit_circle, triangle,
+        newton_method,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -267,6 +299,7 @@ def _build_dispatch() -> None:
         "fraction": fraction,
         "unit_circle": unit_circle,
         "triangle": triangle,
+        "newton_method": newton_method,
     }
 
 
