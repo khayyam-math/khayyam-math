@@ -543,9 +543,71 @@ def render_for_reviewer(gt: FigureGroundTruth | None) -> str:
     return "\n".join(lines)
 
 
+def render_for_generator(gt: FigureGroundTruth | None) -> str:
+    """Produce the directive block to inject into the FIGURE-GENERATING
+    LLM's user message (NOT the reviewer's).  Different tone from
+    ``render_for_reviewer``: this one tells the figure LLM the values
+    are already validated and must be reproduced as-is, instead of
+    asking it to verify the figure against them.
+
+    Empty string when there is no useful ground truth, so a caller can
+    safely append the result unconditionally.
+    """
+    if not gt or not gt.claims:
+        return ""
+    lines = [
+        "=== INDEPENDENT GROUND TRUTH (already validated by SymPy) ===",
+        "A separate proposer + SymPy validator has pre-computed the "
+        "following values from the user's prompt.  Use these EXACT "
+        "values when drawing the figure.  Do NOT recompute them from "
+        "scratch and do NOT contradict any of them; the user has "
+        "them already verified.  If your figure would place an "
+        "element somewhere that contradicts a claim below, the figure "
+        "is WRONG.",
+        "",
+    ]
+    for c in gt.claims:
+        if c.kind == "position":
+            lines.append(
+                f"  - {c.label}: place this at coordinate "
+                f"{c.value:.4g} on the {c.axis}-axis.  {c.explanation}"
+            )
+        elif c.kind == "value":
+            lines.append(
+                f"  - {c.label}: the figure must display the numeric "
+                f"value {c.value:.4g}.  {c.explanation}"
+            )
+        elif c.kind == "slope":
+            lines.append(
+                f"  - {c.label}: the named line MUST have slope "
+                f"{c.value:.4g}.  Positive slopes rise to the right, "
+                f"negative slopes fall to the right; a slope of 12 is "
+                f"steep (rises ~12 units per 1 unit right), a slope of "
+                f"0.5 is shallow.  {c.explanation}"
+            )
+        elif c.kind == "relation":
+            lines.append(
+                f"  - {c.label}: relation '{c.relation}' MUST hold "
+                f"visually between the two named items.  e.g. "
+                f"'less_than' / 'left_of' means strictly to the LEFT "
+                f"on the x-axis; 'above' means strictly higher on "
+                f"the y-axis.  {c.explanation}"
+            )
+        elif c.kind == "presence":
+            lines.append(
+                f"  - {c.label}: this element MUST appear somewhere "
+                f"in the figure.  {c.explanation}"
+            )
+    lines.append("")
+    lines.append("=== END GROUND TRUTH ===")
+    lines.append("")
+    return "\n".join(lines)
+
+
 __all__ = [
     "FigureClaim",
     "FigureGroundTruth",
     "extract_figure_ground_truth",
     "render_for_reviewer",
+    "render_for_generator",
 ]

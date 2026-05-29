@@ -1283,6 +1283,31 @@ _REVIEW_SYSTEM = (
     "the learner something false.  Math correctness is the single "
     "most important check you do.\n"
     "\n"
+    "NARRATION–FIGURE GEOMETRIC VOCABULARY MUST MATCH.  When the "
+    "narration uses a geometric term — TANGENT, SECANT, PERPENDICULAR, "
+    "PARALLEL, INTERSECTS, CROSSES, TOUCHES, PASSES THROUGH, MIDPOINT, "
+    "VERTEX, ASYMPTOTE, NORMAL, BISECTOR — the corresponding figure "
+    "element MUST actually exhibit that geometric property, not just "
+    "approximate it.  Specifically FAIL when:\n"
+    "  • the narration calls a line 'tangent to' a curve but the line "
+    "    visibly does not touch the curve at exactly one point with the "
+    "    curve's local slope (parallel lines, secants crossing the "
+    "    curve at two points, or lines floating away from the curve "
+    "    are all NOT tangent — flag this);\n"
+    "  • the narration says 'perpendicular' but the lines do not meet "
+    "    at a visible right angle;\n"
+    "  • the narration says 'parallel' but the lines visibly converge "
+    "    or diverge;\n"
+    "  • the narration says 'crosses the x-axis at x = 3' but the "
+    "    visible crossing is at a different x;\n"
+    "  • the narration names a point as 'midpoint' / 'vertex' / "
+    "    'centroid' / 'focus' but the marker is placed somewhere else.\n"
+    "If the narration's geometric vocabulary does not match the figure's "
+    "geometry, it is a math-correctness failure (teaches the learner a "
+    "false relationship between two visual elements) — FAIL with a "
+    "specific fix that names both the narrated term and the actual "
+    "geometric defect.\n"
+    "\n"
     "You are a pragmatic reviewer of mathematical figures AND the "
     "narration that explains them.  You are given the rendered figure "
     "(as a PNG) and the spoken narration script (as text).  Default to "
@@ -1929,14 +1954,15 @@ async def express_figure(
     base_url: str,
     model: str,
     api_key: str | None,
-    # max_retries=1 — total budget = 2 attempts.  Was bumped to 2
-    # before best-attempt selection existed; production logs since
-    # then show attempt 0 was consistently the best (or tied with
-    # later attempts), so 3 attempts cost ~30 s for negligible
-    # quality gain.  With best-attempt + patch-retry, 2 attempts
-    # gives us best-of-2 — usually as good as best-of-3 — at half
-    # the worst-case latency (~40-50 s vs ~80-100 s).
-    max_retries: int = 1,
+    # max_retries=2 — total budget = 3 attempts.  Previously 1 (2 total
+    # attempts) on the assumption that attempt 0 was usually best.
+    # Bumped back to 2 (3 total) after the Tier-5 figure-ground-truth
+    # audit started firing: with the new audit, retries become more
+    # productive (the critique now carries SymPy-verified positional
+    # answers, not just vague layout complaints).  Cost: ~10-15 s extra
+    # latency on a failing prompt, none on a passing one.  See
+    # studio/templates/figure_ground_truth.py for the audit details.
+    max_retries: int = 2,
     context_canvases: list[dict[str, Any]] | None = None,
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
     allow_panels: bool = True,
@@ -2393,16 +2419,21 @@ async def express_figure(
     # outside the retry loop.  This is a separate small LLM proposer
     # (gpt-4o-mini by default) followed by a SymPy validator that
     # produces a list of positional / relational / value claims a
-    # correct figure must visibly satisfy.  The list is passed into
-    # _vision_review on every retry attempt so the reviewer always
-    # has independent ground truth to compare the rendered figure
-    # against.  Failure here is non-fatal: empty result skips the
-    # extra check, pipeline continues unchanged.  See
+    # correct figure must visibly satisfy.  The validated list is
+    # used in TWO places:
+    #   (1) fed FORWARD to the figure-generating LLM (below) so it
+    #       draws the figure with the right numbers the first time;
+    #   (2) passed to _vision_review on every retry attempt so the
+    #       reviewer always has independent ground truth to compare
+    #       the rendered figure against.
+    # Failure here is non-fatal: empty result skips both injections,
+    # pipeline continues unchanged.  See
     # studio/templates/figure_ground_truth.py for the design rationale.
     figure_ground_truth = None
     try:
         from studio.templates.figure_ground_truth import (
             extract_figure_ground_truth as _extract_fgt,
+            render_for_generator as _render_fgt_for_generator,
         )
         figure_ground_truth = await _extract_fgt(user_prompt)
         if figure_ground_truth and figure_ground_truth.claims:
@@ -2411,6 +2442,40 @@ async def express_figure(
                 f"of {figure_ground_truth.proposed} claim(s) validated "
                 f"(dropped: {len(figure_ground_truth.dropped_reasons)})"
             )
+            # Sample of the dropped reasons (first 3, truncated).
+            # Helps tune the proposer prompt over time without
+            # spamming CloudWatch.
+            for reason in figure_ground_truth.dropped_reasons[:3]:
+                _log(f"  fgt dropped: {reason[:160]}")
+            # (1) Splice the directive block into the user message we
+            # send to the figure LLM.  Prepended so it sits BEFORE the
+            # original prompt and the LLM has the validated values in
+            # front of it while drawing.
+            try:
+                gt_block_for_generator = _render_fgt_for_generator(
+                    figure_ground_truth
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log(f"render_for_generator FAILED: "
+                     f"{type(exc).__name__}: {exc}")
+                gt_block_for_generator = ""
+            if gt_block_for_generator and isinstance(user_content, str):
+                user_content = (
+                    gt_block_for_generator + "\n" + user_content
+                )
+            elif gt_block_for_generator and isinstance(user_content, list):
+                # Refinement-mode multi-modal payload: prepend the
+                # ground-truth as a leading text block so the LLM
+                # reads it before the prior-canvas attachments.
+                user_content = (
+                    [{"type": "text", "text": gt_block_for_generator}]
+                    + user_content
+                )
+            # Rebuild the messages list with the augmented user_content.
+            messages = [
+                {"role": "system", "content": _EXPRESS_SYSTEM},
+                {"role": "user", "content": user_content},
+            ]
         else:
             _log(
                 "figure ground truth: no validated claims "
