@@ -1476,6 +1476,7 @@ def _review_user_prompt(
     svg_text: str | None = None,
     solution: str | None = None,
     math_claims: list | None = None,
+    figure_ground_truth: Any = None,
 ) -> str:
     """Build the user message body for a figure review.
 
@@ -1525,9 +1526,24 @@ def _review_user_prompt(
         if lines:
             math_block += ("\nMath claims it asserts (already verified "
                            "by a CAS):\n" + "\n".join(lines) + "\n")
+    # Independent figure-level ground truth: positional / relational /
+    # value claims derived from the prompt by a separate proposer +
+    # SymPy validator, NOT from the figure LLM's own narration.  Empty
+    # string when extraction returned nothing useful, so this append
+    # is always safe.
+    ground_truth_block = ""
+    if figure_ground_truth is not None:
+        try:
+            from studio.templates.figure_ground_truth import (
+                render_for_reviewer as _render_gt,
+            )
+            ground_truth_block = _render_gt(figure_ground_truth)
+        except Exception:  # noqa: BLE001
+            ground_truth_block = ""
     return (
         f"User asked: {user_prompt!r}\n"
         f"{math_block}"
+        f"{ground_truth_block}"
         f"{narration_block}"
         f"{svg_block}\n"
         "Review the figure AND the narration together.  Two independent "
@@ -2373,6 +2389,37 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"template router errored: {type(exc).__name__}: {exc}")
 
+    # Compute the figure-level ground truth ONCE per express call,
+    # outside the retry loop.  This is a separate small LLM proposer
+    # (gpt-4o-mini by default) followed by a SymPy validator that
+    # produces a list of positional / relational / value claims a
+    # correct figure must visibly satisfy.  The list is passed into
+    # _vision_review on every retry attempt so the reviewer always
+    # has independent ground truth to compare the rendered figure
+    # against.  Failure here is non-fatal: empty result skips the
+    # extra check, pipeline continues unchanged.  See
+    # studio/templates/figure_ground_truth.py for the design rationale.
+    figure_ground_truth = None
+    try:
+        from studio.templates.figure_ground_truth import (
+            extract_figure_ground_truth as _extract_fgt,
+        )
+        figure_ground_truth = await _extract_fgt(user_prompt)
+        if figure_ground_truth and figure_ground_truth.claims:
+            _log(
+                f"figure ground truth: {figure_ground_truth.validated} "
+                f"of {figure_ground_truth.proposed} claim(s) validated "
+                f"(dropped: {len(figure_ground_truth.dropped_reasons)})"
+            )
+        else:
+            _log(
+                "figure ground truth: no validated claims "
+                "(empty or all dropped)"
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log(f"figure ground truth FAILED: {type(exc).__name__}: {exc}")
+        figure_ground_truth = None
+
     for attempt in range(max_retries + 1):
         _log(f"attempt={attempt} sending main request")
         # 1. Ask LLM for {svg, narration, title} in structured form.
@@ -2922,6 +2969,7 @@ async def express_figure(
             narration=result.get("narration") or [],
             solution=result.get("solution"),
             math_claims=result.get("math_claims"),
+            figure_ground_truth=figure_ground_truth,
         )
 
         # Snapshot pre-merge state so the best-attempt accumulator
@@ -3244,6 +3292,7 @@ async def _vision_review(
     narration: list[dict[str, Any]] | None = None,
     solution: str | None = None,
     math_claims: list | None = None,
+    figure_ground_truth: Any = None,
 ) -> str | None:
     """Ask the reviewer LLM to audit the (svg, narration) pair via the
     structured REVIEW_SCHEMA.  Returns ``None`` on PASS (or if the
@@ -3279,7 +3328,8 @@ async def _vision_review(
         # literal access to ids/attrs/structure that a PNG would hide.
         user_msg = _review_user_prompt(user_prompt, narration, svg_text=svg,
                                         solution=solution,
-                                        math_claims=math_claims)
+                                        math_claims=math_claims,
+                                        figure_ground_truth=figure_ground_truth)
         messages = [
             {"role": "system", "content": _REVIEW_SYSTEM},
             {"role": "user", "content": user_msg},
@@ -3301,7 +3351,8 @@ async def _vision_review(
                 {"type": "text",
                  "text": _review_user_prompt(
                      user_prompt, narration,
-                     solution=solution, math_claims=math_claims)},
+                     solution=solution, math_claims=math_claims,
+                     figure_ground_truth=figure_ground_truth)},
                 {"type": "image_url",
                  "image_url": {"url": f"data:image/png;base64,{b64}"}},
             ]},
