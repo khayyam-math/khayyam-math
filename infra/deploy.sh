@@ -38,6 +38,16 @@ cd "$(dirname "$(readlink -f "$0")")"
 : "${AWS_PROFILE:?Set AWS_PROFILE to the CLI profile that should run cdk deploy}"
 : "${CDK_DEFAULT_ACCOUNT:?Set CDK_DEFAULT_ACCOUNT to your 12-digit AWS account ID}"
 export CDK_DEFAULT_REGION="${CDK_DEFAULT_REGION:-us-east-1}"
+# CDK reads CDK_DEFAULT_REGION for the stack target, but the AWS SDK
+# underneath (used for assume-role / lookup / deploy-role calls) reads
+# AWS_REGION / AWS_DEFAULT_REGION and otherwise falls back to the active
+# profile's region.  If those don't match CDK_DEFAULT_REGION, CDK tries
+# to load bootstrap from the wrong region and fails with
+# "SSM parameter /cdk-bootstrap/hnb659fds/version not found".  Export
+# them explicitly so a profile with a different default region (e.g.
+# ap-south-1) doesn't sabotage the deploy.
+export AWS_REGION="$CDK_DEFAULT_REGION"
+export AWS_DEFAULT_REGION="$CDK_DEFAULT_REGION"
 : "${SEVIM_DOMAIN:?Set SEVIM_DOMAIN to the Route 53 domain to deploy under (e.g. example.com)}"
 
 # Build-time git SHA — flows into the image as $SEVIM_GIT_SHA and
