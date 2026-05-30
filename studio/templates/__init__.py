@@ -28,6 +28,7 @@ from studio.templates.venn import venn_diagram
 from studio.templates.fraction import fraction
 from studio.templates.trig import unit_circle, triangle
 from studio.templates.newton import newton_method
+from studio.templates.volumes import volume_of_sphere, volume_of_cone
 
 __all__ = [
     "matrix_multiplication",
@@ -47,4 +48,6 @@ __all__ = [
     "unit_circle",
     "triangle",
     "newton_method",
+    "volume_of_sphere",
+    "volume_of_cone",
 ]

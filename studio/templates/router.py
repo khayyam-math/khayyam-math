@@ -166,6 +166,32 @@ Supported templates:
     asks for the regions / intersections to be labelled; for 2 sets
     use only keys a, b, ab.
 
+  volume_of_sphere — "prove the volume of a sphere", "derive
+    V = (4/3) π r^3", "show why a sphere has volume (4/3) pi r
+    cubed", "use disks to find the volume of a sphere", "integrate
+    to find the sphere volume".
+    args: {"radius": <number, default 1.0>,
+           "title": "<short title, optional>"}
+    Use this template whenever the prompt asks to PROVE / DERIVE /
+    SHOW / INTEGRATE the volume of a sphere by any disk- or shell-
+    method argument.  The figure draws a side-view sphere with an
+    equator ellipse for 3D illusion, a representative horizontal
+    disk slice, the Pythagorean triangle that gives the disk's
+    radius √(r²−y²), and the full integral derivation.  Numbers are
+    not required from the prompt; the figure uses generic r.
+
+  volume_of_cone — "prove the volume of a cone", "derive
+    V = (1/3) π r^2 h", "show why a cone is one third pi r
+    squared h", "use disks to find the volume of a cone",
+    "integrate to find the cone volume".
+    args: {"radius": <number, default 1.0>,
+           "height": <number, default 2.0>,
+           "title": "<short title, optional>"}
+    Same shape as volume_of_sphere: side-view cone with elliptical
+    base, a representative horizontal disk slice partway up, the
+    similar-triangles relation x = r·(y/h), and the integral
+    derivation.
+
   newton_method — "Newton's method", "Newton-Raphson", "find the
     root of f using Newton's method", "show Newton iteration on f",
     "use Newton's method to compute the cube/square root of N",
@@ -281,6 +307,7 @@ def _build_dispatch() -> None:
         adjacency_matrix, place_value, multiplication_array,
         venn_diagram, fraction, unit_circle, triangle,
         newton_method,
+        volume_of_sphere, volume_of_cone,
     )
     _DISPATCH = {
         "matrix_multiplication": matrix_multiplication,
@@ -300,6 +327,8 @@ def _build_dispatch() -> None:
         "unit_circle": unit_circle,
         "triangle": triangle,
         "newton_method": newton_method,
+        "volume_of_sphere": volume_of_sphere,
+        "volume_of_cone": volume_of_cone,
     }
 
 
