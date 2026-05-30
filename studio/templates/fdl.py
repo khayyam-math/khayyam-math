@@ -109,7 +109,65 @@ class Caption:
     anchor: Literal["right", "top", "bottom"] = "right"
 
 
-Primitive = Plot | AxisMark | MarkPoint | TangentAt | Caption
+# ── Phase 2 concept primitives ──────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Secant:
+    """Line through TWO points on the named curve, (x_a, f(x_a)) and
+    (x_b, f(x_b)).  Contrast with TangentAt: a tangent touches the
+    curve at one point with the curve's slope there; a secant crosses
+    it at two points and has slope (f(b)-f(a))/(b-a)."""
+    curve: str
+    x_a: float
+    x_b: float
+    label: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class Intersection:
+    """Marks each real intersection of two curves f(x)=g(x) inside
+    the plot's x-range.  SymPy.solve gives the x-coordinates."""
+    curve_a: str
+    curve_b: str
+    label: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ShadeUnder:
+    """Shaded region between the named curve and the x-axis for
+    x in [a, b].  Optional label sits inside the shaded region."""
+    curve: str
+    a: float
+    b: float
+    label: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RegionBetween:
+    """Shaded region between two curves for x in [a, b]."""
+    curve_a: str
+    curve_b: str
+    a: float
+    b: float
+    label: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class Vector:
+    """Arrow from (start_x, start_y) to (end_x, end_y) in math
+    coordinates.  Optional label sits near the midpoint."""
+    start_x: float
+    start_y: float
+    end_x: float
+    end_y: float
+    label: Optional[str] = None
+
+
+Primitive = (
+    Plot | AxisMark | MarkPoint | TangentAt | Caption
+    | Secant | Intersection | ShadeUnder | RegionBetween | Vector
+)
 
 
 @dataclass
@@ -197,6 +255,17 @@ def _compute_plot_range(
             xs.append(p.x)
         elif isinstance(p, AxisMark) and p.axis == "x":
             xs.append(p.x)
+        elif isinstance(p, Secant):
+            xs.append(p.x_a)
+            xs.append(p.x_b)
+        elif isinstance(p, (ShadeUnder, RegionBetween)):
+            xs.append(p.a)
+            xs.append(p.b)
+        elif isinstance(p, Vector):
+            xs.append(p.start_x)
+            xs.append(p.end_x)
+            ys.append(p.start_y)
+            ys.append(p.end_y)
     if not xs:
         return None
     x_lo, x_hi = min(xs), max(xs)
@@ -345,6 +414,79 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             f'fill="none" stroke="{p.color}" stroke-width="2.6"/>'
         )
 
+    # Pass 1b: shaded regions (below tangents, below dots)
+    for i, p in enumerate(scene.primitives):
+        if isinstance(p, ShadeUnder):
+            plot = plot_by_label.get(p.curve)
+            if plot is None:
+                continue
+            n = 60
+            pts: List[str] = []
+            for k in range(n + 1):
+                xv = p.a + (p.b - p.a) * k / n
+                yv = _safe_eval(parse, sp, plot.f, xv)
+                if yv is None or yv != yv:
+                    continue
+                pts.append(f"{sx(xv):.1f},{sy(yv):.1f}")
+            # close polygon down to x-axis
+            pts.append(f"{sx(p.b):.1f},{sy(0):.1f}")
+            pts.append(f"{sx(p.a):.1f},{sy(0):.1f}")
+            out.append(
+                f'<polygon id="shade_under_{i}" '
+                f'points="{" ".join(pts)}" '
+                f'fill="#2a6fd6" fill-opacity="0.18" '
+                f'stroke="#2a6fd6" stroke-width="0.8"/>'
+            )
+            if p.label:
+                # label centered horizontally, near top of shaded region
+                mid_x = (p.a + p.b) / 2
+                mid_y_v = _safe_eval(parse, sp, plot.f, mid_x)
+                if mid_y_v is not None:
+                    label_y = mid_y_v / 2  # midway between curve and axis
+                    out.append(
+                        f'<text x="{sx(mid_x):.1f}" '
+                        f'y="{sy(label_y):.1f}" font-size="14" '
+                        f'font-family="serif" text-anchor="middle" '
+                        f'fill="#1a4f99" font-style="italic">'
+                        f'{_esc(p.label)}</text>'
+                    )
+        elif isinstance(p, RegionBetween):
+            plot_a = plot_by_label.get(p.curve_a)
+            plot_b = plot_by_label.get(p.curve_b)
+            if plot_a is None or plot_b is None:
+                continue
+            n = 60
+            pts_top: List[str] = []
+            pts_bot: List[str] = []
+            for k in range(n + 1):
+                xv = p.a + (p.b - p.a) * k / n
+                ya = _safe_eval(parse, sp, plot_a.f, xv)
+                yb = _safe_eval(parse, sp, plot_b.f, xv)
+                if ya is None or yb is None:
+                    continue
+                pts_top.append(f"{sx(xv):.1f},{sy(ya):.1f}")
+                pts_bot.append(f"{sx(xv):.1f},{sy(yb):.1f}")
+            # build closed polygon: top forward, bottom reversed
+            poly = pts_top + list(reversed(pts_bot))
+            out.append(
+                f'<polygon id="region_between_{i}" '
+                f'points="{" ".join(poly)}" '
+                f'fill="#9b59b6" fill-opacity="0.20" '
+                f'stroke="#9b59b6" stroke-width="0.8"/>'
+            )
+            if p.label:
+                mid_x = (p.a + p.b) / 2
+                ya = _safe_eval(parse, sp, plot_a.f, mid_x) or 0.0
+                yb = _safe_eval(parse, sp, plot_b.f, mid_x) or 0.0
+                mid_y = (ya + yb) / 2
+                out.append(
+                    f'<text x="{sx(mid_x):.1f}" '
+                    f'y="{sy(mid_y):.1f}" font-size="14" '
+                    f'font-family="serif" text-anchor="middle" '
+                    f'fill="#6c3483" font-style="italic">'
+                    f'{_esc(p.label)}</text>'
+                )
+
     # Pass 2: tangent lines (before dots so dots sit on top)
     for i, p in enumerate(scene.primitives):
         if not isinstance(p, TangentAt):
@@ -386,6 +528,121 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
                 f'font-size="13" font-family="serif" fill="#c0392b" '
                 f'font-style="italic">{_esc(p.label)}</text>'
             )
+
+    # Pass 2b: Secant, Intersection, Vector — line-like concept primitives
+    for i, p in enumerate(scene.primitives):
+        if isinstance(p, Secant):
+            plot = plot_by_label.get(p.curve)
+            if plot is None:
+                continue
+            y_a = _safe_eval(parse, sp, plot.f, p.x_a)
+            y_b = _safe_eval(parse, sp, plot.f, p.x_b)
+            if y_a is None or y_b is None:
+                continue
+            # extend the secant line a little past both points so it
+            # reads as a "line through" rather than a "segment between"
+            dx = p.x_b - p.x_a
+            if abs(dx) < 1e-9:
+                continue
+            slope = (y_b - y_a) / dx
+            ext = max(abs(dx) * 0.30, (plot_xmax - plot_xmin) * 0.06)
+            x_start = p.x_a - ext
+            x_end = p.x_b + ext
+            y_start = y_a + slope * (x_start - p.x_a)
+            y_end = y_a + slope * (x_end - p.x_a)
+            out.append(
+                f'<line id="secant_{i}" x1="{sx(x_start):.1f}" '
+                f'y1="{sy(y_start):.1f}" x2="{sx(x_end):.1f}" '
+                f'y2="{sy(y_end):.1f}" stroke="#e67e22" '
+                f'stroke-width="2.2"/>'
+            )
+            # mark the two secant endpoints with small dots
+            for xx, yy in ((p.x_a, y_a), (p.x_b, y_b)):
+                out.append(
+                    f'<circle cx="{sx(xx):.1f}" cy="{sy(yy):.1f}" '
+                    f'r="4" fill="#e67e22"/>'
+                )
+            if p.label:
+                mx, my = (p.x_a + p.x_b) / 2, (y_a + y_b) / 2
+                out.append(
+                    f'<text x="{sx(mx):.1f}" y="{sy(my) - 10:.1f}" '
+                    f'font-size="13" font-family="serif" '
+                    f'fill="#a04400" font-style="italic">'
+                    f'{_esc(p.label)}</text>'
+                )
+        elif isinstance(p, Intersection):
+            plot_a = plot_by_label.get(p.curve_a)
+            plot_b = plot_by_label.get(p.curve_b)
+            if plot_a is None or plot_b is None:
+                continue
+            # Solve f(x) = g(x) symbolically.  The parser binds its
+            # own 'x' Symbol instance, so we MUST use that one (a new
+            # Symbol('x') would be a different identity and solve()
+            # would return []).
+            try:
+                from sympy import solve
+                eq_lhs = parse(plot_a.f)
+                eq_rhs = parse(plot_b.f)
+                if eq_lhs is None or eq_rhs is None:
+                    continue
+                diff_expr = eq_lhs - eq_rhs
+                # take the variable from the expression's free symbols
+                free = diff_expr.free_symbols
+                if not free:
+                    continue
+                x_sym = next(iter(free))
+                roots_raw = solve(diff_expr, x_sym)
+            except Exception:  # noqa: BLE001
+                continue
+            roots: List[float] = []
+            for r in roots_raw:
+                try:
+                    if r.is_real is False:
+                        continue
+                    rv = float(r)
+                    if plot_xmin <= rv <= plot_xmax:
+                        roots.append(rv)
+                except Exception:  # noqa: BLE001
+                    continue
+            for j, rv in enumerate(roots):
+                yv = _safe_eval(parse, sp, plot_a.f, rv) or 0.0
+                out.append(
+                    f'<circle id="intersection_{i}_{j}" '
+                    f'cx="{sx(rv):.1f}" cy="{sy(yv):.1f}" r="7" '
+                    f'fill="#e74c3c" stroke="#8b1a0e" '
+                    f'stroke-width="2"/>'
+                )
+                lbl = p.label if (p.label and j == 0) else f"({rv:.3g}, {yv:.3g})"
+                out.append(
+                    f'<text x="{sx(rv) + 12:.1f}" '
+                    f'y="{sy(yv) - 10:.1f}" font-size="13" '
+                    f'font-family="serif" fill="#8b1a0e" '
+                    f'font-weight="bold">{_esc(lbl)}</text>'
+                )
+        elif isinstance(p, Vector):
+            # arrow with a triangle head; uses an inline marker
+            out.append(
+                f'<defs><marker id="arr_vec_{i}" viewBox="0 -5 10 10" '
+                f'refX="9" refY="0" markerWidth="7" markerHeight="7" '
+                f'orient="auto">'
+                f'<path d="M0,-5L10,0L0,5" fill="#16a085"/></marker>'
+                f'</defs>'
+            )
+            out.append(
+                f'<line id="vector_{i}" x1="{sx(p.start_x):.1f}" '
+                f'y1="{sy(p.start_y):.1f}" x2="{sx(p.end_x):.1f}" '
+                f'y2="{sy(p.end_y):.1f}" stroke="#16a085" '
+                f'stroke-width="2.6" marker-end="url(#arr_vec_{i})"/>'
+            )
+            if p.label:
+                mx = (p.start_x + p.end_x) / 2
+                my = (p.start_y + p.end_y) / 2
+                out.append(
+                    f'<text x="{sx(mx):.1f}" y="{sy(my) - 10:.1f}" '
+                    f'font-size="14" font-family="serif" '
+                    f'fill="#0e7361" font-weight="bold">'
+                    f'{_esc(p.label)}</text>'
+                )
 
     # Pass 3: AxisMarks (ticks with labels)
     for p in scene.primitives:
@@ -525,8 +782,12 @@ SCENE_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["plot", "axis_mark", "mark_point",
-                                 "tangent_at", "caption"],
+                        "enum": [
+                            "plot", "axis_mark", "mark_point",
+                            "tangent_at", "caption",
+                            "secant", "intersection",
+                            "shade_under", "region_between", "vector",
+                        ],
                     },
                     # Plot
                     "f": {"type": ["string", "null"]},
@@ -545,9 +806,27 @@ SCENE_SCHEMA: dict[str, Any] = {
                     "text": {"type": ["string", "null"]},
                     "anchor": {"type": ["string", "null"],
                                "enum": ["right", "top", "bottom", None]},
+                    # Secant / RegionBetween / ShadeUnder
+                    "x_a": {"type": ["number", "null"]},
+                    "x_b": {"type": ["number", "null"]},
+                    "a": {"type": ["number", "null"]},
+                    "b": {"type": ["number", "null"]},
+                    # Intersection / RegionBetween
+                    "curve_a": {"type": ["string", "null"]},
+                    "curve_b": {"type": ["string", "null"]},
+                    # Vector
+                    "start_x": {"type": ["number", "null"]},
+                    "start_y": {"type": ["number", "null"]},
+                    "end_x": {"type": ["number", "null"]},
+                    "end_y": {"type": ["number", "null"]},
                 },
-                "required": ["kind", "f", "x_min", "x_max", "label", "x",
-                             "axis", "curve", "mode", "text", "anchor"],
+                "required": [
+                    "kind", "f", "x_min", "x_max", "label", "x",
+                    "axis", "curve", "mode", "text", "anchor",
+                    "x_a", "x_b", "a", "b",
+                    "curve_a", "curve_b",
+                    "start_x", "start_y", "end_x", "end_y",
+                ],
             },
             "maxItems": 16,
         },
@@ -581,6 +860,27 @@ _EXTRACTOR_SYSTEM = (
     "               curve, x, label, mode ('line' = symmetric extension, "
     "               'to_zero' = Newton-method style ending at x-axis "
     "               crossing).\n"
+    "  secant:      a line through TWO points (x_a, f(x_a)) and "
+    "               (x_b, f(x_b)) on the named curve.  Fields: curve, "
+    "               x_a, x_b, label.  Use this whenever the prompt "
+    "               talks about an average rate of change, a chord, "
+    "               or the limit of secants becoming a tangent.\n"
+    "  intersection: marks each real intersection of two named "
+    "               curves inside the plot's x range.  SymPy solves "
+    "               f(x) = g(x).  Fields: curve_a, curve_b, label.  "
+    "               Use this for 'where do f and g intersect', "
+    "               'find the points where these meet'.\n"
+    "  shade_under: shaded region between the named curve and the "
+    "               x-axis for x in [a, b].  Use for 'area under f "
+    "               from a to b', Riemann-sum intro, integral "
+    "               visualization.  Fields: curve, a, b, label.\n"
+    "  region_between: shaded region between TWO curves for x in "
+    "               [a, b].  Use for 'area between f and g'.  Fields: "
+    "               curve_a, curve_b, a, b, label.\n"
+    "  vector:      arrow from (start_x, start_y) to (end_x, end_y) "
+    "               in math coordinates.  Use for displacement, force, "
+    "               gradient direction, etc.  Fields: start_x, start_y, "
+    "               end_x, end_y, label.\n"
     "  caption:     right-side text.  Fields: text, anchor='right'.\n"
     "\n"
     "COMPOSITION RULES — follow these literally:\n"
@@ -631,6 +931,21 @@ _EXTRACTOR_SYSTEM = (
     "x=2 mode='to_zero', mark_point at x=1.5 (label 'x₁'), tangent_at "
     "at x=1.5 mode='to_zero', mark_point at x=1.296 (label 'x₂'), "
     "caption with the iteration formula.\n"
+    "\n"
+    "Prompt: 'Where do f(x) = x^2 and g(x) = x + 2 intersect?'\n"
+    "Output: plot of f, plot of g (labels 'f' and 'g'), an "
+    "intersection primitive with curve_a='f', curve_b='g'.  The "
+    "renderer solves and marks both intersection points.\n"
+    "\n"
+    "Prompt: 'Show the area under f(x) = sin(x) from 0 to pi.'\n"
+    "Output: plot of sin(x) on [-0.5, pi+0.5], a shade_under primitive "
+    "with curve='f', a=0, b=pi (approximated as 3.14159), label='area'.\n"
+    "\n"
+    "Prompt: 'Compare the tangent and secant lines on f(x)=x^2 at x=1 "
+    "and x=3.'\n"
+    "Output: plot of f, secant from x_a=1 to x_b=3 labelled 'secant', "
+    "tangent_at x=2 (the midpoint) labelled 'tangent at midpoint', a "
+    "caption explaining 'average slope on [1,3] equals f'(2) = 4'.\n"
     "\n"
     "Prompt: 'Draw a Venn diagram of A and B.'\n"
     "Output: empty primitives list (non-graphable as a function plot).\n"
@@ -729,6 +1044,42 @@ async def llm_extract_scene(
                 prims.append(Caption(
                     text=str(d["text"]),
                     anchor=(d.get("anchor") or "right"),
+                ))
+            elif kind == "secant":
+                prims.append(Secant(
+                    curve=_clean_label(d.get("curve")),
+                    x_a=float(d["x_a"]),
+                    x_b=float(d["x_b"]),
+                    label=(d.get("label") or None),
+                ))
+            elif kind == "intersection":
+                prims.append(Intersection(
+                    curve_a=_clean_label(d.get("curve_a")),
+                    curve_b=_clean_label(d.get("curve_b")),
+                    label=(d.get("label") or None),
+                ))
+            elif kind == "shade_under":
+                prims.append(ShadeUnder(
+                    curve=_clean_label(d.get("curve")),
+                    a=float(d["a"]),
+                    b=float(d["b"]),
+                    label=(d.get("label") or None),
+                ))
+            elif kind == "region_between":
+                prims.append(RegionBetween(
+                    curve_a=_clean_label(d.get("curve_a")),
+                    curve_b=_clean_label(d.get("curve_b")),
+                    a=float(d["a"]),
+                    b=float(d["b"]),
+                    label=(d.get("label") or None),
+                ))
+            elif kind == "vector":
+                prims.append(Vector(
+                    start_x=float(d["start_x"]),
+                    start_y=float(d["start_y"]),
+                    end_x=float(d["end_x"]),
+                    end_y=float(d["end_y"]),
+                    label=(d.get("label") or None),
                 ))
         except (KeyError, TypeError, ValueError):
             continue
