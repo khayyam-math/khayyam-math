@@ -404,7 +404,15 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
                 f'font-weight="bold">{_esc(p.label)}</text>'
             )
 
-    # Pass 4: MarkPoint dots + labels (with screen-dedup like newton.py)
+    # Pass 4: MarkPoint dots + labels (with screen-dedup like newton.py).
+    # Skip a MarkPoint's label when a TangentAt at the same curve and
+    # x already carries a label — those two labels would otherwise pile
+    # up on the same dot and become unreadable.
+    tangent_labelled_xs = {
+        (p.curve, round(p.x, 4))
+        for p in scene.primitives
+        if isinstance(p, TangentAt) and p.label
+    }
     last_label_sx = float("-inf")
     for p in scene.primitives:
         if not isinstance(p, MarkPoint):
@@ -422,7 +430,9 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             f'<circle cx="{sx(p.x):.1f}" cy="{sy(y_val):.1f}" r="6" '
             f'fill="#c0392b" stroke="#7a2010" stroke-width="1.5"/>'
         )
-        if p.label and abs(sx(p.x) - last_label_sx) >= 60:
+        suppress = (p.curve, round(p.x, 4)) in tangent_labelled_xs
+        if (p.label and not suppress
+                and abs(sx(p.x) - last_label_sx) >= 60):
             out.append(
                 f'<text x="{sx(p.x) + 10:.1f}" '
                 f'y="{sy(y_val) - 10:.1f}" font-size="14" '
@@ -431,13 +441,32 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             )
             last_label_sx = sx(p.x)
 
-    # Pass 5: Captions
-    cap_y = top + 28
+    # Pass 5: Captions, wrapped to the right-margin width.
+    def _wrap_words(text: str, max_chars: int = 36) -> List[str]:
+        """Greedy word-wrap so the caption fits in the right margin.
+        ~36 chars at 14pt serif sits comfortably in a 340-px column."""
+        lines: List[str] = []
+        for raw in (text.splitlines() or [text]):
+            words = raw.split()
+            cur = ""
+            for w in words:
+                trial = (cur + " " + w).strip()
+                if len(trial) <= max_chars:
+                    cur = trial
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+        return lines or [""]
+
+    cap_y = top + 50  # leave room above for the legend
     for p in scene.primitives:
         if not isinstance(p, Caption):
             continue
         if p.anchor == "right":
-            for line in p.text.splitlines() or [p.text]:
+            for line in _wrap_words(p.text, max_chars=36):
                 out.append(
                     f'<text x="{W - right + 16:.1f}" y="{cap_y:.1f}" '
                     f'font-size="14" font-family="serif" fill="#222">'
@@ -533,45 +562,78 @@ SCENE_SCHEMA: dict[str, Any] = {
 
 
 _EXTRACTOR_SYSTEM = (
-    "You are an FDL (Figure Description Language) extractor for a math-"
-    "figure renderer.  Given a math prompt, decide whether the prompt "
-    "describes something that can be drawn as a SINGLE figure composed "
-    "of a few primitives (a function plot, points marked on the curve, "
-    "tangent lines at those points, axis ticks, right-side captions).  "
-    "If yes, emit the primitives.  If no, return an empty primitives "
-    "list — the caller falls back to a different path.\n"
+    "You are an FDL (Figure Description Language) extractor.  Given a "
+    "math prompt, compose a small figure as a list of MATH-MEANINGFUL "
+    "primitives.  A deterministic renderer turns your primitives into "
+    "SVG; you NEVER pick pixel coordinates, only math coordinates.\n"
     "\n"
-    "Primitives:\n"
-    "  plot: a function curve.  f is a SymPy-parseable expression in x "
-    "  (caret ^ and double-star ** both accepted; implicit "
-    "  multiplication ok: '2x' means 2*x).  x_min, x_max define the "
-    "  plot range; pick a range that contains every interesting point "
-    "  with a little padding.  label is a short name (\"f\", \"g\") so "
-    "  later primitives can refer to this curve.\n"
-    "  axis_mark: a labelled tick on the x or y axis (axis = 'x' or "
-    "  'y').  x is the math coordinate.  label is a short string.\n"
-    "  mark_point: a labelled red dot AT (x, f(x)) on the named curve. "
-    "  YOU DO NOT supply y; the renderer evaluates f(x) symbolically. "
-    "  curve is the label of the plot to mark.\n"
-    "  tangent_at: a real tangent line to the named curve at point x. "
-    "  mode 'line' extends in both directions; mode 'to_zero' is the "
-    "  Newton-method style ending at the x-axis crossing.  Slope is "
-    "  computed by SymPy, so the line touches the curve correctly.\n"
-    "  caption: a text caption on the right side of the figure.  Use "
-    "  one caption per logical sentence; multi-line content can be "
-    "  embedded with \\n in text.\n"
+    "PRIMITIVES (each must have kind == one of these):\n"
+    "  plot:        a curve y = f(x).  Fields: f (SymPy-parseable, "
+    "               '**' and '^' both work, implicit '*' ok), x_min, "
+    "               x_max, label (a SHORT plain name like 'f' or 'g' — "
+    "               NO JSON characters, NO punctuation, just letters).\n"
+    "  axis_mark:   a labelled tick on x or y.  Fields: x, label, axis.\n"
+    "  mark_point:  a red dot AT (x, f(x)) on the named curve.  You "
+    "               do NOT supply y — the renderer evaluates f(x).  "
+    "               Fields: curve (the plot's label), x, label.\n"
+    "  tangent_at:  the TRUE tangent line at point x on the named "
+    "               curve.  Slope = f'(x), computed by SymPy.  Fields: "
+    "               curve, x, label, mode ('line' = symmetric extension, "
+    "               'to_zero' = Newton-method style ending at x-axis "
+    "               crossing).\n"
+    "  caption:     right-side text.  Fields: text, anchor='right'.\n"
     "\n"
-    "Rules:\n"
-    "  - Every mark_point / tangent_at MUST name a 'curve' that exists "
-    "    in some plot primitive's 'label'.\n"
-    "  - Numeric fields you don't set MUST be null (not omitted).\n"
-    "  - When the prompt is non-mathematical (Venn diagrams, flowcharts, "
-    "    matrices, geometric proofs without a function), return an "
-    "    EMPTY primitives list.\n"
-    "  - When the prompt IS function-graphable, prefer more primitives "
-    "    than fewer: a Newton's-method prompt should produce a plot + "
-    "    several mark_points + tangent_ats + a short caption with the "
-    "    iteration formula.\n"
+    "COMPOSITION RULES — follow these literally:\n"
+    "  1. ALWAYS emit at least one plot when the prompt mentions a "
+    "     function or a curve.  Without a plot, the figure is empty.\n"
+    "  2. If the prompt says 'tangent at x = N' or 'derivative at "
+    "     x = N graphically', you MUST emit BOTH a mark_point at "
+    "     curve=<plot's label>, x=N AND a tangent_at at the same "
+    "     curve and x.  Two primitives, not one.\n"
+    "  3. If the prompt says 'Newton's method' / 'find the root by "
+    "     iterating', you MUST emit the curve plus a mark_point and "
+    "     tangent_at (mode='to_zero') for EACH iterate the prompt "
+    "     mentions or the typical first 3 iterates.\n"
+    "  4. If the prompt says 'where f and g intersect', emit BOTH "
+    "     plots, name them 'f' and 'g', then emit a mark_point on "
+    "     whichever curve at the intersection x.\n"
+    "  5. Add one short caption summarising the figure's punchline "
+    "     (e.g. 'Slope at x=3 is 6.', 'The tangent at x_0 hits "
+    "     the x-axis at x_1 = 1.5.').\n"
+    "  6. Plot range: pick x_min and x_max so EVERY mark_point and "
+    "     tangent_at x value is inside [x_min, x_max] with at least "
+    "     ~30 % padding on each side.\n"
+    "  7. label fields are PLAIN identifiers ('f', 'g', 'h'), NOT "
+    "     JSON, NOT punctuated, NOT with braces / commas.\n"
+    "  8. Numeric fields you don't use MUST be null (not omitted).\n"
+    "  9. Return an EMPTY primitives list ONLY when the prompt is "
+    "     genuinely non-graphable (Venn diagram, flowchart, matrix "
+    "     operation, abstract proof with no curve).\n"
+    "\n"
+    "WORKED EXAMPLES (study these — they show the expected density):\n"
+    "\n"
+    "Prompt: 'Show the tangent line to f(x) = x^2 at x = 3.'\n"
+    "Output: {\n"
+    "  title: 'Tangent to x² at x = 3',\n"
+    "  primitives: [\n"
+    "    {kind:'plot', f:'x**2', x_min:-1, x_max:5, label:'f', ...},\n"
+    "    {kind:'mark_point', curve:'f', x:3, label:'(3, 9)', ...},\n"
+    "    {kind:'tangent_at', curve:'f', x:3, label:'slope = 6',\n"
+    "                                                 mode:'line'},\n"
+    "    {kind:'caption', text:'f′(3) = 6, so the tangent has "
+    "                          slope 6.', anchor:'right'},\n"
+    "  ],\n"
+    "  narration: ['At x equals 3, the tangent line has slope six.']\n"
+    "}\n"
+    "\n"
+    "Prompt: 'Explain Newton's method visually on x^3 - 2 from x = 2.'\n"
+    "Output: plot of f, mark_point at x=2 (label 'x₀'), tangent_at at "
+    "x=2 mode='to_zero', mark_point at x=1.5 (label 'x₁'), tangent_at "
+    "at x=1.5 mode='to_zero', mark_point at x=1.296 (label 'x₂'), "
+    "caption with the iteration formula.\n"
+    "\n"
+    "Prompt: 'Draw a Venn diagram of A and B.'\n"
+    "Output: empty primitives list (non-graphable as a function plot).\n"
     "\n"
     "Return JSON conforming to the supplied schema."
 )
@@ -625,6 +687,14 @@ async def llm_extract_scene(
     raw_prims = data.get("primitives") or []
     if not raw_prims:
         return None
+    # The LLM occasionally hallucinates JSON-syntax characters into
+    # 'label' fields ("f},{..." instead of just "f").  Strip non-
+    # identifier characters defensively so the SVG <text> output and
+    # the curve-id matching downstream stay clean.
+    import re
+    def _clean_label(s: object) -> str:
+        s2 = re.sub(r"[^A-Za-z0-9_₀₁₂₃₄₅₆₇₈₉]+", "", str(s or ""))
+        return s2 or "f"
     prims: List[Primitive] = []
     for d in raw_prims:
         try:
@@ -634,7 +704,7 @@ async def llm_extract_scene(
                     f=str(d["f"]),
                     x_min=float(d["x_min"]),
                     x_max=float(d["x_max"]),
-                    label=str(d.get("label") or "f"),
+                    label=_clean_label(d.get("label")),
                 ))
             elif kind == "axis_mark":
                 prims.append(AxisMark(
@@ -644,13 +714,13 @@ async def llm_extract_scene(
                 ))
             elif kind == "mark_point":
                 prims.append(MarkPoint(
-                    curve=str(d["curve"]),
+                    curve=_clean_label(d.get("curve")),
                     x=float(d["x"]),
                     label=(d.get("label") or None),
                 ))
             elif kind == "tangent_at":
                 prims.append(TangentAt(
-                    curve=str(d["curve"]),
+                    curve=_clean_label(d.get("curve")),
                     x=float(d["x"]),
                     label=(d.get("label") or None),
                     mode=(d.get("mode") or "line"),
