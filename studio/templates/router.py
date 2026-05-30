@@ -196,6 +196,14 @@ Supported templates:
     root of f using Newton's method", "show Newton iteration on f",
     "use Newton's method to compute the cube/square root of N",
     "where does the tangent line lead", "show me Newton converging".
+    DO NOT route to newton_method when the prompt asks where two
+    NAMED curves intersect (e.g. "where do f and g intersect", "find
+    the intersection of f(x)=… and g(x)=…").  Return null for those
+    — the FDL Intersection primitive handles them with a side-by-
+    side plot and labelled intersection dots, which is what the user
+    is asking for.  Newton's-method routing is ONLY appropriate when
+    the prompt explicitly NAMES Newton's method, Newton-Raphson, or
+    asks for an iteration on a single function.
     args: {
       "f": "<SymPy-parseable expression in x>",
       "x0": <number>,
