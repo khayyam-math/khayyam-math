@@ -393,7 +393,34 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             )
         tv += tick_step
 
-    # Pass 1: draw all Plots (curves first, behind everything)
+    # Pass 1: draw all Plots (curves first, behind everything).
+    # When the LLM gives every Plot the same default colour, the user
+    # can't tell two curves apart visually.  Walk all plots and assign
+    # a palette colour to any plot still on the default blue when
+    # there's more than one plot.
+    _PLOT_PALETTE = ("#2a6fd6", "#e67e22", "#27ae60",
+                     "#8e44ad", "#c0392b", "#16a085")
+    plots_in_order = [pp for pp in scene.primitives if isinstance(pp, Plot)]
+    if len(plots_in_order) > 1:
+        for k, pp in enumerate(plots_in_order):
+            if pp.color == "#2a6fd6" and k > 0:
+                # rebuild this Plot with the next palette colour
+                plots_in_order[k] = Plot(
+                    f=pp.f, x_min=pp.x_min, x_max=pp.x_max,
+                    label=pp.label,
+                    color=_PLOT_PALETTE[k % len(_PLOT_PALETTE)],
+                )
+        # rewrite the scene's primitive list so downstream passes see
+        # the recoloured Plots (replace in place, preserving order)
+        new_prims: List[Primitive] = []
+        next_repl_idx = 0
+        for q in scene.primitives:
+            if isinstance(q, Plot):
+                new_prims.append(plots_in_order[next_repl_idx])
+                next_repl_idx += 1
+            else:
+                new_prims.append(q)
+        scene.primitives = new_prims  # type: ignore[assignment]
     for p in scene.primitives:
         if not isinstance(p, Plot):
             continue
@@ -1085,8 +1112,16 @@ async def llm_extract_scene(
             continue
     if not prims:
         return None
-    # require at least one Plot — without it nothing maps to math space
-    if not any(isinstance(p, Plot) for p in prims):
+    # Require at least one primitive that defines math-space anchors:
+    # either a Plot (curve over an x-range) or a Vector (explicit
+    # start/end coordinates).  Without one of these the scene has no
+    # coordinates and cannot be rendered.  MarkPoint/TangentAt/etc
+    # need a Plot to evaluate f(x); pure-Vector scenes are valid
+    # without a Plot.
+    has_anchor = any(
+        isinstance(p, (Plot, Vector)) for p in prims
+    )
+    if not has_anchor:
         return None
     return Scene(
         title=str(data.get("title") or ""),
