@@ -464,6 +464,15 @@ async def _execute_tool(
     prompt = (args.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("sevim_express requires a non-empty 'prompt'")
+    # Original user message verbatim (set by the chat-loop on tool-call).
+    # The chat LLM frequently paraphrases the user's words when building
+    # the tool prompt ("Show Newton's method" -> "Illustrate Newton's
+    # method ... step by step"), which breaks the deterministic template
+    # classifier that keys off the user's literal phrasing.  We pass
+    # both prompts through to express_figure: the classifier runs on
+    # the original, and only the LLM-SVG fallback path sees the
+    # paraphrased tool prompt.
+    original_user_prompt = (args.get("_original_user_prompt") or "").strip()
     # Conversational context: pull prior canvases out of REGISTRY so
     # gpt-4o sees the actual figure(s) the user is refining (SVG XML +
     # PNG snapshot + original prompt + narration script).
@@ -531,6 +540,7 @@ async def _execute_tool(
         api_key=api_key,
         context_canvases=context_canvases,
         on_svg_chunk=on_svg_chunk,
+        original_user_prompt=original_user_prompt or None,
     ))
     # Await figure first because the rest of _execute_tool unpacks its
     # result.  The primer task runs to completion alongside; we collect
@@ -1217,6 +1227,14 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
                     on_svg_chunk = _push_svg_chunk
                     on_primer_chunk = _push_primer_chunk
 
+                # Preserve the user's *original* message verbatim so the
+                # tool can route on it instead of the chat LLM's
+                # paraphrased tool-call prompt.  Without this, the chat
+                # LLM tends to reword "Show Newton's method..." into
+                # "Illustrate Newton's method... [step instructions]",
+                # which then hits the sequential / LLM-SVG path instead
+                # of our deterministic template.
+                args.setdefault("_original_user_prompt", req.user)
                 tool_task = asyncio.create_task(_execute_tool(
                     tool_name, args,
                     session_id=req.session_id,

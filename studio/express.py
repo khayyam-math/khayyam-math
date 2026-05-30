@@ -1967,6 +1967,18 @@ async def express_figure(
     on_svg_chunk: Callable[[str], Awaitable[None]] | None = None,
     allow_panels: bool = True,
     allow_sequential: bool = True,
+    # The user's literal message, passed through the tool-call layer
+    # without paraphrasing.  When provided, ALL deterministic-routing
+    # decisions (template classifier, algorithm-trace gate, sequential
+    # gate, panels gate, graphviz gate) run against this prompt rather
+    # than the chat-LLM's reworded ``user_prompt``.  This keeps the
+    # template router on the user's actual words and prevents the chat
+    # LLM from accidentally hijacking us into the LLM-SVG path with
+    # paraphrases like "Illustrate ... step by step ..." when the user
+    # said "Show Newton's method".  Falls back to ``user_prompt`` when
+    # not supplied (so internal callers — recursive express calls from
+    # the sequential / panels routes — keep working unchanged).
+    original_user_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Run the SVG-direct + vision-review loop.
 
@@ -2032,6 +2044,18 @@ async def express_figure(
 
     _log(f"start prompt={user_prompt[:60]!r} model={model}")
 
+    # Routing-decision prompt: prefer the user's literal message if it
+    # was threaded through (chat-loop sets it), otherwise fall back to
+    # ``user_prompt`` (which is what internal recursive callers pass).
+    # All six deterministic gates below use ``routing_prompt`` so the
+    # chat LLM's paraphrase ("Illustrate ... step by step ...") cannot
+    # hijack us into the sequential / LLM-SVG path when the user
+    # actually said something like "Show Newton's method".
+    routing_prompt = (original_user_prompt or user_prompt or "").strip()
+    if original_user_prompt and original_user_prompt != user_prompt:
+        _log(f"routing prompt differs from tool prompt: "
+             f"routing={routing_prompt[:80]!r}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and
@@ -2046,7 +2070,7 @@ async def express_figure(
             from studio.templates.algorithm_trace import (
                 generate_algorithm_trace_svg, is_algorithm_trace_prompt,
             )
-            if is_algorithm_trace_prompt(user_prompt):
+            if is_algorithm_trace_prompt(routing_prompt):
                 trace = await generate_algorithm_trace_svg(
                     user_prompt, api_key=api_key or "",
                     base_url=base_url, model=model)
@@ -2084,7 +2108,7 @@ async def express_figure(
             from studio.templates.process_route import (
                 generate_process_svg, is_process_prompt,
             )
-            if is_process_prompt(user_prompt):
+            if is_process_prompt(routing_prompt):
                 proc = await generate_process_svg(
                     user_prompt, api_key=api_key or "",
                     base_url=base_url, model=model)
@@ -2201,7 +2225,7 @@ async def express_figure(
             from studio.templates.panels_route import (
                 generate_panels_svg, is_panels_prompt,
             )
-            if is_panels_prompt(user_prompt):
+            if is_panels_prompt(routing_prompt):
                 async def _gen_panel(sub: str) -> dict[str, Any]:
                     return await express_figure(
                         sub, base_url=base_url, model=model,
@@ -2244,7 +2268,7 @@ async def express_figure(
             from studio.templates.sequential_route import (
                 generate_sequential_svg, is_sequential_prompt,
             )
-            if is_sequential_prompt(user_prompt):
+            if is_sequential_prompt(routing_prompt):
                 async def _gen_step(sub: str) -> dict[str, Any]:
                     return await express_figure(
                         sub, base_url=base_url, model=model,
@@ -2292,7 +2316,7 @@ async def express_figure(
                 is_graphviz_prompt, narrate_graphviz,
             )
             if (is_graphviz_binary_available()
-                    and is_graphviz_prompt(user_prompt)):
+                    and is_graphviz_prompt(routing_prompt)):
                 gv_result = await generate_graphviz_svg(
                     user_prompt,
                     api_key=api_key or "",
@@ -2380,7 +2404,7 @@ async def express_figure(
                 classify_prompt, render_template,
             )
             classified = await classify_prompt(
-                user_prompt,
+                routing_prompt,
                 api_key=api_key or "",
                 base_url=base_url,
             )
