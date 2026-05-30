@@ -514,7 +514,12 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
                     f'{_esc(p.label)}</text>'
                 )
 
-    # Pass 2: tangent lines (before dots so dots sit on top)
+    # Pass 2: tangent lines (before dots so dots sit on top).  When
+    # iterates converge tightly (Newton-style scenes), tangent labels
+    # placed at each tangent's midpoint pile up on each other.  Apply
+    # the same screen-x dedup MarkPoint uses: skip a tangent's label
+    # if its midpoint is within 60 px of a previously-labelled one.
+    last_tangent_label_sx = float("-inf")
     for i, p in enumerate(scene.primitives):
         if not isinstance(p, TangentAt):
             continue
@@ -550,11 +555,14 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
         )
         if p.label:
             mx, my = (start_x + end_x) / 2, (start_y + end_y) / 2
-            out.append(
-                f'<text x="{sx(mx):.1f}" y="{sy(my) - 8:.1f}" '
-                f'font-size="13" font-family="serif" fill="#c0392b" '
-                f'font-style="italic">{_esc(p.label)}</text>'
-            )
+            if abs(sx(mx) - last_tangent_label_sx) >= 60:
+                out.append(
+                    f'<text x="{sx(mx):.1f}" y="{sy(my) - 8:.1f}" '
+                    f'font-size="13" font-family="serif" '
+                    f'fill="#c0392b" font-style="italic">'
+                    f'{_esc(p.label)}</text>'
+                )
+                last_tangent_label_sx = sx(mx)
 
     # Pass 2b: Secant, Intersection, Vector — line-like concept primitives
     for i, p in enumerate(scene.primitives):
@@ -924,9 +932,16 @@ _EXTRACTOR_SYSTEM = (
     "  4. If the prompt says 'where f and g intersect', emit BOTH "
     "     plots, name them 'f' and 'g', then emit a mark_point on "
     "     whichever curve at the intersection x.\n"
-    "  5. Add one short caption summarising the figure's punchline "
-    "     (e.g. 'Slope at x=3 is 6.', 'The tangent at x_0 hits "
-    "     the x-axis at x_1 = 1.5.').\n"
+    "  5. Captions: emit at least TWO caption primitives.  The "
+    "     first explains WHAT the figure shows (the setup, the "
+    "     formula being applied, the meaning of the geometry).  The "
+    "     LAST caption MUST be a CONCLUSION stating the numerical "
+    "     or qualitative result (e.g. 'The tangent at x = 3 has "
+    "     slope f′(3) = 6.', 'The iterates converge to x ≈ 1.26, "
+    "     the cube root of 2.', 'Area = ∫₀^π sin(x) dx = 2.').  A "
+    "     figure without a conclusion teaches nothing.  Keep each "
+    "     caption short (one sentence, < 80 chars) and let the "
+    "     renderer wrap to the margin.\n"
     "  6. Plot range: pick x_min and x_max so EVERY mark_point and "
     "     tangent_at x value is inside [x_min, x_max] with at least "
     "     ~30 % padding on each side.\n"
@@ -947,17 +962,21 @@ _EXTRACTOR_SYSTEM = (
     "    {kind:'mark_point', curve:'f', x:3, label:'(3, 9)', ...},\n"
     "    {kind:'tangent_at', curve:'f', x:3, label:'slope = 6',\n"
     "                                                 mode:'line'},\n"
-    "    {kind:'caption', text:'f′(3) = 6, so the tangent has "
-    "                          slope 6.', anchor:'right'},\n"
+    "    {kind:'caption', text:'The tangent at (3, 9) shows the "
+    "                          instantaneous rate of change of f.', "
+    "                          anchor:'right'},\n"
+    "    {kind:'caption', text:'CONCLUSION: f′(3) = 6, so the slope "
+    "                          of the tangent is 6.', anchor:'right'},\n"
     "  ],\n"
     "  narration: ['At x equals 3, the tangent line has slope six.']\n"
     "}\n"
     "\n"
     "Prompt: 'Explain Newton's method visually on x^3 - 2 from x = 2.'\n"
-    "Output: plot of f, mark_point at x=2 (label 'x₀'), tangent_at at "
-    "x=2 mode='to_zero', mark_point at x=1.5 (label 'x₁'), tangent_at "
-    "at x=1.5 mode='to_zero', mark_point at x=1.296 (label 'x₂'), "
-    "caption with the iteration formula.\n"
+    "Output: plot of f over [-0.5, 2.5]; mark_point/tangent_at pairs "
+    "at x=2 ('x₀'), x=1.5 ('x₁'), x=1.296 ('x₂') with mode='to_zero'; "
+    "TWO captions: first one stating the Newton iteration formula, "
+    "second one stating the conclusion 'CONCLUSION: the iterates "
+    "converge to x ≈ 1.26, which is the cube root of 2.'.\n"
     "\n"
     "Prompt: 'Where do f(x) = x^2 and g(x) = x + 2 intersect?'\n"
     "Output: plot of f, plot of g (labels 'f' and 'g'), an "
