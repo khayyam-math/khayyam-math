@@ -2392,11 +2392,19 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"matplotlib route errored: {type(exc).__name__}: {exc}")
 
-    # Try the prompt → template classifier before the full LLM-SVG
-    # loop.  If the prompt is asking for a matrix operation the
-    # template library can render deterministically, skip the 30-90s
-    # express loop entirely.  Disabled via SEVIM_TEMPLATE_ROUTER=off
-    # or when no API key is configured (the classifier needs one).
+    # ── Figure Description Language (FDL) route ──────────────────
+    # Sits BETWEEN the specific-template router (Newton, sphere, cone,
+    # ...) and the general LLM-SVG path.  FDL = a small set of concept
+    # primitives (Plot, MarkPoint, TangentAt, AxisMark, Caption) that
+    # the LLM emits as structured JSON; a deterministic renderer
+    # composes them.  This covers prompts that don't match a
+    # template-classifier rule but ARE function-graphable: "Explain
+    # Newton's method visually", "Show the derivative of f at x=3",
+    # "Plot f and its tangent at x=2", etc.  By construction, tangent
+    # lines drawn here are real tangents (slope = f'(x) via SymPy),
+    # so the LLM-SVG's secant-as-tangent failure mode cannot recur.
+    # The template router still runs FIRST so explicit
+    # Newton's-method prompts pin to the bespoke newton template.
     if (api_key
             and os.environ.get("SEVIM_TEMPLATE_ROUTER", "on").lower() != "off"):
         try:
@@ -2438,6 +2446,53 @@ async def express_figure(
                          f"render rejected args; falling back to LLM")
         except Exception as exc:  # noqa: BLE001
             _log(f"template router errored: {type(exc).__name__}: {exc}")
+
+    # ── FDL fallback ──────────────────────────────────────────────
+    # Specific-template classifier missed.  Try the general Figure
+    # Description Language: the LLM extracts a small Scene of concept
+    # primitives (Plot + MarkPoint + TangentAt + ...) from the
+    # prompt; the deterministic renderer composes them.  By
+    # construction the rendered tangents have the correct slope
+    # (f'(x) via SymPy), so the LLM-SVG's "draw a generic dashed
+    # line and call it a tangent" failure mode cannot recur.  An
+    # empty / unparseable extraction returns None and we fall
+    # through to the LLM-SVG path unchanged.  Disabled via
+    # SEVIM_FDL_ROUTE=off.
+    if (api_key
+            and os.environ.get("SEVIM_FDL_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.fdl import (
+                llm_extract_scene, render_scene,
+            )
+            scene = await llm_extract_scene(
+                routing_prompt, api_key=api_key or "",
+                base_url=base_url,
+            )
+            if scene is not None:
+                fdl_svg, fdl_narration = render_scene(scene)
+                _log(
+                    f"FDL fast-path: title={scene.title!r} "
+                    f"prims={len(scene.primitives)} "
+                    f"svg={len(fdl_svg)} chars"
+                )
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(fdl_svg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": fdl_svg,
+                    "narration": fdl_narration,
+                    "title": scene.title,
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "fdl",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"FDL route errored "
+                 f"(falling through to LLM-SVG): "
+                 f"{type(exc).__name__}: {exc}")
 
     # Compute the figure-level ground truth ONCE per express call,
     # outside the retry loop.  This is a separate small LLM proposer
