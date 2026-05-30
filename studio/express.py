@@ -2256,49 +2256,17 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"panels route errored: {type(exc).__name__}: {exc}")
 
-    # ── Sequential step-frame route ───────────────────────────────
-    # For "show X step by step" prompts, decompose into ordered steps
-    # and stack a clean per-step figure vertically — instead of the
-    # LLM cramming every step into one overlapping canvas.  Recurses
-    # with allow_sequential=False / allow_panels=False.
-    if (api_key and allow_sequential
-            and os.environ.get("SEVIM_SEQUENTIAL_ROUTE", "on").lower()
-            != "off"):
-        try:
-            from studio.templates.sequential_route import (
-                generate_sequential_svg, is_sequential_prompt,
-            )
-            if is_sequential_prompt(routing_prompt):
-                async def _gen_step(sub: str) -> dict[str, Any]:
-                    return await express_figure(
-                        sub, base_url=base_url, model=model,
-                        api_key=api_key, max_retries=1,
-                        allow_panels=False, allow_sequential=False)
-                seq = await generate_sequential_svg(
-                    user_prompt, api_key=api_key or "",
-                    base_url=base_url, model=model,
-                    gen_step=_gen_step)
-                if seq is not None:
-                    seq_svg, seq_narr = seq
-                    _log(f"sequential fast-path: svg={len(seq_svg)} "
-                         f"chars narration={len(seq_narr)} phrases")
-                    if on_svg_chunk is not None:
-                        try:
-                            await on_svg_chunk(seq_svg)
-                        except Exception:  # noqa: BLE001
-                            pass
-                    return {
-                        "svg": seq_svg,
-                        "narration": seq_narr,
-                        "title": "",
-                        "review_history": [],
-                        "retries_used": 0,
-                        "repairs": [],
-                        "template": "sequential",
-                    }
-        except Exception as exc:  # noqa: BLE001
-            _log(f"sequential route errored: "
-                 f"{type(exc).__name__}: {exc}")
+    # NOTE: the sequential step-frame route used to live HERE (before
+    # the template router and FDL).  Production showed that "step by
+    # step" Newton's-method prompts were being decomposed by sequential
+    # into LLM-drawn sub-figures, losing continuity and accuracy, when
+    # the deterministic newton_method template (and FDL) already
+    # handle the iteration correctly in one cohesive figure.  Moved
+    # sequential to AFTER the template router and FDL so iterative-
+    # math prompts hit those deterministic paths first; sequential
+    # only fires for genuinely step-shaped prompts that no
+    # deterministic path catches (e.g. "explain the scientific
+    # method step by step").  See the block further down.
 
     # ── Template fast-path ────────────────────────────────────────
     # Graphviz fast-path: for prompts that look graph-shaped (state
@@ -2492,6 +2460,56 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"FDL route errored "
                  f"(falling through to LLM-SVG): "
+                 f"{type(exc).__name__}: {exc}")
+
+    # ── Sequential step-frame route (moved here from before the
+    # template router) ─────────────────────────────────────────────
+    # For "show X step by step" prompts that DO NOT match any
+    # deterministic template and DO NOT extract as an FDL Scene,
+    # decompose into ordered steps and stack a per-step figure
+    # vertically.  Each sub-step recurses with allow_sequential=False
+    # / allow_panels=False so the decomposition is one level deep.
+    # Newton's-method / iterative-algorithm prompts that mention
+    # "step by step" hit the template (or FDL) above first; sequential
+    # only catches genuinely sequential prompts like "explain the
+    # scientific method step by step" or "show the writing process".
+    if (api_key and allow_sequential
+            and os.environ.get("SEVIM_SEQUENTIAL_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.sequential_route import (
+                generate_sequential_svg, is_sequential_prompt,
+            )
+            if is_sequential_prompt(routing_prompt):
+                async def _gen_step(sub: str) -> dict[str, Any]:
+                    return await express_figure(
+                        sub, base_url=base_url, model=model,
+                        api_key=api_key, max_retries=1,
+                        allow_panels=False, allow_sequential=False)
+                seq = await generate_sequential_svg(
+                    user_prompt, api_key=api_key or "",
+                    base_url=base_url, model=model,
+                    gen_step=_gen_step)
+                if seq is not None:
+                    seq_svg, seq_narr = seq
+                    _log(f"sequential fast-path: svg={len(seq_svg)} "
+                         f"chars narration={len(seq_narr)} phrases")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(seq_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": seq_svg,
+                        "narration": seq_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "sequential",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"sequential route errored: "
                  f"{type(exc).__name__}: {exc}")
 
     # Compute the figure-level ground truth ONCE per express call,
