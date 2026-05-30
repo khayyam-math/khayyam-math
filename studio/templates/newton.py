@@ -24,6 +24,7 @@ from typing import List, Tuple
 
 
 _SUB = "₀₁₂₃₄₅₆₇₈₉"
+_SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹"
 
 
 def _esc(s: object) -> str:
@@ -36,6 +37,38 @@ def _sub(i: int) -> str:
     if 0 <= i < 10:
         return _SUB[i]
     return str(i)
+
+
+def _pretty_expr(expr_str: str) -> str:
+    """Convert a Python/SymPy-style expression string into a more
+    readable math form for figure labels.
+
+      "x**3 - 2"      -> "x³ − 2"
+      "x*exp(x) - 1"  -> "x·exp(x) − 1"
+      "cos(x) - x"    -> "cos(x) − x"
+      "x^2 - 5"       -> "x² − 5"
+
+    Only single-digit superscripts are converted; multi-digit
+    exponents (rare in classroom Newton problems) stay as **N.
+    Multiplication '*' becomes the typographic middle-dot '·'.
+    Unary/binary minus '-' becomes the Unicode minus sign '−' so
+    it visually matches the rest of the figure.
+    """
+    import re
+    s = expr_str
+    # ** N (single digit, possibly with surrounding spaces) -> superscript
+    def _sup_repl(m):
+        d = m.group(1)
+        return d.translate(str.maketrans("0123456789", _SUP))
+    s = re.sub(r"\*\*\s*(\d)\b", _sup_repl, s)
+    # ^ N (single digit) -> superscript (in case caret survives)
+    s = re.sub(r"\^\s*(\d)\b", _sup_repl, s)
+    # remaining * -> middle-dot
+    s = s.replace("*", "·")
+    # ASCII minus -> Unicode minus (only as a standalone operator,
+    # not in -- or in negative numbers we want to keep distinct)
+    s = re.sub(r"(?<=\S) - (?=\S)", " − ", s)
+    return s
 
 
 def newton_method(
@@ -123,6 +156,14 @@ def newton_method(
     # clipped, plus extra room to one side for the convergence note.
     plot_xmin = x_lo - 0.30 * span
     plot_xmax = x_hi + 0.30 * span
+    # Always include the origin x = 0 so the y-axis can be drawn at
+    # the standard location.  Newton's-method figures expect a
+    # visible y-axis: it's the reference for "the tangent crosses
+    # zero at x_{n+1}".  When all iterates are positive (the typical
+    # case) the auto-computed plot range excludes x=0 and the y-axis
+    # would otherwise be invisible.
+    plot_xmin = min(plot_xmin, -0.10 * span)
+    plot_xmax = max(plot_xmax, 0.10 * span)
 
     # y-range: sample f across the plot window and clip aggressively
     # so a steep cubic doesn't blow the vertical out of usable range.
@@ -256,15 +297,16 @@ def newton_method(
         f'<polyline id="curve" points="{" ".join(pts)}" '
         f'fill="none" stroke="#2a6fd6" stroke-width="2.8"/>'
     )
-    # curve label, placed near a sampled mid-point of the curve
-    if pts:
-        mid = pts[len(pts) // 2].split(',')
-        lx, ly = float(mid[0]), float(mid[1])
-        out.append(
-            f'<text id="curve_label" x="{lx + 12:.1f}" '
-            f'y="{ly - 14:.1f}" font-size="15" font-family="serif" '
-            f'fill="#2a6fd6">f(x) = {_esc(sp.sstr(fexpr))}</text>'
-        )
+    # curve label, anchored to the upper-RIGHT corner of the plot
+    # region (legend style) so it never collides with an iterate
+    # dot or a tangent line.  _pretty_expr converts "x**3 - 2" to
+    # "x³ − 2" for proper math typography.
+    out.append(
+        f'<text id="curve_label" x="{W - right - 10:.1f}" '
+        f'y="{top + 28:.1f}" font-size="16" font-family="serif" '
+        f'text-anchor="end" fill="#2a6fd6">'
+        f'f(x) = {_esc(_pretty_expr(sp.sstr(fexpr)))}</text>'
+    )
 
     # ── tangent lines (drawn before dots so dots sit on top) ──────
     n_steps = len(iterates) - 1
