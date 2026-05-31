@@ -7597,16 +7597,62 @@ def _build_user_content(
         f"when the new request is UNRELATED to any attached prior "
         f"figure (e.g. user pivots: 'now show me matrix multiplication')."
     )})
+    # Classify the new request server-side: do we send the prior SVG
+    # as XML (Case A), or only as a rendered PNG (Case B / Case C)?
+    # When the SVG XML is available the model copies text from it
+    # byte-for-byte, which is correct for narrow targeted edits and
+    # WRONG for elaboration / complaint redraws (it produces stacked
+    # duplicate titles + captions overlaid on the new figure).  Only
+    # include the XML when the prompt unambiguously names ONE
+    # element AND ONE change.
+    pl = (user_prompt or "").lower()
+    _NARROW_EDIT_PATTERNS = (
+        # explicit colour change
+        r"\bchange\s+(?:the\s+)?\w+\s+(?:colou?r\s+)?to\s+\w+",
+        r"\bcolou?r\s+(?:the\s+|it\s+)\w+\s+\w+",
+        r"\bmake\s+(?:the\s+|it\s+)\w+",
+        # add / remove / highlight a SINGLE element
+        r"\badd\s+(?:a\s+|an\s+|the\s+)?\w+",
+        r"\bremove\s+(?:the\s+|that\s+)?\w+",
+        r"\bdelete\s+(?:the\s+|that\s+)?\w+",
+        r"\bhighlight\s+(?:the\s+|that\s+)?\w+",
+        # narrow rename / relabel
+        r"\brelabel\s+(?:the\s+)?\w+",
+        r"\brename\s+(?:the\s+)?\w+",
+        # rotate / move / scale a SINGLE element
+        r"\brotate\s+(?:the\s+)?\w+",
+        r"\bmove\s+(?:the\s+)?\w+",
+        r"\bscale\s+(?:the\s+)?\w+",
+    )
+    is_narrow_edit = any(re.search(p, pl) for p in _NARROW_EDIT_PATTERNS)
+
     for i, ctx in enumerate(context_canvases, start=1):
         cid = ctx.get("id", "?")
         prior_prompt = ctx.get("prompt") or "(unknown prompt)"
         prior_svg = ctx.get("svg") or ""
-        blocks.append({"type": "text", "text": (
-            f"\n—— PRIOR FIGURE {i} (canvas id={cid}) ——\n"
-            f"Original prompt: {prior_prompt!r}\n\n"
-            f"Its current SVG XML (modify this in place when the user is "
-            f"refining it):\n```xml\n{prior_svg}\n```"
-        )})
+        if is_narrow_edit:
+            blocks.append({"type": "text", "text": (
+                f"\n—— PRIOR FIGURE {i} (canvas id={cid}) ——\n"
+                f"Original prompt: {prior_prompt!r}\n\n"
+                f"Its current SVG XML (modify this in place when the "
+                f"user is refining it):\n```xml\n{prior_svg}\n```"
+            )})
+        else:
+            # CASE B / CASE C: don't hand the model the SVG XML — it
+            # WILL copy text from it byte-for-byte and produce a new
+            # figure with the old captions still stacked on top of
+            # the new ones.  Show the rendered PNG only; the model
+            # understands the prior figure visually and redraws fresh.
+            blocks.append({"type": "text", "text": (
+                f"\n—— PRIOR FIGURE {i} (canvas id={cid}) ——\n"
+                f"Original prompt: {prior_prompt!r}\n\n"
+                f"Rendered preview attached below.  The SVG XML is "
+                f"INTENTIONALLY WITHHELD because your request looks "
+                f"like elaboration / correction (Case B or C above), "
+                f"not a single-element targeted edit (Case A).  "
+                f"Redraw fresh; do not copy text or coordinates from "
+                f"the prior figure — recompute everything."
+            )})
         try:
             png = _svg_to_png(ctx["svg"])
             b64 = base64.b64encode(png).decode("ascii")
