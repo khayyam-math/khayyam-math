@@ -2235,7 +2235,24 @@ async def express_figure(
     # chat LLM's paraphrase ("Illustrate ... step by step ...") cannot
     # hijack us into the sequential / LLM-SVG path when the user
     # actually said something like "Show Newton's method".
-    routing_prompt = (original_user_prompt or user_prompt or "").strip()
+    # Default to the user's literal message for routing — that's what
+    # the deterministic template classifiers want for fresh prompts.
+    # EXCEPT on Case B / Case C refinement (a prior canvas is
+    # attached AND the request is not a narrow targeted edit).  In
+    # that case the chat LLM has already bundled the prior topic
+    # into its tool-call prompt ('Illustrate Newton's method for
+    # finding roots using f(x) = x^3 - 2 ...') -- the user's
+    # literal ('Explain visually and with proper formulas') lacks
+    # the topic context and would steer FDL / template router to a
+    # generic figure.  On Case B / C use the chat LLM's enriched
+    # prompt so the newton_method template / FDL extractor see the
+    # topic.
+    if (context_canvases
+            and not is_narrow_targeted_edit(
+                original_user_prompt or user_prompt or "")):
+        routing_prompt = (user_prompt or original_user_prompt or "").strip()
+    else:
+        routing_prompt = (original_user_prompt or user_prompt or "").strip()
     if original_user_prompt and original_user_prompt != user_prompt:
         _log(f"routing prompt differs from tool prompt: "
              f"routing={routing_prompt[:80]!r}")
