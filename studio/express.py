@@ -7329,6 +7329,120 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
         # parsing edge case.
         pass
 
+    # ── Crowded iterate markers ──────────────────────────────────
+    # If three-or-more <circle> dots are packed into a tiny cluster
+    # (typical Newton-method convergence) without the figure visibly
+    # zooming into the cluster, none of them will be readable.  Flag
+    # so the retry emits a zoomed figure (or the FDL TangentAt path
+    # picks up its built-in cluster zoom).
+    #
+    # User-reported regression on 2026-05-31: x_0=1.5, x_1=1.417,
+    # x_2=1.414 rendered as three dots within ~5 pixels of each
+    # other; the iterate labels stacked vertically on top of the
+    # pile and were unreadable.
+    try:
+        circle_iter = re.finditer(
+            r"<circle\b[^>]*>", svg, flags=re.IGNORECASE
+        )
+        circles_xy: list[tuple[float, float, float]] = []
+        for m in circle_iter:
+            a = _attrs(m.group(0))
+            try:
+                cx = float(a.get("cx", "0"))
+                cy = float(a.get("cy", "0"))
+                rr = float(a.get("r", "0") or "0")
+            except ValueError:
+                continue
+            # Ignore decoration / arrow heads — only count visible
+            # dot-shaped markers.
+            if rr <= 0:
+                continue
+            circles_xy.append((cx, cy, rr))
+
+        # Pairwise close: <= 20 px apart center-to-center.
+        if len(circles_xy) >= 3:
+            close_pairs = 0
+            for i in range(len(circles_xy)):
+                for j in range(i + 1, len(circles_xy)):
+                    cx1, cy1, _ = circles_xy[i]
+                    cx2, cy2, _ = circles_xy[j]
+                    d2 = (cx1 - cx2) ** 2 + (cy1 - cy2) ** 2
+                    if d2 <= 20.0 * 20.0:
+                        close_pairs += 1
+            # Three+ dots, two+ close pairs -> at least three dots
+            # are packed.
+            if close_pairs >= 2:
+                issues.append(
+                    "crowded_markers: " + str(len(circles_xy)) +
+                    " marker dot(s) on the figure, with " +
+                    str(close_pairs) + " pair(s) less than 20 px "
+                    "apart.  Stacking the iterates on top of each "
+                    "other makes them unreadable.  When successive "
+                    "iterates (x_0, x_1, x_2, ...) converge to a "
+                    "tight cluster, ZOOM the plot window to the "
+                    "cluster's range + ~20% margin so each dot is "
+                    "drawn at a visibly distinct screen position. "
+                    "Re-draw with: xmin = min(iterates) - 0.20*W, "
+                    "xmax = max(iterates) + 0.20*W where W is the "
+                    "cluster width.  Each iterate label must sit "
+                    "next to its dot, not stacked vertically."
+                )
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Narration mentions 'tangent' but no concrete function ────
+    # When narration says 'tangent line' / 'tangent to the curve'
+    # and the user's PROMPT supplies a function (e.g. f(x) = x^2 -
+    # 2 with x_0 = 1.5), the deterministic newton_method template
+    # OR the FDL TangentAt primitive draws a real SymPy-slope
+    # tangent.  When the prompt is vague ('Newton's method
+    # approximates roots using tangent lines') and the figure path
+    # falls through to LLM-SVG, the model invents tangent-shaped
+    # lines that aren't actually tangent — user-reported on
+    # 2026-05-31.  Flag this so the retry either pins concrete
+    # f / x_0 OR drops the 'tangent' word from narration.
+    try:
+        narration_text = " ".join(
+            (p.get("text") or p.get("speak") or "")
+            for p in (narration or [])
+        ).lower()
+        if "tangent" in narration_text:
+            up = (user_prompt or "").lower()
+            # Heuristic: a usable function statement includes both
+            # an `f(x) = ...` style declaration AND an `x =` /
+            # `x_0 =` starting value.  We're permissive — any
+            # `f(x)`, `f =`, or explicit polynomial like `x^2 - 2`
+            # counts as a function statement.
+            has_f = bool(re.search(
+                r"f\s*\(\s*x\s*\)\s*=|f\s*=|"
+                r"\bx\s*\^\s*\d|\bx\s*\*\*\s*\d|"
+                r"\bsqrt\s*\(|\bsin\s*\(|\bcos\s*\(|\bexp\s*\(",
+                up,
+            ))
+            has_x0 = bool(re.search(
+                r"\bx[\s_]*0\s*=|\bstart(?:ing)?\b|\binitial\b|"
+                r"\bfrom\s+x\s*=|\bguess\b",
+                up,
+            ))
+            if not (has_f and has_x0):
+                issues.append(
+                    "tangent_without_function_spec: narration "
+                    "promises tangent lines but the user's prompt "
+                    "did not pin a specific function f and starting "
+                    "value x_0.  The figure LLM drew generic lines "
+                    "that may not be tangent to the curve.  FIX: "
+                    "in the next attempt, pick concrete defaults "
+                    "(e.g. f(x) = x^2 - 2, x_0 = 1.5) and DRAW the "
+                    "tangent at each iterate x_n as a line through "
+                    "(x_n, f(x_n)) with slope f'(x_n).  The tangent "
+                    "extends to where it crosses the x-axis at "
+                    "x_{n+1} = x_n - f(x_n)/f'(x_n).  Without "
+                    "concrete f and x_0 the tangents cannot be "
+                    "drawn correctly."
+                )
+    except Exception:  # noqa: BLE001
+        pass
+
     return issues
 
 
