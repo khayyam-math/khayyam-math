@@ -1831,7 +1831,7 @@ async def localise_narration(
 
     Disable with SEVIM_LOCALISE_NARRATION=off.
     """
-    import os, json, httpx
+    import os, json, re, unicodedata, httpx
     if os.environ.get("SEVIM_LOCALISE_NARRATION", "on").lower() == "off":
         return narration
     if not narration or not original_user_prompt or not api_key:
@@ -1841,14 +1841,43 @@ async def localise_narration(
     if not any(speaks):
         return narration
 
+    # Fast-path: if the user prompt contains NO non-Latin script
+    # characters (no Persian / Arabic / Chinese / Japanese / Korean /
+    # Cyrillic / Devanagari / Hebrew / Greek / Thai), and no
+    # non-ASCII Latin diacritics (no ü ö ä ñ é ç ...), it is
+    # overwhelmingly likely English.  Skip the LLM round-trip
+    # entirely.  An earlier prod run had gpt-4o-mini hallucinate an
+    # English-to-Spanish translation on the plain English Newton
+    # prompt; this fast-path makes that impossible by construction.
+    def _looks_like_plain_english(s: str) -> bool:
+        for ch in s:
+            if ord(ch) < 128:
+                continue
+            cat = unicodedata.category(ch)
+            # Letters outside ASCII -> not plain English.
+            if cat.startswith("L"):
+                return False
+            # Math symbols / punctuation / digits in the non-ASCII
+            # range (× ÷ π ∫ √ ≈ ≤ ≥ ∞) are fine.
+        return True
+
+    if _looks_like_plain_english(original_user_prompt):
+        return narration
+
     system_msg = (
         "You are a narration localiser for a math-figure tutor.  You "
         "are given (a) the user's original prompt and (b) an array of "
         "spoken narration phrases (currently in English).  Detect the "
         "language of the user's prompt.\n"
         "\n"
-        "If the prompt language is ENGLISH, return the phrases array "
-        "verbatim — do not change anything.\n"
+        "DEFAULT TO ENGLISH.  If the prompt is ambiguous, mixed, or "
+        "could be English with a couple of foreign loan-words, output "
+        "language='en' and return the phrases array VERBATIM.  Only "
+        "translate when the prompt is UNAMBIGUOUSLY non-English (the "
+        "majority of words are in a non-English language).\n"
+        "\n"
+        "If language='en', return the phrases array verbatim — do NOT "
+        "translate, paraphrase, normalise, or 'improve' anything.\n"
         "\n"
         "Otherwise, translate every phrase into the user's language, "
         "preserving math content exactly.  Math symbols (π, x², ∫, √) "
@@ -1895,6 +1924,14 @@ async def localise_narration(
             return narration
         content = r.json()["choices"][0]["message"]["content"]
         data = json.loads(content)
+        # Trust the model's language decision: if it says 'en' (or
+        # any English variant), keep the originals.  A prior prod
+        # run had the model say language='en' but still translate
+        # the phrases to Spanish; this short-circuit makes that
+        # impossible.
+        lang_decision = str(data.get("language") or "").strip().lower()
+        if lang_decision in ("en", "eng", "english", "en-us", "en-gb"):
+            return narration
         translated = data.get("phrases") or []
     except Exception:  # noqa: BLE001
         return narration
