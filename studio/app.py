@@ -1247,16 +1247,19 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
                 for pid in (req.prior_canvas_ids or []):
                     if pid and pid not in ctx_ids:
                         ctx_ids.append(pid)
-                # Current canvas: attach ONLY when the prompt looks
-                # like a follow-up on the current figure. A clear
-                # new-topic prompt ("show me X", "draw Y") generates
-                # a fresh figure without prior-SVG copy-paste — the
-                # LLM otherwise blends old and new SVG elements
-                # because REFINEMENT MODE tells it to "preserve
-                # every unchanged element byte-for-byte".
-                if (req.canvas_id
-                        and req.canvas_id not in ctx_ids
-                        and _looks_like_followup(req.user)):
+                # Current canvas: ALWAYS attach when one is on screen.
+                # The old behaviour gated this on a keyword
+                # _looks_like_followup() match, which missed phrasings
+                # like 'Explain visually and with proper formulas' and
+                # caused the next figure to lose all topic context.
+                # The downstream looks_like_refinement() regex in
+                # _execute_tool is the actual gate for refinement-mode
+                # behaviour, and the REFINEMENT MODE preamble now has
+                # explicit Case A (targeted edit) vs Case B (complaint
+                # — redraw fresh) vs topic-switch logic, so attaching
+                # the prior canvas no longer risks the old "blend old
+                # and new SVG" failure.
+                if req.canvas_id and req.canvas_id not in ctx_ids:
                     ctx_ids.append(req.canvas_id)
                 for sid in supplied:
                     if sid and sid not in ctx_ids:
