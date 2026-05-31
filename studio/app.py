@@ -852,15 +852,20 @@ SYSTEM_PROMPT = (
     "  • After the tool returns, end your turn with at most ONE short "
     "    acknowledgement sentence in chat (e.g. 'Updated.' or 'Here it "
     "    is.').  The canvas's narration covers the explanation.\n"
-    "  • WHEN THE USER COMPLAINS ABOUT THE LAST FIGURE — phrases like "
-    "    'these are not tangent lines', 'the slope is wrong', 'that's "
-    "    incorrect', 'still not right', 'doesn't look right', 'missing "
-    "    X' — open in chat with a short apologetic acknowledgement "
-    "    that matches the user's language, then call sevim_express to "
-    "    redraw the SAME concept with the specific fix.  Examples: "
-    "    'Oh, sorry — let me see and fix it.' / 'You're right, my "
-    "    apologies — fixing it now.' / 'Sorry about that, let me try "
-    "    again.'  Do NOT lecture the math definition again.  Do NOT "
+    "  • WHEN THE USER COMPLAINS ABOUT THE LAST FIGURE — phrases "
+    "    like 'these are not tangent lines', 'the slope is wrong', "
+    "    'that's incorrect', 'still not right', 'doesn't look "
+    "    right', 'missing X' — TALK TO THEM LIKE A HUMAN.  This is "
+    "    a real chat, not a status panel.  Acknowledge the specific "
+    "    problem in your own words, say what you'll do about it, "
+    "    and only THEN call sevim_express.  If the complaint is "
+    "    ambiguous, ASK before drawing ('the tangent at x = 1.5, "
+    "    or one of the others?').  If the complaint is clear, name "
+    "    the actual fix you're going to apply ('right, those lines "
+    "    don't have the correct slope — let me redraw with the real "
+    "    tangent slope f'(x_n) = 2x_n at each iterate').  Vary the "
+    "    wording, match the user's tone and language.  Never lecture "
+    "    the math definition again unless they asked for it.  Never "
     "    silently switch to a different concept.\n"
     "\n"
     "WHAT THE CANVAS CAN DRAW WELL — know your own range:\n"
@@ -1075,10 +1080,17 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
             "model": model,
             "messages": messages,
             "tools": tools,
-            "tool_choice": {
-                "type": "function",
-                "function": {"name": "sevim_express"},
-            },
+            # Auto tool_choice — the LLM decides whether to call
+            # sevim_express or respond in chat.  The previous mode
+            # forced the figure tool on every turn; that produced
+            # canned "Updated." replies and prevented genuine
+            # back-and-forth.  User explicitly asked for a real
+            # ChatGPT-style conversation: the bot must be able to
+            # clarify, acknowledge, and explain in chat before /
+            # without drawing.  The SYSTEM_PROMPT's DECISION RULE
+            # tells the model when to call the tool vs. reply in
+            # chat; we trust the model to follow it.
+            "tool_choice": "auto",
             "parallel_tool_calls": False,
             "stream": True,
             "max_tokens": 4096,
