@@ -670,7 +670,13 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
     # the same screen-x dedup MarkPoint uses: skip a tangent's label
     # if its midpoint is within 60 px of a previously-labelled one.
     last_tangent_label_sx = float("-inf")
-    for i, p in enumerate(scene.primitives):
+    # Use a LOCAL counter rather than the global scene.primitives
+    # index so tangent ids line up with the narration highlight
+    # matcher's expectation (tangent_0, tangent_1, tangent_2, ...)
+    # — the matcher binds the n-th tangent in the scene to
+    # tangent_<n>, not tangent_<global_primitive_index>.
+    tangent_index = 0
+    for p in scene.primitives:
         if not isinstance(p, TangentAt):
             continue
         plot = plot_by_label.get(p.curve)
@@ -681,6 +687,7 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
         y_val = _safe_eval(parse, sp, plot.f, p.x)
         slope = _safe_diff_eval(parse, sp, plot.f, p.x)
         if y_val is None or slope is None:
+            tangent_index += 1
             continue
         if p.mode == "to_zero":
             # Newton-style: end at the x-axis crossing
@@ -698,7 +705,7 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             end_x = p.x + span * 0.5
             end_y = y_val + slope * span * 0.5
         out.append(
-            f'<line id="tangent_{i}" x1="{sx(start_x):.1f}" '
+            f'<line id="tangent_{tangent_index}" x1="{sx(start_x):.1f}" '
             f'y1="{sy(start_y):.1f}" x2="{sx(end_x):.1f}" '
             f'y2="{sy(end_y):.1f}" stroke="#c0392b" '
             f'stroke-width="2.0" stroke-dasharray="7,3"/>'
@@ -713,21 +720,29 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
                     f'{_esc(p.label)}</text>'
                 )
                 last_tangent_label_sx = sx(mx)
+        tangent_index += 1
 
-    # Pass 2b: Secant, Intersection, Vector — line-like concept primitives
+    # Pass 2b: Secant, Intersection, Vector — line-like concept primitives.
+    # Secants use a LOCAL counter for the same reason TangentAt does (so
+    # the narration highlight matcher's secant_<n> binds to the n-th
+    # Secant in the scene).
+    secant_index = 0
     for i, p in enumerate(scene.primitives):
         if isinstance(p, Secant):
             plot = plot_by_label.get(p.curve)
             if plot is None:
+                secant_index += 1
                 continue
             y_a = _safe_eval(parse, sp, plot.f, p.x_a)
             y_b = _safe_eval(parse, sp, plot.f, p.x_b)
             if y_a is None or y_b is None:
+                secant_index += 1
                 continue
             # extend the secant line a little past both points so it
             # reads as a "line through" rather than a "segment between"
             dx = p.x_b - p.x_a
             if abs(dx) < 1e-9:
+                secant_index += 1
                 continue
             slope = (y_b - y_a) / dx
             ext = max(abs(dx) * 0.30, (plot_xmax - plot_xmin) * 0.06)
@@ -736,7 +751,7 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             y_start = y_a + slope * (x_start - p.x_a)
             y_end = y_a + slope * (x_end - p.x_a)
             out.append(
-                f'<line id="secant_{i}" x1="{sx(x_start):.1f}" '
+                f'<line id="secant_{secant_index}" x1="{sx(x_start):.1f}" '
                 f'y1="{sy(y_start):.1f}" x2="{sx(x_end):.1f}" '
                 f'y2="{sy(y_end):.1f}" stroke="#e67e22" '
                 f'stroke-width="2.2"/>'
@@ -755,6 +770,7 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
                     f'fill="#a04400" font-style="italic">'
                     f'{_esc(p.label)}</text>'
                 )
+            secant_index += 1
         elif isinstance(p, Intersection):
             plot_a = plot_by_label.get(p.curve_a)
             plot_b = plot_by_label.get(p.curve_b)
