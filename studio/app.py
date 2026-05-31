@@ -547,6 +547,24 @@ async def _execute_tool(
     # the assembled string for telemetry / canvas prelude after.
     result = await figure_task
     primer_text = await primer_task
+    # Localise narration to the user's language.  Deterministic
+    # templates (newton_method, volume_of_sphere, …) hard-code
+    # English narration; LLM-driven routes (FDL, LLM-SVG) usually
+    # match the user's language but sometimes drift to English when
+    # the prompt is short / ambiguous.  One gpt-4o-mini pass at the
+    # caller covers every return path uniformly.  Non-fatal on any
+    # error.  Disable with SEVIM_LOCALISE_NARRATION=off.
+    if api_key and original_user_prompt and result.get("narration"):
+        try:
+            from studio.express import localise_narration
+            result["narration"] = await localise_narration(
+                result["narration"], original_user_prompt,
+                api_key=api_key, base_url=base_url,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[execute_tool] localise_narration failed: "
+                  f"{type(exc).__name__}: {exc}",
+                  flush=True, file=__import__("sys").stderr)
     duration_s = _time.monotonic() - t0
     cid = "express_" + secrets.token_hex(16)
     c = REGISTRY.open(canvas_id=cid, math_mode=True, animate=False,

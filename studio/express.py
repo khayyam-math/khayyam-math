@@ -535,6 +535,36 @@ EXPRESS_SCHEMA: dict[str, Any] = {
 }
 
 
+_LANGUAGE_RULE = (
+    "\n\n"
+    "LANGUAGE MATCHING — HARD RULE.\n"
+    "Detect the language of the user's prompt and respond in EXACTLY "
+    "that language for every word of narration, caption, primer, and "
+    "any other user-facing prose.  If the prompt is in German, every "
+    "spoken phrase is in German.  If the prompt is in Persian, every "
+    "spoken phrase is in Persian.  Same for French, Chinese, Arabic, "
+    "Spanish, Italian, Russian, Hindi, Turkish, and any other "
+    "language.  Never silently switch to English just because math "
+    "symbols are universal.  Math notation (π, ∫, x², √) is the same "
+    "in every language; the surrounding prose must match the user.\n"
+    "\n"
+    "NUMBERS IN SPOKEN NARRATION (when language ≠ English).\n"
+    "TTS engines often mis-pronounce or swallow numerical digits in "
+    "non-English text.  When writing any `speak` / narration string "
+    "in a language other than English, spell every number out as "
+    "words in that language:\n"
+    "    German   1.5 → eineinhalb  (or 'eins Komma fünf');  3 → "
+    "drei; ≈1.26 → ungefähr eins Komma zwei sechs.\n"
+    "    Persian  1.5 → یک و نیم (yek o nim); 3 → سه; 1.26 → یک "
+    "ممیز بیست و شش صدم.\n"
+    "    French   1.5 → un virgule cinq; 3 → trois.\n"
+    "    Chinese  1.5 → 一点五; 3 → 三; 1.26 → 一点二六.\n"
+    "The figure itself (text labels, captions, integral bounds) can "
+    "keep numerals as digits — only the spoken narration text needs "
+    "the word form.  Constants like π, e, ∞ stay as symbols.\n"
+)
+
+
 _EXPRESS_SYSTEM = (
     "MATH CORRECTNESS IS NON-NEGOTIABLE.  Before any figure, you must "
     "(1) state the problem in `problem_statement`, (2) work out the "
@@ -1259,6 +1289,7 @@ _EXPRESS_SYSTEM = (
     "When the prompt does NOT fall into these families, ignore the "
     "templates and use your own layout.  But never emit an empty "
     "framed canvas — that is always wrong."
+    + _LANGUAGE_RULE
 )
 
 
@@ -1771,7 +1802,111 @@ _PRIMER_SYSTEM = (
     "    'as shown below' or 'in the diagram.'  Speak only the theory.\n"
     "  * Stop after the formula(s).  Do NOT add a closing summary.\n"
     "  * NEVER mention that another component is generating a figure."
+    + _LANGUAGE_RULE
 )
+
+
+async def localise_narration(
+    narration: list[dict[str, Any]],
+    original_user_prompt: str,
+    *,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    model: str = "gpt-4o-mini",
+    timeout_s: float = 20.0,
+) -> list[dict[str, Any]]:
+    """Translate every `speak` string in ``narration`` into the same
+    language as ``original_user_prompt``.
+
+    English prompts pass through unchanged (the LLM detects English
+    and returns the phrases verbatim).  For non-English target
+    languages, the model is instructed to spell numbers out as words
+    so the downstream TTS doesn't swallow digits — German user reports
+    confirmed that "1.5" / "1,5" pronounce poorly while "eineinhalb"
+    is clean.
+
+    Failure is non-fatal: any error (no key, parse mismatch, request
+    timeout) returns the original narration unchanged.  Adds at most
+    one ~200-token gpt-4o-mini call per express turn (~$0.0001).
+
+    Disable with SEVIM_LOCALISE_NARRATION=off.
+    """
+    import os, json, httpx
+    if os.environ.get("SEVIM_LOCALISE_NARRATION", "on").lower() == "off":
+        return narration
+    if not narration or not original_user_prompt or not api_key:
+        return narration
+
+    speaks = [(p.get("speak") or "").strip() for p in narration]
+    if not any(speaks):
+        return narration
+
+    system_msg = (
+        "You are a narration localiser for a math-figure tutor.  You "
+        "are given (a) the user's original prompt and (b) an array of "
+        "spoken narration phrases (currently in English).  Detect the "
+        "language of the user's prompt.\n"
+        "\n"
+        "If the prompt language is ENGLISH, return the phrases array "
+        "verbatim — do not change anything.\n"
+        "\n"
+        "Otherwise, translate every phrase into the user's language, "
+        "preserving math content exactly.  Math symbols (π, x², ∫, √) "
+        "stay as symbols; the prose around them switches to the user's "
+        "language.\n"
+        "\n"
+        "When translating into a non-English language, SPELL EVERY "
+        "NUMBER OUT AS A WORD in the target language so downstream TTS "
+        "engines (Piper, OpenAI tts-1) don't swallow digits.  "
+        "Examples:\n"
+        "  English '1.5'  →  German 'eineinhalb'  /  French 'un "
+        "virgule cinq'  /  Persian 'یک و نیم' / Chinese '一点五'.\n"
+        "  English 'three' stays 'drei' / 'trois' / 'سه' / '三'.\n"
+        "  English '≈ 1.26'  →  German 'ungefähr eins Komma zwei "
+        "sechs'.\n"
+        "\n"
+        "Return JSON: {\"language\": \"<ISO 639-1 code>\", \"phrases\": "
+        "[\"...\", \"...\", ...]}.  The phrases array MUST have "
+        "exactly the same length as the input."
+    )
+    user_msg = json.dumps({
+        "user_prompt": original_user_prompt[:400],
+        "phrases": speaks,
+    }, ensure_ascii=False)
+    payload = {
+        "model": model,
+        "temperature": 0.0,
+        "max_tokens": 1800,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+    }
+    headers = {"content-type": "application/json",
+               "Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            r = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers, json=payload,
+            )
+        if r.status_code != 200:
+            return narration
+        content = r.json()["choices"][0]["message"]["content"]
+        data = json.loads(content)
+        translated = data.get("phrases") or []
+    except Exception:  # noqa: BLE001
+        return narration
+    if not isinstance(translated, list) or len(translated) != len(speaks):
+        return narration
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(narration):
+        new_speak = (translated[i] or "").strip()
+        if not new_speak:
+            new_speak = speaks[i]  # fall back to original on empty
+        out.append({**p, "speak": new_speak})
+    return out
 
 
 # Defensive post-processor: catches bare LaTeX (commands or subscripts

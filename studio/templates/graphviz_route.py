@@ -424,6 +424,21 @@ phrase.
 
 Respond with ONLY a JSON object, no prose:
   {"phrases": [{"speak": "...", "highlight": ["node1"]}, ...]}
+
+LANGUAGE MATCHING — HARD RULE.
+Detect the language of the user's prompt and write every `speak` \
+phrase in EXACTLY that language.  Persian prompt → Persian phrases.  \
+German prompt → German phrases.  Same for French, Chinese, Arabic, \
+Spanish, Italian, Russian, Hindi, Turkish.  Never silently switch \
+back to English just because graph-theory terms are universal.  \
+Element labels stay verbatim; the prose around them matches the \
+user.
+
+NUMBERS IN SPOKEN PHRASES (when language ≠ English).
+TTS engines often mispronounce or swallow digits in non-English \
+text.  Spell numbers out as words: German 1.5 → 'eineinhalb', \
+Persian 3 → 'سه', French 1.26 → 'un virgule deux six', Chinese \
+1.5 → '一点五'.  Constants like π, e stay as symbols.
 """
 
 
