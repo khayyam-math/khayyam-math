@@ -2241,23 +2241,30 @@ async def express_figure(
              f"routing={routing_prompt[:80]!r}")
 
     # ── Refinement-mode gate ──────────────────────────────────────
-    # When the caller supplied prior canvases, the user is asking for
-    # a targeted edit on the previous figure ("change the colour of
-    # edge A-B to red", "label the third tangent", "remove the
-    # axes").  Every deterministic route below regenerates a figure
-    # from scratch and IGNORES context_canvases — so on a refinement
-    # turn they would produce the same figure as last turn, with the
-    # user's edit silently dropped.  Skip them and let the LLM-SVG
-    # path handle the refinement, which already honours REFINEMENT
-    # MODE: the prior SVG XML is in the user message and the system
-    # prompt tells the model to preserve unchanged elements
-    # byte-for-byte.  The caller (_execute_tool) only attaches prior
-    # canvases when the user prompt looks like a refinement, so
-    # presence of context_canvases is a sufficient signal here.
-    _refining = bool(context_canvases)
+    # Only SKIP deterministic templates when the user is making a
+    # narrow Case A targeted edit ('change the curve to red', 'add a
+    # label x_3') — that's the only mode where byte-for-byte
+    # preservation of the prior figure is correct, and the
+    # deterministic templates would clobber the user's edit by
+    # re-running with their default colours / labels.
+    #
+    # For Case B (complaint: 'these are not tangent lines') and
+    # Case C (elaboration: 'explain visually with proper formulas'),
+    # the deterministic templates (newton_method, FDL TangentAt,
+    # …) produce clean, math-correct, single-figure layouts that
+    # are strictly better than what gpt-4o-LLM-SVG manages on a
+    # redraw.  Let them fire normally.
+    _refining = bool(context_canvases) and is_narrow_targeted_edit(
+        original_user_prompt or user_prompt or ""
+    )
     if _refining:
-        _log(f"refinement mode: {len(context_canvases or [])} prior "
-             f"canvas(es) attached — skipping deterministic routes")
+        _log(f"refinement mode (narrow Case A edit): "
+             f"{len(context_canvases or [])} prior canvas(es) attached "
+             f"— skipping deterministic routes")
+    elif context_canvases:
+        _log(f"refinement context attached ({len(context_canvases)} "
+             f"canvas(es)) but request is Case B/C — deterministic "
+             f"templates still eligible")
 
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
@@ -7446,6 +7453,42 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
     return issues
 
 
+_NARROW_EDIT_PATTERNS: tuple[str, ...] = (
+    # explicit colour change
+    r"\bchange\s+(?:the\s+)?\w+\s+(?:colou?r\s+)?to\s+\w+",
+    r"\bcolou?r\s+(?:the\s+|it\s+)\w+\s+\w+",
+    r"\bmake\s+(?:the\s+|it\s+)\w+",
+    # add / remove / highlight a SINGLE element
+    r"\badd\s+(?:a\s+|an\s+|the\s+)?\w+",
+    r"\bremove\s+(?:the\s+|that\s+)?\w+",
+    r"\bdelete\s+(?:the\s+|that\s+)?\w+",
+    r"\bhighlight\s+(?:the\s+|that\s+)?\w+",
+    # narrow rename / relabel
+    r"\brelabel\s+(?:the\s+)?\w+",
+    r"\brename\s+(?:the\s+)?\w+",
+    # rotate / move / scale a SINGLE element
+    r"\brotate\s+(?:the\s+)?\w+",
+    r"\bmove\s+(?:the\s+)?\w+",
+    r"\bscale\s+(?:the\s+)?\w+",
+)
+
+
+def is_narrow_targeted_edit(prompt: str) -> bool:
+    """True when the user's request reads like a Case A targeted
+    edit ('change the curve to red', 'add a label x_3', 'remove the
+    green tangent'): a single named element AND a single named
+    change.  False for elaboration / complaint / topic-switch and
+    anything ambiguous.  Used to gate:
+      * whether to skip deterministic templates and run LLM-SVG
+        with REFINEMENT MODE byte-for-byte preservation
+      * whether to attach the prior SVG XML in _build_user_content
+    """
+    if not prompt:
+        return False
+    pl = prompt.lower()
+    return any(re.search(p, pl) for p in _NARROW_EDIT_PATTERNS)
+
+
 _REFINEMENT_CUE_RE = re.compile(
     r"\b("
     r"add|adds|adding|added|"
@@ -7597,34 +7640,7 @@ def _build_user_content(
         f"when the new request is UNRELATED to any attached prior "
         f"figure (e.g. user pivots: 'now show me matrix multiplication')."
     )})
-    # Classify the new request server-side: do we send the prior SVG
-    # as XML (Case A), or only as a rendered PNG (Case B / Case C)?
-    # When the SVG XML is available the model copies text from it
-    # byte-for-byte, which is correct for narrow targeted edits and
-    # WRONG for elaboration / complaint redraws (it produces stacked
-    # duplicate titles + captions overlaid on the new figure).  Only
-    # include the XML when the prompt unambiguously names ONE
-    # element AND ONE change.
-    pl = (user_prompt or "").lower()
-    _NARROW_EDIT_PATTERNS = (
-        # explicit colour change
-        r"\bchange\s+(?:the\s+)?\w+\s+(?:colou?r\s+)?to\s+\w+",
-        r"\bcolou?r\s+(?:the\s+|it\s+)\w+\s+\w+",
-        r"\bmake\s+(?:the\s+|it\s+)\w+",
-        # add / remove / highlight a SINGLE element
-        r"\badd\s+(?:a\s+|an\s+|the\s+)?\w+",
-        r"\bremove\s+(?:the\s+|that\s+)?\w+",
-        r"\bdelete\s+(?:the\s+|that\s+)?\w+",
-        r"\bhighlight\s+(?:the\s+|that\s+)?\w+",
-        # narrow rename / relabel
-        r"\brelabel\s+(?:the\s+)?\w+",
-        r"\brename\s+(?:the\s+)?\w+",
-        # rotate / move / scale a SINGLE element
-        r"\brotate\s+(?:the\s+)?\w+",
-        r"\bmove\s+(?:the\s+)?\w+",
-        r"\bscale\s+(?:the\s+)?\w+",
-    )
-    is_narrow_edit = any(re.search(p, pl) for p in _NARROW_EDIT_PATTERNS)
+    is_narrow_edit = is_narrow_targeted_edit(user_prompt)
 
     for i, ctx in enumerate(context_canvases, start=1):
         cid = ctx.get("id", "?")
