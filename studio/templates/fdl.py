@@ -331,6 +331,118 @@ def _compute_plot_range(
     return plot_xmin, plot_xmax, plot_ymin, plot_ymax
 
 
+_NUMWORD_TO_INT = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "naught": 0, "nought": 0,
+}
+_SUBSCRIPT_DIGITS = {"₀": 0, "₁": 1, "₂": 2,
+                     "₃": 3, "₄": 4, "₅": 5,
+                     "₆": 6, "₇": 7, "₈": 8,
+                     "₉": 9}
+# Matches:  x_3, x3, x 3, x_{3}, x sub 3,
+#           x_zero, x sub one, x naught, x_three,
+#           x₀, x₁, …
+_NUMWORD_ALT = r"|".join(_NUMWORD_TO_INT.keys())
+_XN_RE = __import__("re").compile(
+    rf"\bx[_\s]*\{{?(?:sub\s+)?(?:(\d+)|({_NUMWORD_ALT}))\}}?"
+    rf"|\bx[₀-₉]",
+    __import__("re").IGNORECASE,
+)
+
+
+def _extract_iterate_indices(text: str) -> list[int]:
+    """Find every x_n / x sub n / x naught (n=0) / x_zero / x₀-x₉
+    mentioned in a narration phrase.  Returns the n's in occurrence
+    order (deduped on first appearance).
+    """
+    indices: list[int] = []
+    seen: set[int] = set()
+    for m in _XN_RE.finditer(text):
+        if m.group(1) is not None:
+            try:
+                n = int(m.group(1))
+            except ValueError:
+                continue
+        elif m.group(2) is not None:
+            n = _NUMWORD_TO_INT.get(m.group(2).lower())
+            if n is None:
+                continue
+        else:
+            # Unicode subscript case (x₀-x₉)
+            ch = m.group(0)[-1]
+            n = _SUBSCRIPT_DIGITS.get(ch)
+            if n is None:
+                continue
+        if n not in seen:
+            seen.add(n)
+            indices.append(n)
+    return indices
+
+
+def _phrase_highlights(
+    phrase: str, *, plot_labels: list[str], n_tangents: int,
+    n_secants: int, n_marks: int, has_title: bool,
+) -> list[str]:
+    """Pick the SVG element ids this phrase talks about.  Heuristic:
+      * 'x_n' / 'x sub n' / 'x naught' -> mark_<n> (when emitted)
+      * 'tangent' + 'x_n' -> tangent_<n>
+      * 'secant' + 'x_n' -> secant_<n>
+      * 'curve' / 'function' / 'graph' -> curve_<first plot label>
+      * 'axis' / 'x-axis' / 'y-axis' -> x_axis / y_axis
+      * 'title' / 'Newton's method' (intro phrase) -> title
+    Falls back to [title] when nothing matches and a title exists.
+    """
+    text = (phrase or "").strip()
+    if not text:
+        return ["title"] if has_title else []
+    low = text.lower()
+
+    indices = _extract_iterate_indices(text)
+    highlights: list[str] = []
+    seen: set[str] = set()
+
+    def add(hid: str) -> None:
+        if hid not in seen:
+            seen.add(hid)
+            highlights.append(hid)
+
+    if any(w in low for w in ("x-axis", "x axis")):
+        add("x_axis")
+    if any(w in low for w in ("y-axis", "y axis")):
+        add("y_axis")
+
+    mentions_tangent = "tangent" in low
+    mentions_secant = "secant" in low
+
+    for n in indices:
+        if mentions_tangent and n < n_tangents:
+            add(f"tangent_{n}")
+        if mentions_secant and n < n_secants:
+            add(f"secant_{n}")
+        if n < n_marks:
+            add(f"mark_{n}")
+
+    if not indices and (mentions_tangent or mentions_secant):
+        # phrase talks about tangent / secant in general — highlight
+        # all of them
+        if mentions_tangent:
+            for i in range(min(n_tangents, 6)):
+                add(f"tangent_{i}")
+        if mentions_secant:
+            for i in range(min(n_secants, 6)):
+                add(f"secant_{i}")
+
+    if any(w in low for w in ("the curve", "the function", "the graph",
+                              "function curve")):
+        if plot_labels:
+            add(f"curve_{plot_labels[0]}")
+
+    if not highlights and has_title:
+        add("title")
+    return highlights
+
+
 def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
     """Turn a Scene into (svg, narration).  Raises ValueError on a
     malformed Scene (e.g. TangentAt referencing a curve that wasn't
@@ -390,14 +502,26 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
         f'<text x="{W-right+6:.1f}" y="{sy(0)+5:.1f}" font-size="14" '
         f'font-family="serif" fill="#333">x</text>'
     )
-    if plot_xmin <= 0 <= plot_xmax:
-        out.append(
-            f'<line id="y_axis" x1="{sx(0):.1f}" y1="{top:.1f}" '
-            f'x2="{sx(0):.1f}" y2="{H-bot:.1f}" stroke="#333" '
-            f'stroke-width="1.6"/>'
-        )
+    # Always draw a y-axis.  When x=0 lies inside the plot window,
+    # draw it at x=0 (the canonical math y-axis).  Otherwise draw it
+    # at the LEFT EDGE of the plot so the figure still has the
+    # familiar two-axis look — a zoomed-in Newton-iterates window
+    # like x∈[1, 2.5] gets a y-axis at x=1 instead of no y-axis at
+    # all, which user-reported on 2026-05-31 as missing.
+    y_axis_x = sx(0) if (plot_xmin <= 0 <= plot_xmax) else left
     out.append(
-        f'<text x="{left-10:.1f}" y="{top+4:.1f}" font-size="14" '
+        f'<line id="y_axis" x1="{y_axis_x:.1f}" y1="{top:.1f}" '
+        f'x2="{y_axis_x:.1f}" y2="{H-bot:.1f}" stroke="#333" '
+        f'stroke-width="1.6"/>'
+    )
+    # Arrowhead at top of the y-axis.
+    out.append(
+        f'<polygon points="{y_axis_x:.1f},{top:.1f} '
+        f'{y_axis_x-5:.1f},{top+8:.1f} {y_axis_x+5:.1f},{top+8:.1f}" '
+        f'fill="#333"/>'
+    )
+    out.append(
+        f'<text x="{y_axis_x-10:.1f}" y="{top+4:.1f}" font-size="14" '
         f'font-family="serif" text-anchor="end" fill="#333">y</text>'
     )
 
@@ -732,6 +856,7 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
         if isinstance(p, TangentAt) and p.label
     }
     last_label_sx = float("-inf")
+    mark_index = 0
     for p in scene.primitives:
         if not isinstance(p, MarkPoint):
             continue
@@ -742,12 +867,16 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
             )
         y_val = _safe_eval(parse, sp, plot.f, p.x)
         if y_val is None:
+            mark_index += 1
             continue
-        # dot on the curve
+        # dot on the curve — id="mark_<i>" so the narration
+        # highlight matcher can target it.
         out.append(
-            f'<circle cx="{sx(p.x):.1f}" cy="{sy(y_val):.1f}" r="6" '
+            f'<circle id="mark_{mark_index}" cx="{sx(p.x):.1f}" '
+            f'cy="{sy(y_val):.1f}" r="6" '
             f'fill="#c0392b" stroke="#7a2010" stroke-width="1.5"/>'
         )
+        mark_index += 1
         suppress = (p.curve, round(p.x, 4)) in tangent_labelled_xs
         if (p.label and not suppress
                 and abs(sx(p.x) - last_label_sx) >= 60):
@@ -810,12 +939,29 @@ def render_scene(scene: Scene) -> Tuple[str, List[dict]]:
     svg = "\n".join(out)
 
     # Narration: use explicit narration strings if the LLM supplied any;
-    # otherwise synthesise a generic intro from the primitives.
+    # otherwise synthesise a generic intro from the primitives.  For
+    # each phrase, scan the text to pick the SVG element ids it
+    # mentions and emit those as the highlight set.  Without this,
+    # every phrase used to fall back to ["title"] and nothing
+    # flashed when the narrator named a tangent or an iterate.
+    plot_labels = [pl.label for pl in scene.primitives
+                   if isinstance(pl, Plot)]
+    n_tangents = sum(1 for pl in scene.primitives
+                     if isinstance(pl, TangentAt))
+    n_secants = sum(1 for pl in scene.primitives
+                    if isinstance(pl, Secant))
+    n_marks = sum(1 for pl in scene.primitives
+                  if isinstance(pl, MarkPoint))
+
     narration: List[dict] = []
     if scene.narration:
         for s in scene.narration:
-            narration.append({"speak": s, "highlight": ["title"]
-                              if scene.title else []})
+            highlights = _phrase_highlights(
+                s, plot_labels=plot_labels,
+                n_tangents=n_tangents, n_secants=n_secants,
+                n_marks=n_marks, has_title=bool(scene.title),
+            )
+            narration.append({"speak": s, "highlight": highlights})
     else:
         narration.append({
             "speak": (f"Figure: {scene.title}." if scene.title
