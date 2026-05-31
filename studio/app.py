@@ -364,6 +364,21 @@ _FOLLOWUP_KEYWORDS: tuple[str, ...] = (
     # bare pronouns referring to the current figure
     "make it", "change it", "color it", "colour it",
     "label it",
+    # complaint / correction phrasings — the user is pointing at
+    # something in the figure that's wrong.  "These are not tangent
+    # lines", "that's wrong", "the slope is incorrect", "those
+    # aren't perpendicular", "still not right", etc.  Without these,
+    # a frustrated user gets a fresh-topic figure instead of an
+    # edit attempt.
+    "these are not", "this is not", "those are not", "that is not",
+    "these aren't", "this isn't", "those aren't", "that isn't",
+    "is wrong", "are wrong", "is incorrect", "are incorrect",
+    "is not right", "are not right", "doesn't look right",
+    "does not look right", "not quite right", "still wrong",
+    "still not", "still missing", "still no", "still doesn't",
+    "should be", "should not be", "shouldn't be",
+    "instead of", "rather than",
+    "missing ", "wrong ", "incorrect ",
 )
 
 
@@ -812,6 +827,16 @@ SYSTEM_PROMPT = (
     "    sevim_express prompt without quoting canvas IDs.\n"
     "  • For a refinement, write a prompt that bundles the original "
     "    request plus the new change so the model has full context.\n"
+    "  • CONCRETE NUMBERS FOR ITERATIVE TECHNIQUES.  Newton's method, "
+    "    Newton-Raphson, fixed-point iteration, and similar all need "
+    "    a specific function f and a starting value x_0 to draw "
+    "    correctly.  If the user's request is generic ('Newton's "
+    "    method', 'Newton-Raphson approximation'), supply concrete "
+    "    defaults in your sevim_express prompt — e.g. 'Newton's "
+    "    method on f(x) = x^3 - 2 starting from x_0 = 2'.  Do NOT "
+    "    leave the function unspecified; the figure LLM will draw a "
+    "    generic parabola with non-tangent lines and the figure will "
+    "    be wrong.\n"
     "  • PRESERVE THE USER'S MATHEMATICAL CONCEPT.  Do NOT silently "
     "    swap one concept for another that shares a keyword.  If the "
     "    user asks about a RING / GROUP / RELATION / TERM / MODULE / "
@@ -827,6 +852,16 @@ SYSTEM_PROMPT = (
     "  • After the tool returns, end your turn with at most ONE short "
     "    acknowledgement sentence in chat (e.g. 'Updated.' or 'Here it "
     "    is.').  The canvas's narration covers the explanation.\n"
+    "  • WHEN THE USER COMPLAINS ABOUT THE LAST FIGURE — phrases like "
+    "    'these are not tangent lines', 'the slope is wrong', 'that's "
+    "    incorrect', 'still not right', 'doesn't look right', 'missing "
+    "    X' — open in chat with a short apologetic acknowledgement "
+    "    that matches the user's language, then call sevim_express to "
+    "    redraw the SAME concept with the specific fix.  Examples: "
+    "    'Oh, sorry — let me see and fix it.' / 'You're right, my "
+    "    apologies — fixing it now.' / 'Sorry about that, let me try "
+    "    again.'  Do NOT lecture the math definition again.  Do NOT "
+    "    silently switch to a different concept.\n"
     "\n"
     "WHAT THE CANVAS CAN DRAW WELL — know your own range:\n"
     "  • function graphs and 3-D surfaces — any y = f(x) or z = f(x,y)\n"

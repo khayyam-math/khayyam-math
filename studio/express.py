@@ -7345,7 +7345,7 @@ _REFINEMENT_CUE_RE = re.compile(
     r"keep\s+going|next\s+step|"
     r"explain|explains|explaining|explained|"
     r"more\s+detail|more\s+on|"
-    r"this|that|"
+    r"this|that|these|those|"
     r"the\s+figure|the\s+canvas|the\s+diagram|the\s+previous|"
     r"the\s+above|prior|earlier|"
     r"refine|refines|refining|refined|"
@@ -7356,7 +7356,16 @@ _REFINEMENT_CUE_RE = re.compile(
     r"annotate|annotates|annotating|"
     r"shrink|shrinks|shrinking|enlarge|enlarges|enlarging|"
     r"move|moves|moving|moved|reposition|"
-    r"fix|fixes|fixing|fixed|correct|corrects|correcting|corrected"
+    r"fix|fixes|fixing|fixed|correct|corrects|correcting|corrected|"
+    # complaint / correction phrasings — user is pointing at
+    # something in the figure that's wrong.  "These are not tangent
+    # lines", "the slope is incorrect", "still wrong", etc.
+    r"wrong|incorrect|missing|"
+    r"isn'?t|aren'?t|doesn'?t|don'?t|"
+    r"should\s+be|should\s+not\s+be|shouldn'?t\s+be|"
+    r"still\s+(?:wrong|not|no|missing|doesn'?t)|"
+    r"not\s+quite|not\s+right|"
+    r"instead\s+of|rather\s+than"
     r")\b",
     re.IGNORECASE,
 )
