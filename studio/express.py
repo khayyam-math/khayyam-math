@@ -2191,6 +2191,25 @@ async def express_figure(
         _log(f"routing prompt differs from tool prompt: "
              f"routing={routing_prompt[:80]!r}")
 
+    # ── Refinement-mode gate ──────────────────────────────────────
+    # When the caller supplied prior canvases, the user is asking for
+    # a targeted edit on the previous figure ("change the colour of
+    # edge A-B to red", "label the third tangent", "remove the
+    # axes").  Every deterministic route below regenerates a figure
+    # from scratch and IGNORES context_canvases — so on a refinement
+    # turn they would produce the same figure as last turn, with the
+    # user's edit silently dropped.  Skip them and let the LLM-SVG
+    # path handle the refinement, which already honours REFINEMENT
+    # MODE: the prior SVG XML is in the user message and the system
+    # prompt tells the model to preserve unchanged elements
+    # byte-for-byte.  The caller (_execute_tool) only attaches prior
+    # canvases when the user prompt looks like a refinement, so
+    # presence of context_canvases is a sufficient signal here.
+    _refining = bool(context_canvases)
+    if _refining:
+        _log(f"refinement mode: {len(context_canvases or [])} prior "
+             f"canvas(es) attached — skipping deterministic routes")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and
@@ -2198,7 +2217,7 @@ async def express_figure(
     # step-by-step algorithm prompt never reaches the sequential
     # route (which used to let the LLM redraw — and mis-number —
     # every step independently).
-    if (api_key and allow_sequential
+    if (api_key and allow_sequential and not _refining
             and os.environ.get("SEVIM_ALGO_TRACE", "on").lower()
             != "off"):
         try:
@@ -2236,7 +2255,7 @@ async def express_figure(
     # and render a deterministic ring (cyclic) or vertical flow
     # (linear).  Runs before the sequential route so a process prompt
     # never gets stacked as LLM-drawn sub-figures.
-    if (api_key and allow_sequential
+    if (api_key and allow_sequential and not _refining
             and os.environ.get("SEVIM_PROCESS_ROUTE", "on").lower()
             != "off"):
         try:
@@ -2278,7 +2297,7 @@ async def express_figure(
     # exactly, not decomposed into panels whose intermediate values
     # the decomposer LLM would guess (and get wrong).
     # Disabled via SEVIM_SYMBOLIC_ROUTE=off.
-    if (api_key
+    if (api_key and not _refining
             and os.environ.get("SEVIM_SYMBOLIC_ROUTE", "on").lower()
             != "off"):
         try:
@@ -2314,7 +2333,7 @@ async def express_figure(
     # deterministic O(|E_G|) verifier confirms the mapping IS a
     # homomorphism BEFORE the figure is rendered.  Fixes the earlier
     # tangle-of-dashed-arrows class of failures.
-    if (api_key
+    if (api_key and not _refining
             and os.environ.get("SEVIM_HOMOM_ROUTE", "on").lower()
             != "off"):
         try:
@@ -2353,7 +2372,7 @@ async def express_figure(
     # deterministic grid.  Runs FIRST — before the single-figure
     # routes — and recurses into express_figure per panel with
     # allow_panels=False so a sub-prompt cannot re-enter this route.
-    if (api_key and allow_panels
+    if (api_key and allow_panels and not _refining
             and os.environ.get("SEVIM_PANELS_ROUTE", "on").lower()
             != "off"):
         try:
@@ -2411,7 +2430,7 @@ async def express_figure(
     # loop. Graphviz's 30+ year-old layout engine handles positioning
     # and overlap-avoidance with hard correctness guarantees.
     # Disabled via SEVIM_GRAPHVIZ_ROUTE=off or when `dot` is missing.
-    if (api_key
+    if (api_key and not _refining
             and os.environ.get("SEVIM_GRAPHVIZ_ROUTE", "on").lower() != "off"):
         try:
             from studio.templates.graphviz_route import (
@@ -2462,7 +2481,7 @@ async def express_figure(
     # construction, with genuine 3-D projection.  No LLM code is ever
     # executed; the route accepts only a closed-vocabulary spec.
     # Disabled via SEVIM_MATPLOTLIB_ROUTE=off.
-    if (api_key
+    if (api_key and not _refining
             and os.environ.get("SEVIM_MATPLOTLIB_ROUTE", "on").lower()
             != "off"):
         try:
@@ -2508,7 +2527,7 @@ async def express_figure(
     # so the LLM-SVG's secant-as-tangent failure mode cannot recur.
     # The template router still runs FIRST so explicit
     # Newton's-method prompts pin to the bespoke newton template.
-    if (api_key
+    if (api_key and not _refining
             and os.environ.get("SEVIM_TEMPLATE_ROUTER", "on").lower() != "off"):
         try:
             from studio.templates.router import (
@@ -2561,7 +2580,7 @@ async def express_figure(
     # empty / unparseable extraction returns None and we fall
     # through to the LLM-SVG path unchanged.  Disabled via
     # SEVIM_FDL_ROUTE=off.
-    if (api_key
+    if (api_key and not _refining
             and os.environ.get("SEVIM_FDL_ROUTE", "on").lower() != "off"):
         try:
             from studio.templates.fdl import (
@@ -2608,7 +2627,7 @@ async def express_figure(
     # "step by step" hit the template (or FDL) above first; sequential
     # only catches genuinely sequential prompts like "explain the
     # scientific method step by step" or "show the writing process".
-    if (api_key and allow_sequential
+    if (api_key and allow_sequential and not _refining
             and os.environ.get("SEVIM_SEQUENTIAL_ROUTE", "on").lower()
             != "off"):
         try:
