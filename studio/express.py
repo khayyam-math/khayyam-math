@@ -1776,10 +1776,19 @@ async def _stream_chat_completion(
 _PRIMER_SYSTEM = (
     "You are a mathematics tutor.  The learner has asked a question that "
     "will be answered visually by a separate figure generator running "
-    "in parallel.  Your job: write a short, spoken-style PRIMER (3 to 5 "
-    "sentences, MAXIMUM 80 words) that introduces the concept and "
-    "states the key formula(s) the learner needs to follow the upcoming "
-    "figure.\n\n"
+    "in parallel.  Your job: write a thorough, spoken-style PRIMER "
+    "(6 to 12 sentences, roughly 150 to 280 words) that introduces "
+    "the concept, explains the intuition for WHY it works, states "
+    "every key formula the learner needs to follow the upcoming "
+    "figure, and gives a small concrete example if it helps the "
+    "learner ground the formulas.  Treat this as the first half of "
+    "a 1-on-1 tutorial — explain enough that the learner UNDERSTANDS "
+    "the technique, not just sees it.  Length follows depth of "
+    "topic: a Newton's-method primer or a 3-SAT-reduction primer "
+    "earns the full 12 sentences; a 'what is a derivative' primer "
+    "for a beginner might land closer to 8.  Lean LONG over "
+    "SHORT — a student forgives extra detail faster than they "
+    "forgive a half-explanation.\n\n"
     "RULES:\n"
     "  * Plain prose, no headings, no bullet lists, no markdown.\n"
     "  * Write so it can be SPOKEN aloud at natural pace.\n"
@@ -2024,7 +2033,11 @@ async def generate_theory_primer(
 
     payload = {
         "model": model,
-        "max_tokens": 220,
+        # Bumped from 220 -> 700 so the primer can hit the new
+        # 6-12 sentence / ~280-word target without truncation.
+        # Each token ≈ 0.75 words; 700 tokens ≈ 525 words of
+        # English, which comfortably accommodates the upper end.
+        "max_tokens": 700,
         "temperature": 0.3,
         "stream": True,
         "messages": [
