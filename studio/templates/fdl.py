@@ -273,7 +273,33 @@ def _compute_plot_range(
     plot_xmin = x_lo - 0.15 * span_x
     plot_xmax = x_hi + 0.15 * span_x
 
-    # Sample each curve to figure out y-range
+    # Cluster zoom: when the figure's FOCAL points (the labelled
+    # MarkPoints and TangentAt anchors — what the eye actually
+    # navigates between) cluster into a small region relative to the
+    # plot's natural x-range, zoom into the cluster.  Newton's-method
+    # iterates that converge to ∛2 = 1.26 from x_0 = 2 pile into a
+    # 0.7-unit cluster on a 3-unit plot range, so the action area
+    # ends up as ~25 % of the screen.  Cluster-zoom rescales that
+    # cluster to ~70 % of the screen while keeping the curve
+    # extending naturally past either edge.
+    focal_xs = [p.x for p in scene.primitives
+                if isinstance(p, (MarkPoint, TangentAt))]
+    if len(focal_xs) >= 2:
+        cluster_lo = min(focal_xs)
+        cluster_hi = max(focal_xs)
+        cluster_w = cluster_hi - cluster_lo
+        natural_w = plot_xmax - plot_xmin
+        if natural_w > 0 and cluster_w < 0.30 * natural_w:
+            # zoom: cluster becomes the inner ~71 % of the new
+            # x-range, with 20 %-of-cluster padding on each side.
+            pad = max(cluster_w * 0.20, natural_w * 0.04)
+            plot_xmin = cluster_lo - pad
+            plot_xmax = cluster_hi + pad
+
+    # Sample each curve to figure out y-range  (using the FINAL
+    # plot_xmin/plot_xmax — so cluster-zoomed scenes get a y-range
+    # that's appropriate for the zoomed window, not for the wider
+    # original range).
     for plot in plot_by_label.values():
         n = 100
         for i in range(n + 1):
