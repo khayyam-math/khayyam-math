@@ -2169,7 +2169,19 @@ async def express_figure(
         headers["Authorization"] = f"Bearer {api_key}"
 
     # Build the user message --- multi-modal when prior context exists.
-    user_content = _build_user_content(user_prompt, context_canvases or [])
+    # On refinement turns, send the USER'S LITERAL request rather than
+    # the chat-LLM's paraphrased tool prompt.  When the user says
+    # "change the colour of the curve to red" the chat LLM frequently
+    # rewrites it into a self-contained math request that loses the
+    # edit intent (verified post-deploy: prompt "Please change the
+    # colour of the function curve to red" came through as title
+    # "Tangent to x² at x = 3").  REFINEMENT MODE asks the model to
+    # preserve unchanged elements byte-for-byte, so it needs to see
+    # the user's actual instruction.
+    figure_prompt = user_prompt
+    if context_canvases and original_user_prompt:
+        figure_prompt = original_user_prompt
+    user_content = _build_user_content(figure_prompt, context_canvases or [])
 
     # Text-only backends (Qwen2.5-7B-Instruct, base Qwen, etc.) reject
     # multimodal image_url blocks with a 500.  The refinement intent is

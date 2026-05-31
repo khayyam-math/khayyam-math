@@ -487,7 +487,16 @@ async def _execute_tool(
     from studio.express import looks_like_refinement
     context_ids = list(args.get("context_canvas_ids") or [])
     context_canvases: list[dict[str, Any]] = []
-    if context_ids and looks_like_refinement(prompt):
+    # IMPORTANT: classify on the USER'S LITERAL message, not the chat
+    # LLM's paraphrased tool prompt.  The chat LLM frequently
+    # rewrites "change the curve colour to red" into a self-contained
+    # math request like "Show f(x) = x² with the tangent at x = 3"
+    # that loses the refinement cue.  Using the paraphrase here causes
+    # looks_like_refinement to return False and the prior canvas to
+    # be dropped, even though the chat-loop already determined the
+    # user was refining.
+    refinement_check_prompt = original_user_prompt or prompt
+    if context_ids and looks_like_refinement(refinement_check_prompt):
         for prior_id in context_ids[:3]:  # cap at 3 prior figures (cost)
             try:
                 pc = REGISTRY.get(prior_id)
