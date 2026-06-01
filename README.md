@@ -6,7 +6,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests passing](https://img.shields.io/badge/tests-67_passing-brightgreen.svg)](#testing)
+[![Tests passing](https://img.shields.io/badge/tests-275_passing-brightgreen.svg)](#testing)
 [![Live demo](https://img.shields.io/badge/demo-khayyammath.com-orange.svg)](https://khayyammath.com)
 [![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v5.1-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1)
 [![HuggingFace Space](https://img.shields.io/badge/🤗_Space-try_in_browser-blueviolet.svg)](https://huggingface.co/spaces/khayyam-math/demo)
@@ -49,27 +49,41 @@ from a one-line prompt.
 Most "AI generates a figure" products are wrappers around a single
 LLM call: ask GPT-4 for SVG, hope it isn't wrong. **We don't do that.**
 
-Khayyam Math uses a **layered architecture** that routes per prompt:
+Khayyam Math uses a **layered architecture** with ten deterministic
+figure routes that are tried in order before any "LLM draws SVG"
+fallback fires. Each route is correct by construction for the figure
+shapes it handles.
 
-| Route | Used for | Quality | Latency |
+| # | Route | Used for | How |
 |---|---|---|---|
-| **Deterministic templates** | Matrix multiplication / inverse / determinant / transpose / `Ax = b` | Pixel-perfect, always | <1 s |
-| **Graphviz** (`dot`, `circo`, `fdp`) | State machines / Turing machines / DAGs / trees / Hasse diagrams / Petersen / Cayley | Zero overlap, by construction | 3-9 s |
-| **LLM-SVG with vision audit** | Everything else (geometry, calculus, set theory, function plots) | Verified against narration | 10-30 s |
+| 1 | `algorithm_trace` | Sorts, Gaussian elimination, determinant cofactor, Euclid gcd | Python runs the algorithm, renders each step |
+| 2 | `process` / cycle | Cell cycle, scientific method, Krebs / water cycle | Ring (cyclic) or vertical flow (linear) |
+| 3 | `symbolic` | Derivatives, gradients, Hessians, integrals, limits, critical points | SymPy solves exactly; matplotlib typesets |
+| 4 | `graph_homomorphism` | Two-graph mappings | Deterministic O(\|E_G\|) verifier before render |
+| 5 | `panels` | Side-by-side comparisons | Recursive decomposition + deterministic grid |
+| 6 | `graphviz` (`dot`, `circo`, `fdp`) | DFA / Turing / DAG / tree / Hasse / Cayley | LLM emits DOT; Graphviz renders |
+| 7 | `matplotlib` | Function plots, regression, decision boundaries, 3-D surfaces | LLM emits closed-vocabulary plot spec; matplotlib renders |
+| 8 | `template_router` | Matrix mul / transpose / det / inverse, Pythagoras, Newton, sphere/cone volume, fraction, unit circle, Venn, etc. (19 named templates) | Per-template gpt-4o-mini classifier + pure-Python renderer |
+| 9 | `FDL` (Figure Description Language) | Function-graphable prompts that aren't a named template — "explain Newton's method visually" | LLM emits a `Scene` of ten composable primitives; SymPy backs every tangent slope and intersection |
+| 10 | `sequential` (fallback) | Generic "step by step" prompts | Decomposes into ordered sub-prompts, recurses per step |
 
-For every figure: a built-in **vision-review loop** (`gpt-4o` on a
-rendered PNG) catches incorrect claims before they reach the learner.
-Up to 3 correction rounds.
+When none of the ten match, the **LLM-SVG fallback** runs with a
+**structural critic + vision review + retry loop** (up to 3
+attempts):
 
-For every retry: an **LaTeX scrubber**, **layout planner** (CP-SAT
-constraint solver), **overlap-detector**, **out-of-bounds clamper**,
-and **font-fitter** rewrite the SVG so the canvas is honest.
+- **Structural critic** (deterministic Python) catches broken-figure
+  issues — missing required primitives, overlapping text, crowded
+  iterate clusters, narration highlight ids that don't exist, line
+  labeled "tangent" emitted without an actual function spec, …
+- **Vision review** (`gpt-4o` on the rendered PNG) catches the
+  geometric impossibilities a CAS can't see.
+- **Figure ground truth** (Tier 5) generates an independent
+  SymPy-validated claim list from the prompt alone — the vision
+  reviewer cross-checks the figure against that.
 
-The CP-SAT planner ([`studio/layout_planner.py`](studio/layout_planner.py))
-+ the Graphviz route ([`studio/templates/graphviz_route.py`](studio/templates/graphviz_route.py))
-+ the vision-audit retry ([`studio/express.py`](studio/express.py))
-together give the system its "this actually works" feel. None of these
-are novel by themselves; the integration is the moat.
+Read the full picture in
+[**ARCHITECTURE.md**](ARCHITECTURE.md) and
+[**docs/PIPELINE.md**](docs/PIPELINE.md).
 
 ## Math correctness — verified, not just generated
 
@@ -281,35 +295,46 @@ The fine-tuned Qwen model is documented on Hugging Face:
 
 ## How it's built
 
-Five subsystems, ~25 K LOC Python, 58 tests passing:
+Roughly 25 K LOC Python + a small amount of HTML/JS, 275 tests passing.
 
-```
-                   user prompt
-                       │
-                       ▼
-       ┌─── express loop (studio/express.py) ───┐
-       │                                         │
-       │    1. Template router (matrices, ...) ──┼─→ deterministic SVG
-       │    2. Graphviz route (graphs)         ──┼─→ DOT → SVG
-       │    3. LLM-SVG (everything else)         │
-       │           ↓                             │
-       │       vision audit ←─ rendered PNG     │
-       │           ↓ retry if FAIL              │
-       │       CP-SAT layout planner             │
-       │           ↓                             │
-       │       LaTeX scrubber + overlap fixer    │
-       └─────────────────────────────────────────┘
-                       │
-                       ▼
-            phrase-timed narration WAV
-            (piper voices, server-side)
-                       │
-                       ▼
-            canvas viewer ←── postMessage
-            (synced highlight + audio)
+```mermaid
+flowchart TB
+    U[user prompt] --> APP[studio/app.py<br/>chat loop, tool_choice=auto]
+    APP -.parallel.-> PRIMER[generate_theory_primer<br/>gpt-4o-mini, streams to chat]
+    APP -->|tool_call| EXP[express_figure<br/>10-route pipeline]
+    EXP --> DET[Routes 1-8:<br/>algorithm_trace / process /<br/>symbolic / homomorphism / panels /<br/>graphviz / matplotlib / templates]
+    EXP --> FDL[Route 9: FDL extractor<br/>10 composable primitives<br/>SymPy-backed]
+    EXP --> SEQ[Route 10: sequential fallback]
+    DET --> Q[structural critic +<br/>vision review +<br/>math verifier Tier 2-5]
+    FDL --> Q
+    SEQ --> Q
+    Q -->|fail| RETRY[retry with critique<br/>up to 3 attempts]
+    RETRY --> EXP
+    Q -->|pass| CANVAS[Canvas service<br/>persists to S3]
+    CANVAS --> PIPER[piper TTS narration<br/>per-phrase WAV]
+    CANVAS --> VIEWER[canvas viewer iframe<br/>synced highlights + audio]
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
+Refinement (follow-up turns) splits into three explicit cases —
+narrow edit (preserve byte-for-byte), complaint (redraw fresh
+fixing the named defect), elaboration (redraw fresh with more
+depth). See [docs/REFINEMENT.md](docs/REFINEMENT.md).
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design and
+the file-level map of every subsystem.
+
+### New here? Start with these docs
+
+If you've just joined the project, read these in order:
+
+1. **[ARCHITECTURE.md](ARCHITECTURE.md)** — top-down system map. Subsystems, request lifecycle, deploy topology, file-level map. **Start here.**
+2. **[docs/PIPELINE.md](docs/PIPELINE.md)** — `express_figure` deep-dive: every route, when each fires, FDL primitives catalog, "how to add a new template" recipe.
+3. **[docs/REFINEMENT.md](docs/REFINEMENT.md)** — conversation-awareness model: Case A (narrow edit) / Case B (complaint) / Case C (elaboration). Multi-turn worked example.
+4. **[docs/QUALITY_GATES.md](docs/QUALITY_GATES.md)** — structural critic rule catalog, vision review prompt, pre-deploy quality gate, telemetry → distillation loop.
+5. **[docs/MATH_CORRECTNESS.md](docs/MATH_CORRECTNESS.md)** — the five-tier verifier chain (SymPy → Z3 → Lean → per-domain → vision + Tier 5 ground truth).
+6. **[docs/DEPLOY.md](docs/DEPLOY.md)** — Fargate runbook: `infra/deploy.sh`, AWS account / profile, common failures + recovery.
+7. **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, code style, PR flow.
+8. **[docs/finetune.md](docs/finetune.md)** — local Qwen LoRA fine-tune procedure (smoke run, full run, HF push).
 
 ## Benchmarks
 
@@ -461,12 +486,16 @@ and HuggingFace — is in **[docs/finetune.md](docs/finetune.md)**.
 ## Testing
 
 ```bash
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest tests/ studio/ khayyam_math/tests/ -q
 ```
 
-67 tests on `main`, covering: the matrix family, Graphviz route,
-scene-graph parser, neural-layout schema, math-correctness verifier
-chain (SymPy / Z3 / Lean / structural), and the public `khayyam_math`
+275 tests on `main`, covering: matrix templates, Newton, sphere/cone
+volumes, fraction, geometry, trig, primary-school templates, the
+Graphviz route, the FDL extractor + renderer + highlight matcher, the
+algorithm-trace family, process/sequential routes, math-correctness
+verifier chain (SymPy / Z3 / Lean / structural), figure ground truth
+(Tier 5), structural critic rules, the refinement Case A/B/C
+classifier, the language localiser, and the public `khayyam_math`
 package (provider dispatch, JSON-from-LLM parser, env-var resolution).
 
 To run only the public-package tests (no provider credentials
