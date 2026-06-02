@@ -1823,24 +1823,40 @@ async def localise_narration(
     base_url: str = "https://api.openai.com/v1",
     model: str = "gpt-4o-mini",
     timeout_s: float = 20.0,
+    target_lang: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Translate every `speak` string in ``narration`` into the same
-    language as ``original_user_prompt``.
+    """Translate every `speak` string in ``narration`` into the
+    target language.
 
-    English prompts pass through unchanged (the LLM detects English
-    and returns the phrases verbatim).  For non-English target
-    languages, the model is instructed to spell numbers out as words
-    so the downstream TTS doesn't swallow digits — German user reports
-    confirmed that "1.5" / "1,5" pronounce poorly while "eineinhalb"
-    is clean.
+    The TARGET LANGUAGE is determined by ``target_lang`` if
+    supplied, otherwise by a deterministic detector run on
+    ``original_user_prompt``.  The LLM does NOT decide the
+    language — it is given a hard constraint and asked only to
+    translate.
 
-    Failure is non-fatal: any error (no key, parse mismatch, request
-    timeout) returns the original narration unchanged.  Adds at most
-    one ~200-token gpt-4o-mini call per express turn (~$0.0001).
+    A post-translation script cross-check verifies the output
+    actually consists of letters in the target language's script.
+    A German prompt that the model returns in Chinese — the real
+    production failure that motivated this rewrite — fails the
+    cross-check and the original (English) narration is shipped
+    instead.
 
-    Disable with SEVIM_LOCALISE_NARRATION=off.
+    Failure modes (any of which return the original narration
+    unchanged):
+      - SEVIM_LOCALISE_NARRATION=off
+      - no narration, no API key, no original prompt
+      - all narration phrases empty
+      - detected target language is English
+      - HTTP non-200
+      - JSON parse error / phrase count mismatch
+      - output script doesn't match target language's expected script
     """
-    import os, json, re, unicodedata, httpx
+    import os, json, httpx
+    from studio.language import (
+        detect_language, expected_scripts_for, text_matches_script,
+        describe_language,
+    )
+
     if os.environ.get("SEVIM_LOCALISE_NARRATION", "on").lower() == "off":
         return narration
     if not narration or not original_user_prompt or not api_key:
@@ -1850,65 +1866,54 @@ async def localise_narration(
     if not any(speaks):
         return narration
 
-    # Fast-path: if the user prompt contains NO non-Latin script
-    # characters (no Persian / Arabic / Chinese / Japanese / Korean /
-    # Cyrillic / Devanagari / Hebrew / Greek / Thai), and no
-    # non-ASCII Latin diacritics (no ü ö ä ñ é ç ...), it is
-    # overwhelmingly likely English.  Skip the LLM round-trip
-    # entirely.  An earlier prod run had gpt-4o-mini hallucinate an
-    # English-to-Spanish translation on the plain English Newton
-    # prompt; this fast-path makes that impossible by construction.
-    def _looks_like_plain_english(s: str) -> bool:
-        for ch in s:
-            if ord(ch) < 128:
-                continue
-            cat = unicodedata.category(ch)
-            # Letters outside ASCII -> not plain English.
-            if cat.startswith("L"):
-                return False
-            # Math symbols / punctuation / digits in the non-ASCII
-            # range (× ÷ π ∫ √ ≈ ≤ ≥ ∞) are fine.
-        return True
+    # Determine target language — deterministic detector, no LLM.
+    # An explicit `target_lang` from the caller wins (the chat-loop
+    # has already detected and pinned it).  Empty / "und" / unknown
+    # → fall back to detecting from the prompt.
+    if target_lang and target_lang not in ("und", ""):
+        lang = target_lang
+    else:
+        lang = detect_language(original_user_prompt)
 
-    if _looks_like_plain_english(original_user_prompt):
+    # English / undetermined → pass through.  This is the
+    # "ASCII-only Newton question" case from production: detector
+    # returns 'en', we ship the original narration verbatim.
+    if lang in ("en", "und"):
         return narration
 
+    expected = expected_scripts_for(lang)
+    lang_name = describe_language(lang)
+
+    # System prompt: hand the model a HARD constraint, not a
+    # detection task.  The model only translates; it does NOT
+    # choose the language.  Earlier prompts asked it to "detect
+    # then translate"; that's where the German→Chinese hallucination
+    # happened.
     system_msg = (
-        "You are a narration localiser for a math-figure tutor.  You "
-        "are given (a) the user's original prompt and (b) an array of "
-        "spoken narration phrases (currently in English).  Detect the "
-        "language of the user's prompt.\n"
-        "\n"
-        "DEFAULT TO ENGLISH.  If the prompt is ambiguous, mixed, or "
-        "could be English with a couple of foreign loan-words, output "
-        "language='en' and return the phrases array VERBATIM.  Only "
-        "translate when the prompt is UNAMBIGUOUSLY non-English (the "
-        "majority of words are in a non-English language).\n"
-        "\n"
-        "If language='en', return the phrases array verbatim — do NOT "
-        "translate, paraphrase, normalise, or 'improve' anything.\n"
-        "\n"
-        "Otherwise, translate every phrase into the user's language, "
-        "preserving math content exactly.  Math symbols (π, x², ∫, √) "
-        "stay as symbols; the prose around them switches to the user's "
-        "language.\n"
-        "\n"
-        "When translating into a non-English language, SPELL EVERY "
-        "NUMBER OUT AS A WORD in the target language so downstream TTS "
-        "engines (Piper, OpenAI tts-1) don't swallow digits.  "
-        "Examples:\n"
-        "  English '1.5'  →  German 'eineinhalb'  /  French 'un "
-        "virgule cinq'  /  Persian 'یک و نیم' / Chinese '一点五'.\n"
-        "  English 'three' stays 'drei' / 'trois' / 'سه' / '三'.\n"
-        "  English '≈ 1.26'  →  German 'ungefähr eins Komma zwei "
-        "sechs'.\n"
-        "\n"
-        "Return JSON: {\"language\": \"<ISO 639-1 code>\", \"phrases\": "
-        "[\"...\", \"...\", ...]}.  The phrases array MUST have "
-        "exactly the same length as the input."
+        f"You are a narration localiser.  Translate every phrase "
+        f"in the input array into {lang_name}.  Output "
+        f"language is FIXED at {lang_name}; you do NOT decide.  "
+        f"If you are uncertain whether a phrase needs translation, "
+        f"translate it anyway — duplicate-translation of an already-"
+        f"translated phrase is preferable to mixed-language output.\n"
+        f"\n"
+        f"Preserve math content exactly.  Math symbols (π, x², ∫, "
+        f"√) stay as symbols; the prose around them switches to "
+        f"{lang_name}.\n"
+        f"\n"
+        f"SPELL EVERY NUMBER OUT AS A WORD in {lang_name} so "
+        f"downstream TTS doesn't swallow digits.  Examples:\n"
+        f"  German '1.5' → 'eineinhalb'; '3' → 'drei'.\n"
+        f"  French '1.5' → 'un virgule cinq'.\n"
+        f"  Persian '1.5' → 'یک و نیم'.\n"
+        f"  Chinese '1.5' → '一点五'.\n"
+        f"\n"
+        f"Return JSON: {{\"phrases\": [\"...\", \"...\", ...]}}.  "
+        f"The phrases array MUST have exactly the same length as "
+        f"the input."
     )
     user_msg = json.dumps({
-        "user_prompt": original_user_prompt[:400],
+        "target_language": lang_name,
         "phrases": speaks,
     }, ensure_ascii=False)
     payload = {
@@ -1933,19 +1938,30 @@ async def localise_narration(
             return narration
         content = r.json()["choices"][0]["message"]["content"]
         data = json.loads(content)
-        # Trust the model's language decision: if it says 'en' (or
-        # any English variant), keep the originals.  A prior prod
-        # run had the model say language='en' but still translate
-        # the phrases to Spanish; this short-circuit makes that
-        # impossible.
-        lang_decision = str(data.get("language") or "").strip().lower()
-        if lang_decision in ("en", "eng", "english", "en-us", "en-gb"):
-            return narration
         translated = data.get("phrases") or []
     except Exception:  # noqa: BLE001
         return narration
+
     if not isinstance(translated, list) or len(translated) != len(speaks):
         return narration
+
+    # Output script cross-check.  Concatenate all non-empty
+    # translated phrases; the combined text's letters must be in
+    # the script set we expect for the target language.  A German
+    # request that came back as Chinese (real production
+    # failure) fails this check — Han characters where Latin was
+    # expected.
+    combined = " ".join(str(t).strip() for t in translated if t)
+    if not text_matches_script(combined, expected):
+        # Hallucinated language.  Roll back to original English.
+        print(
+            f"[express] localise rejected output: target was "
+            f"{lang_name}, scripts expected {set(expected)}, "
+            f"output contains the wrong script — shipping original",
+            flush=True, file=__import__("sys").stderr,
+        )
+        return narration
+
     out: list[dict[str, Any]] = []
     for i, p in enumerate(narration):
         new_speak = (translated[i] or "").strip()
@@ -2012,6 +2028,7 @@ async def generate_theory_primer(
     model: str,
     api_key: str | None,
     on_text_chunk: Callable[[str], Awaitable[None]] | None = None,
+    target_lang: str | None = None,
 ) -> str:
     """Quick parallel call that produces a 3-5 sentence theoretical
     primer with LaTeX-formatted formulas for the learner's prompt.
@@ -2031,6 +2048,25 @@ async def generate_theory_primer(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    # Compose the primer system prompt with the per-turn language
+    # hard constraint appended.  When the chat-loop has detected a
+    # non-English prompt language, that determines the primer's
+    # output language deterministically — the LLM does NOT decide.
+    _primer_system = _PRIMER_SYSTEM
+    if target_lang and target_lang not in ("en", "und", ""):
+        try:
+            from studio.language import describe_language
+            _name = describe_language(target_lang)
+            _primer_system = _primer_system + (
+                f"\n\nOUTPUT LANGUAGE (HARD CONSTRAINT): "
+                f"{_name}.  Every sentence of the primer MUST be "
+                f"in {_name}.  The language is pinned by the "
+                f"server; do not switch to English or any other "
+                f"language."
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     payload = {
         "model": model,
         # Bumped from 220 -> 700 so the primer can hit the new
@@ -2041,7 +2077,7 @@ async def generate_theory_primer(
         "temperature": 0.3,
         "stream": True,
         "messages": [
-            {"role": "system", "content": _PRIMER_SYSTEM},
+            {"role": "system", "content": _primer_system},
             {"role": "user",   "content": user_prompt},
         ],
     }
@@ -2243,15 +2279,68 @@ async def express_figure(
             flush=True, file=__import__("sys").stderr,
         )
 
+    # Deterministic language detection — runs BEFORE messages
+    # assembly so the figure-LLM system prompt can pin the output
+    # language as a hard constraint.  Detection uses a stdlib-only
+    # script-blocks + stopwords classifier; no LLM, no network.
+    # Defaults to 'en' for ASCII-only prompts (the platform's
+    # baseline language).
+    _detected_lang = "en"
+    _detected_lang_name = "English"
+    _lang_rule_for_llm = ""
+    try:
+        from studio.language import (
+            detect_language as _detect_lang,
+            describe_language as _describe_lang,
+        )
+        _detected_lang = _detect_lang(
+            original_user_prompt or user_prompt or ""
+        )
+        if _detected_lang in ("und", ""):
+            _detected_lang = "en"
+        _detected_lang_name = _describe_lang(_detected_lang)
+        print(
+            f"[express] detected language: "
+            f"{_detected_lang!r} ({_detected_lang_name})",
+            flush=True, file=__import__("sys").stderr,
+        )
+        if _detected_lang != "en":
+            _lang_rule_for_llm = (
+                f"\n\n=== OUTPUT LANGUAGE (HARD CONSTRAINT) ===\n"
+                f"Every word of narration, every caption, every "
+                f"primer string, and every other user-facing prose "
+                f"piece MUST be in {_detected_lang_name}.  The "
+                f"language is pinned by the server based on the "
+                f"user's literal message; you do NOT decide and you "
+                f"do NOT switch.  Even if other text in this "
+                f"conversation (history, paraphrased tool prompts, "
+                f"system reminders) appears in a different "
+                f"language, the user-facing output is "
+                f"{_detected_lang_name}.\n"
+                f"Math notation (π, ∫, x², √, =) stays as symbols.  "
+                f"For non-English output, spell every numeric value "
+                f"out as words so TTS pronounces it cleanly (e.g. "
+                f"German '1.5' → 'eineinhalb', Persian '1.5' → "
+                f"'یک و نیم')."
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[express] language detect errored (non-fatal): "
+            f"{type(exc).__name__}: {exc}",
+            flush=True, file=__import__("sys").stderr,
+        )
+
     # Compose the system message with the per-turn completeness
-    # brief appended.  This is the "brief the model up front" half
-    # of the critic+brief pair; the critic-on-output half lives
-    # below in the retry loop.
+    # brief and the language hard-constraint appended.  Both are
+    # "brief the model up front" inserts; the corresponding
+    # critic-on-output checks live in the retry loop below.
     _system_content = _EXPRESS_SYSTEM
     if _completeness_brief:
         _system_content = (
             _system_content + "\n\n=== PER-TURN ===\n" + _completeness_brief
         )
+    if _lang_rule_for_llm:
+        _system_content = _system_content + _lang_rule_for_llm
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": _system_content},

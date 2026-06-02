@@ -545,6 +545,13 @@ async def _execute_tool(
     primer_url = "https://api.openai.com/v1"
     primer_model = os.environ.get("SEVIM_PRIMER_MODEL", "gpt-4o-mini")
 
+    # Detect the user's language once; reuse for primer + localiser.
+    try:
+        from studio.language import detect_language as _detect_lang
+        _detected_lang = _detect_lang(original_user_prompt or prompt or "")
+    except Exception:  # noqa: BLE001
+        _detected_lang = "en"
+
     async def _run_primer() -> str:
         if on_primer_chunk is None or not _openai_key:
             return ""
@@ -554,6 +561,7 @@ async def _execute_tool(
             model=primer_model,
             api_key=_openai_key,
             on_text_chunk=on_primer_chunk,
+            target_lang=_detected_lang,
         )
 
     primer_task = asyncio.create_task(_run_primer())
@@ -581,9 +589,13 @@ async def _execute_tool(
     if api_key and original_user_prompt and result.get("narration"):
         try:
             from studio.express import localise_narration
+            # Reuse the language detected at the top of this
+            # function so primer + figure-LLM + localiser all
+            # agree on the same hard-constrained target.
             result["narration"] = await localise_narration(
                 result["narration"], original_user_prompt,
                 api_key=api_key, base_url=base_url,
+                target_lang=_detected_lang,
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[execute_tool] localise_narration failed: "
