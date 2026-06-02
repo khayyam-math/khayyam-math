@@ -1077,6 +1077,7 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
     # literal message; appended to SYSTEM_PROMPT so the chat-LLM (BOTH
     # reply-in-chat AND tool-call paths) sees what "complete" looks
     # like for this specific question.  Regex-only classifier; cheap.
+    # _slog is defined further down so we log via stderr directly.
     _sys = SYSTEM_PROMPT
     try:
         from studio.templates.completeness import (
@@ -1091,11 +1092,15 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
             brief = _rubric_brief(archetype)
             if brief:
                 _sys = _sys + "\n\n=== PER-TURN ===\n" + brief
-                _slog(f"completeness archetype: {archetype!r}")
+                print(
+                    f"[chat-loop] completeness archetype: {archetype!r}",
+                    flush=True, file=__import__("sys").stderr,
+                )
     except Exception as exc:  # noqa: BLE001
-        _slog(
-            f"completeness classify errored (non-fatal): "
-            f"{type(exc).__name__}: {exc}"
+        print(
+            f"[chat-loop] completeness classify errored "
+            f"(non-fatal): {type(exc).__name__}: {exc}",
+            flush=True, file=__import__("sys").stderr,
         )
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": _sys}]
