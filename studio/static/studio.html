@@ -831,14 +831,22 @@
 
   function renderPrimerMath() {
     if (!primerEl || !window.renderMathInElement) return;
+    renderMathInEl(primerEl);
+  }
+
+  function renderMathInEl(el) {
+    // Shared math-render path for primer AND chat-assistant
+    // replies.  The chat-LLM emits LaTeX in either `$..$` /
+    // `$$..$$` (the format we ask for in SYSTEM_PROMPT) or
+    // `\(..\)` / `\[..\]` (OpenAI assistant default).  KaTeX
+    // must accept all four delimiter styles, otherwise the
+    // backslash form ships to the user as raw source — see
+    // field report 2026-06-04 where a chat reply about a 2×2
+    // matrix inverse showed up as 'A = \begin{bmatrix} a & b
+    // \\ c & d \end{bmatrix}' in plain text.
+    if (!el || !window.renderMathInElement) return;
     try {
-      window.renderMathInElement(primerEl, {
-        // Cover the four common LaTeX delimiter styles.  The primer
-        // model was tutored on `$..$` / `$$..$$`, but in practice it
-        // also reaches for `\(..\)` and `\[..\]` (those are the
-        // OpenAI assistant defaults), so KaTeX must match all four —
-        // otherwise the literal backslash form leaks through to the
-        // user as raw source.
+      window.renderMathInElement(el, {
         delimiters: [
           { left: '$$',  right: '$$',  display: true  },
           { left: '\\[', right: '\\]', display: true  },
@@ -846,11 +854,25 @@
           { left: '\\(', right: '\\)', display: false },
         ],
         throwOnError: false,
-        // Don't try to render inside our own already-styled spans
-        // (avoids re-rendering KaTeX output on subsequent chunks).
         ignoredClasses: ['katex-html', 'katex'],
       });
-    } catch (_) { /* partial LaTeX, ignore */ }
+    } catch (_) { /* partial LaTeX mid-stream; ignore */ }
+  }
+
+  // Debounced re-render for streaming text.  Each text chunk
+  // schedules a render; bunched chunks coalesce into one render
+  // call.  KaTeX is ~5 ms for a typical chat reply so even
+  // un-debounced would be fine, but the debounce avoids visible
+  // re-flow flicker.
+  const _renderTimers = new WeakMap();
+  function scheduleMathRender(el, delay = 80) {
+    if (!el) return;
+    const t = _renderTimers.get(el);
+    if (t) clearTimeout(t);
+    _renderTimers.set(el, setTimeout(() => {
+      _renderTimers.delete(el);
+      renderMathInEl(el);
+    }, delay));
   }
 
   // Speak whatever sentence boundary we've passed since last speak.
@@ -1097,6 +1119,12 @@
             asstText += payload.text;
             asstEl.textContent = asstText;
             asstEl.style.opacity = '1';
+            // Render any LaTeX in the streamed reply.  Debounced so
+            // bunched chunks coalesce into one KaTeX pass.  Final
+            // (no-debounce) render also fires on `event: done`
+            // below in case the closing delimiter arrives in the
+            // last chunk.
+            scheduleMathRender(asstEl);
             // Visual streaming only — audio is the canvas's job.
           } else if (evt === 'primer_chunk') {
             // Theory primer streams in parallel with the figure.  Each
@@ -1285,6 +1313,12 @@
               }
             } catch {}
           } else if (evt === 'done') {
+            // Final math-render pass on the assistant reply.  The
+            // closing LaTeX delimiter may have arrived in the last
+            // chunk, and the debounced renderer might not have
+            // fired yet.  Re-rendering at end-of-stream guarantees
+            // the user sees rendered formulas, not raw source.
+            if (asstText) renderMathInEl(asstEl);
             // Belt-and-suspenders snapshot trigger.  Some turns
             // update the canvas via SSE/refinement WITHOUT firing a
             // tool_result event in studio's stream, so the figure
