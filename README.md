@@ -6,7 +6,7 @@
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests passing](https://img.shields.io/badge/tests-275_passing-brightgreen.svg)](#testing)
+[![Tests passing](https://img.shields.io/badge/tests-328_passing-brightgreen.svg)](#testing)
 [![Live demo](https://img.shields.io/badge/demo-khayyammath.com-orange.svg)](https://khayyammath.com)
 [![HuggingFace model](https://img.shields.io/badge/🤗_model-khayyam--math--qwen2.5--7b--v5.1-yellow.svg)](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v5.1)
 [![HuggingFace Space](https://img.shields.io/badge/🤗_Space-try_in_browser-blueviolet.svg)](https://huggingface.co/spaces/khayyam-math/demo)
@@ -68,8 +68,8 @@ shapes it handles.
 | 10 | `sequential` (fallback) | Generic "step by step" prompts | Decomposes into ordered sub-prompts, recurses per step |
 
 When none of the ten match, the **LLM-SVG fallback** runs with a
-**structural critic + vision review + retry loop** (up to 3
-attempts):
+**structural critic + vision review + completeness critic + retry
+loop** (up to 3 attempts):
 
 - **Structural critic** (deterministic Python) catches broken-figure
   issues — missing required primitives, overlapping text, crowded
@@ -80,6 +80,11 @@ attempts):
 - **Figure ground truth** (Tier 5) generates an independent
   SymPy-validated claim list from the prompt alone — the vision
   reviewer cross-checks the figure against that.
+- **Completeness critic** classifies the question into one of nine
+  pedagogical archetypes (proof / step-by-step / why / compare /
+  define / explain / construct / apply / quick-fact) and verifies
+  the produced answer has the required components for that class.
+  A right-but-shallow answer doesn't ship.
 
 Read the full picture in
 [**ARCHITECTURE.md**](ARCHITECTURE.md) and
@@ -305,7 +310,7 @@ flowchart TB
     EXP --> DET[Routes 1-8:<br/>algorithm_trace / process /<br/>symbolic / homomorphism / panels /<br/>graphviz / matplotlib / templates]
     EXP --> FDL[Route 9: FDL extractor<br/>10 composable primitives<br/>SymPy-backed]
     EXP --> SEQ[Route 10: sequential fallback]
-    DET --> Q[structural critic +<br/>vision review +<br/>math verifier Tier 2-5]
+    DET --> Q[structural critic +<br/>vision review +<br/>math verifier Tier 2-5 +<br/>completeness critic]
     FDL --> Q
     SEQ --> Q
     Q -->|fail| RETRY[retry with critique<br/>up to 3 attempts]
@@ -331,10 +336,11 @@ If you've just joined the project, read these in order:
 2. **[docs/PIPELINE.md](docs/PIPELINE.md)** — `express_figure` deep-dive: every route, when each fires, FDL primitives catalog, "how to add a new template" recipe.
 3. **[docs/REFINEMENT.md](docs/REFINEMENT.md)** — conversation-awareness model: Case A (narrow edit) / Case B (complaint) / Case C (elaboration). Multi-turn worked example.
 4. **[docs/QUALITY_GATES.md](docs/QUALITY_GATES.md)** — structural critic rule catalog, vision review prompt, pre-deploy quality gate, telemetry → distillation loop.
-5. **[docs/MATH_CORRECTNESS.md](docs/MATH_CORRECTNESS.md)** — the five-tier verifier chain (SymPy → Z3 → Lean → per-domain → vision + Tier 5 ground truth).
-6. **[docs/DEPLOY.md](docs/DEPLOY.md)** — Fargate runbook: `infra/deploy.sh`, AWS account / profile, common failures + recovery.
-7. **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, code style, PR flow.
-8. **[docs/finetune.md](docs/finetune.md)** — local Qwen LoRA fine-tune procedure (smoke run, full run, HF push).
+5. **[docs/COMPLETENESS.md](docs/COMPLETENESS.md)** — pedagogical-depth gate: the nine archetypes (proof, step_by_step, …), brief + critic pair, classifier + detector catalog.
+6. **[docs/MATH_CORRECTNESS.md](docs/MATH_CORRECTNESS.md)** — the five-tier verifier chain (SymPy → Z3 → Lean → per-domain → vision + Tier 5 ground truth).
+7. **[docs/DEPLOY.md](docs/DEPLOY.md)** — Fargate runbook: `infra/deploy.sh`, AWS account / profile, common failures + recovery.
+8. **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, code style, PR flow.
+9. **[docs/finetune.md](docs/finetune.md)** — local Qwen LoRA fine-tune procedure (smoke run, full run, HF push).
 
 ## Benchmarks
 
@@ -489,14 +495,15 @@ and HuggingFace — is in **[docs/finetune.md](docs/finetune.md)**.
 .venv/bin/python -m pytest tests/ studio/ khayyam_math/tests/ -q
 ```
 
-275 tests on `main`, covering: matrix templates, Newton, sphere/cone
+328 tests on `main`, covering: matrix templates, Newton, sphere/cone
 volumes, fraction, geometry, trig, primary-school templates, the
 Graphviz route, the FDL extractor + renderer + highlight matcher, the
 algorithm-trace family, process/sequential routes, math-correctness
 verifier chain (SymPy / Z3 / Lean / structural), figure ground truth
 (Tier 5), structural critic rules, the refinement Case A/B/C
-classifier, the language localiser, and the public `khayyam_math`
-package (provider dispatch, JSON-from-LLM parser, env-var resolution).
+classifier, the language localiser, the **completeness critic
+(9 archetypes, 53 cases)**, and the public `khayyam_math` package
+(provider dispatch, JSON-from-LLM parser, env-var resolution).
 
 To run only the public-package tests (no provider credentials
 required):

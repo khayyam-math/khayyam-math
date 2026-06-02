@@ -55,6 +55,7 @@ These are listed roughly in order of "easy first issue" → "hardest":
 | **More deterministic templates** — Fourier series, slope fields, vector-addition diagrams, Riemann sums, more linalg ops | medium | See `studio/templates/matrix.py` and `studio/templates/newton.py` as patterns. Each template is a pure-Python function returning `(svg_string, narration_list)`. Recipe in [docs/PIPELINE.md](docs/PIPELINE.md#how-to-add-a-new-template). |
 | **More FDL primitives** — `Asymptote`, `InflectionPoint`, `LocalExtremum`, `ParametricCurve` | medium | Extend `studio/templates/fdl.py`. Recipe in [docs/PIPELINE.md](docs/PIPELINE.md#how-to-add-a-new-fdl-primitive). |
 | **More structural critic rules** — anything the vision LLM unreliably catches but a Python check can decide | easy-medium | `_structural_review` in `studio/express.py`. Recipe in [docs/MATH_CORRECTNESS.md](docs/MATH_CORRECTNESS.md#how-to-add-a-verifier-rule). |
+| **More completeness archetypes** — open-ended Socratic question, multi-part homework problem, "draft a proof outline" | medium | `studio/templates/completeness.py`. Add to `COMPLETENESS_RUBRICS` + `_CLASSIFIER_RULES` + a test row. Recipe in [docs/COMPLETENESS.md](docs/COMPLETENESS.md#adding-a-new-archetype). |
 | **Localisation voices** — Arabic, French, Spanish, Hindi narration voices | medium | The text-side language localiser already handles translation + digits-as-words for non-English. Piper-TTS supports many languages; add a voice config keyed by language code. |
 | **Better Graphviz coverage** — Turing-machine `tape` visualisation, recursion-tree templates | medium | Extend `studio/templates/graphviz_route.py`. |
 | **LaTeX scrubber rules** — more LaTeX commands → Unicode mappings | easy | `_LATEX_REPLACEMENTS` in `studio/express.py`. PRs welcome. |
@@ -75,7 +76,7 @@ These are listed roughly in order of "easy first issue" → "hardest":
   explicit about what each function takes.
 - **Tests pass before the PR**:
   `.venv/bin/python -m pytest tests/ studio/ khayyam_math/tests/ -q`
-  must exit 0 (275 tests on `main`).
+  must exit 0 (328 tests on `main`).
 - **One concern per PR**: don't bundle a typo fix with a 2000-LOC
   refactor.
 
@@ -105,6 +106,14 @@ These are listed roughly in order of "easy first issue" → "hardest":
   first.** The three-case (A / B / C) model is non-obvious and
   changing it incorrectly silently regresses every multi-turn
   session.
+- **Completeness rubrics: don't change a rubric's required
+  components without updating the brief.** The "brief + critic"
+  pair must agree, otherwise the figure LLM produces what the
+  brief asked for and the critic rejects it. See
+  [docs/COMPLETENESS.md](docs/COMPLETENESS.md). When you add a
+  new archetype, add it to both `COMPLETENESS_RUBRICS` AND
+  `_CLASSIFIER_RULES` AND a test row in
+  `tests/test_completeness.py`.
 
 ## Pull-request flow
 

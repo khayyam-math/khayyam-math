@@ -5,6 +5,13 @@ false and the learner doesn't know to doubt it. Khayyam Math
 runs every claim a figure makes through a five-tier verifier
 chain before the figure ships.
 
+> **Math correctness vs completeness.** This doc covers whether
+> an answer is RIGHT. Whether it is DEEP ENOUGH (a right but
+> one-sentence answer to "explain Newton's method step by step")
+> is a sister concern; see
+> [COMPLETENESS.md](COMPLETENESS.md). Both run in the same retry
+> loop with a shared budget.
+
 Each tier is more rigorous than the last. The chain escalates
 only as far as needed — most claims (~78%) resolve at Tier 2a
 (SymPy `simplify`); the deeper tiers handle the residue.

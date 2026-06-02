@@ -265,19 +265,29 @@ template first.
 
 The catch-all path:
 
-1. gpt-4o emits `{problem_statement, solution, math_claims, svg,
+1. **Completeness classify + brief.** The user's question is
+   classified into one of nine pedagogical archetypes
+   (proof / step_by_step / why / compare / define / explain /
+   construct / apply / quick_fact). The rubric brief for that
+   archetype is appended to `_EXPRESS_SYSTEM` so the figure LLM
+   sees the depth contract up front. See
+   [COMPLETENESS.md](COMPLETENESS.md).
+2. gpt-4o emits `{problem_statement, solution, math_claims, svg,
    narration, title}` as one JSON object (structured-output mode).
-2. **Tier 2/3 math verifier** (SymPy → Z3 → Lean → per-domain
+3. **Tier 2/3 math verifier** (SymPy → Z3 → Lean → per-domain
    structural) checks every `math_claims` entry.
-3. **Tier 5 figure_ground_truth** independently proposes claims
+4. **Tier 5 figure_ground_truth** independently proposes claims
    from the prompt and validates them via SymPy.
-4. **Structural critic** (`_structural_review`) runs deterministic
+5. **Structural critic** (`_structural_review`) runs deterministic
    checks on the rendered SVG (see [QUALITY_GATES](QUALITY_GATES.md)).
-5. **Vision review** (`_vision_review`, gpt-4o on the rendered PNG
+6. **Completeness critic** (`completeness_review`) checks the
+   produced primer + narration against the archetype's required
+   components + length range.
+7. **Vision review** (`_vision_review`, gpt-4o on the rendered PNG
    + narration) catches what code can't.
-6. If any of the above fail, format the issues as a critique and
+8. If any of the above fail, format the issues as a critique and
    **retry** (up to `max_retries`, default 2 → 3 total attempts).
-7. After exhausting retries, ship the BEST attempt
+9. After exhausting retries, ship the BEST attempt
    (`_attempt_score` over all retries — the 3-SAT regression where
    attempt 0 had 1 overlap pair and attempt 2 had 5 forced this).
 

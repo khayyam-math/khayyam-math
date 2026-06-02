@@ -1,6 +1,6 @@
 # Quality gates — review, structural critic, ground truth
 
-Every figure on the LLM-SVG path passes three quality gates
+Every figure on the LLM-SVG path passes four quality gates
 before it ships:
 
 1. **Structural critic** — deterministic Python checks on the
@@ -9,25 +9,35 @@ before it ships:
    verification of `math_claims`.
 3. **Vision review** — gpt-4o on the rendered PNG +
    independent Tier 5 ground-truth claims.
+4. **Completeness critic** — pedagogical-depth check against
+   the rubric for the question's archetype. Sister gate to
+   the structural critic; see [COMPLETENESS.md](COMPLETENESS.md)
+   for the full design.
 
 If any gate fails, the failure is formatted as a critique and the
 figure LLM is retried with that critique attached (up to
-`max_retries`, default 2 → 3 total attempts).
+`max_retries`, default 2 → 3 total attempts). All four gates
+share the same retry budget — issues from any combination are
+merged into one critique block per attempt.
 
 Deterministic templates (newton, sphere, cone, matrix, …) skip
-all three gates by design: they are correct by construction.
+all four gates by design: they are correct + complete by
+construction.
 
-This doc walks each gate.
+This doc walks the first three gates; completeness has its own
+deep-dive at [COMPLETENESS.md](COMPLETENESS.md).
 
 ```mermaid
 flowchart TB
     SVG[raw SVG from figure LLM] --> S[structural critic]
     SVG --> M[math claims verifier<br/>Tier 2/3]
     SVG --> GT[figure_ground_truth<br/>Tier 5 propose claims]
+    SVG --> C[completeness critic<br/>archetype rubric]
     GT --> R[vision review<br/>gpt-4o on PNG +<br/>claims as context]
     S --> Merge[merge issues into single critique]
     M --> Merge
     R --> Merge
+    C --> Merge
     Merge -->|pass + no issues| OUT[(ship figure)]
     Merge -->|fail| Critique[format critique]
     Critique --> Retry[retry figure LLM<br/>with critique attached]

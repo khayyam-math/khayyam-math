@@ -51,6 +51,7 @@ flowchart TB
         fdl[FDL extractor<br/>+ renderer]
         ver[math_verifier<br/>z3_verifier<br/>lean_verifier]
         gt[figure_ground_truth.py<br/>Tier 5 claims]
+        comp[completeness.py<br/>9 archetype rubrics]
     end
 
     subgraph svc[Canvas service]
@@ -72,6 +73,8 @@ flowchart TB
     exp --> fdl
     exp --> ver
     exp --> gt
+    exp --> comp
+    app --> comp
     exp --> canv
     canv --> store
     store --> s3
@@ -92,11 +95,12 @@ Sizes (lines of Python, today):
 | `studio/app.py` | ~2,300 | FastAPI router, chat loop, magic-link auth, admin endpoints. |
 | `studio/templates/fdl.py` | ~1,400 | Figure Description Language: ten primitives + extractor + renderer. |
 | `service/canvas.py` | ~900 | `Canvas` object + REGISTRY + S3 rehydration. |
+| `studio/templates/completeness.py` | ~660 | Pedagogical-depth gate: nine archetype rubrics + classifier + critic + brief generator. |
 | `service/app.py` | ~640 | `/canvas/*` HTTP surface for the viewer iframe. |
 | `studio/auth.py` | ~270 | Magic-link cookie auth via SES. |
 | Other templates | ~6,000 | newton, volumes, fraction, geometry, graph, graphviz, graph_homomorphism, matrix, matplotlib_route, panels_route, plotly_render, primary, process_route, sequential_route, symbolic_route, table, trig, venn, algorithm_trace. |
 
-Tests: 275 collected (`tests/`, `studio/`, `khayyam_math/tests/`).
+Tests: 328 collected (`tests/`, `studio/`, `khayyam_math/tests/`).
 
 ---
 
@@ -332,6 +336,65 @@ and [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md).
 
 ---
 
+## Completeness — pedagogical-depth gate (nine archetypes)
+
+The verifier chain above checks whether an answer is RIGHT. The
+completeness gate checks whether an answer is DEEP ENOUGH. A
+right-but-shallow answer (a one-sentence response to "explain
+Newton's method step by step in an example") doesn't ship.
+
+The model is three-axis: an answer is complete when (cognitive
+level × structural depth × representational forms) match the
+question's pedagogical contract. The three axes collapse into one
+of **nine archetypes** the classifier picks per turn.
+
+```mermaid
+flowchart LR
+    Q[user prompt] --> C[classify_question<br/>regex-only, no LLM]
+    C --> A[(archetype: proof / step_by_step /<br/>causal / comparison / definition /<br/>concept_intuition / apply / construction /<br/>quick_fact)]
+    A --> B[rubric_brief_for_llm]
+    B --> SP[append to SYSTEM_PROMPT<br/>chat-LLM + figure-LLM]
+    SP --> LLM[model generates answer]
+    LLM --> R[completeness_review]
+    A --> R
+    R -->|missing components| RETRY[merge into existing<br/>structural-issues critique]
+    R -->|complete| SHIP[(ship)]
+    RETRY --> LLM
+```
+
+Each archetype has a rubric: required components + narration
+phrase range + primer word range. Detection is lenient regex on
+the combined (primer + narration + chat reply) text.
+
+| Archetype | Match cue | Required components | Narration | Primer |
+|---|---|---|---:|---:|
+| `quick_fact` | *evaluate / compute / simplify* | statement | 1-2 | 15-60 |
+| `concept_definition` | *what is / define* | statement, paraphrase | 2-4 | 60-140 |
+| `concept_with_intuition` | *explain / how does X work* | statement, intuition, takeaway | 3-5 | 100-200 |
+| `apply_worked_example` | *show / use ... to ... / with an example* | statement, worked example, takeaway | 4-6 | 120-220 |
+| `step_by_step` | *step by step / walk me through / in detail* | + sequence_of_steps + worked example | 6-9 | 150-280 |
+| `causal_explanation` | *why / how come / intuition* | + causal chain + link to prior | 5-8 | 150-260 |
+| `comparison` | *compare / difference between* | criteria, tabulation, takeaway | 4-7 | 70-200 |
+| `proof` | *prove / show that / derive* | statement, full deduction, QED | 5-9 | 160-320 |
+| `construction` | *construct / design / find an X such that* | construction steps, verification | 5-8 | 140-260 |
+
+Two wiring points:
+
+- The classifier runs once per turn in **both**
+  `studio/app.py:_stream_vllm_chat` (so the chat-LLM is briefed on
+  what "complete" means before deciding to reply-in-chat or
+  tool-call) and `studio/express.py:express_figure` (so the figure
+  LLM sees the brief in its system prompt).
+- The critic runs after every LLM-SVG attempt, parallel to
+  `_structural_review`. Issues feed the same retry critique.
+
+Gate: `SEVIM_COMPLETENESS_CRITIC` (default: on). Off disables both
+the brief and the critic — useful for A/B telemetry comparisons.
+
+Deep-dive: [`docs/COMPLETENESS.md`](docs/COMPLETENESS.md).
+
+---
+
 ## Narration synthesis + highlight matching
 
 ```mermaid
@@ -557,6 +620,7 @@ flowchart TB
 | Lean kernel verifier (Tier 2c) | `studio/templates/lean_verifier.py` |
 | Offline Mathlib catalog verifier | `studio/catalog_verifier.py` |
 | Lean translation prompts | `studio/templates/lean_translator.py` |
+| Completeness classifier + critic + brief | `studio/templates/completeness.py` |
 | Canvas object + REGISTRY | `service/canvas.py` |
 | Canvas viewer (browser) | `service/static/canvas.html` |
 | Canvas HTTP endpoints | `service/app.py` |
