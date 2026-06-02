@@ -2214,8 +2214,47 @@ async def express_figure(
                   f"for text-only backend {model!r}",
                   flush=True, file=__import__("sys").stderr)
 
+    # Completeness classification — run BEFORE messages assembly so
+    # the per-turn brief can be appended to the system prompt.
+    # Cheap regex-only classifier; no network.
+    _completeness_archetype = None
+    _completeness_brief = ""
+    _completeness_primer = ""  # populated later when primer_task finishes
+    try:
+        from studio.templates.completeness import (
+            classify_question as _classify_question,
+            rubric_brief_for_llm as _rubric_brief,
+            is_enabled as _completeness_enabled,
+        )
+        if _completeness_enabled():
+            _completeness_archetype = _classify_question(
+                original_user_prompt or user_prompt or ""
+            )
+            _completeness_brief = _rubric_brief(_completeness_archetype)
+            print(
+                f"[express] completeness archetype: "
+                f"{_completeness_archetype!r}",
+                flush=True, file=__import__("sys").stderr,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[express] completeness classify errored (non-fatal): "
+            f"{type(exc).__name__}: {exc}",
+            flush=True, file=__import__("sys").stderr,
+        )
+
+    # Compose the system message with the per-turn completeness
+    # brief appended.  This is the "brief the model up front" half
+    # of the critic+brief pair; the critic-on-output half lives
+    # below in the retry loop.
+    _system_content = _EXPRESS_SYSTEM
+    if _completeness_brief:
+        _system_content = (
+            _system_content + "\n\n=== PER-TURN ===\n" + _completeness_brief
+        )
+
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _EXPRESS_SYSTEM},
+        {"role": "system", "content": _system_content},
         {"role": "user", "content": user_content},
     ]
 
@@ -3338,6 +3377,36 @@ async def express_figure(
             result.get("svg", ""), result.get("narration") or [],
             user_prompt=user_prompt,
         )
+        # Completeness critic — pedagogical-depth checks parallel to
+        # the structural critic.  Runs the rubric for the archetype
+        # the user's question landed in (classified once up at the
+        # top of this function).  Missing components feed the same
+        # retry critique as the structural issues.
+        if _completeness_archetype is not None:
+            try:
+                from studio.templates.completeness import (
+                    completeness_review as _completeness_review,
+                )
+                completeness_issues = _completeness_review(
+                    archetype=_completeness_archetype,
+                    primer=_completeness_primer or "",
+                    narration=result.get("narration") or [],
+                    chat_text="",
+                )
+                if completeness_issues:
+                    structural_issues = (
+                        list(completeness_issues) + list(structural_issues)
+                    )
+                    _log(
+                        f"completeness review: "
+                        f"{len(completeness_issues)} issue(s) for "
+                        f"archetype {_completeness_archetype!r}"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                _log(
+                    f"completeness review errored "
+                    f"(non-fatal): {type(exc).__name__}: {exc}"
+                )
         # Math-claim failures are stop-the-line: prepend them to the
         # structural-issues list so the existing retry path picks them
         # up as critique input.
@@ -7384,6 +7453,12 @@ def _structural_review(svg: str, narration: list[dict[str, Any]],
         circles_xy: list[tuple[float, float, float]] = []
         for m in circle_iter:
             a = _attrs(m.group(0))
+            # Decorative circles (no id, no explicit cx/cy) are
+            # NOT iterate markers.  The crowded-markers rule is
+            # for labelled iterate dots clustering together, not
+            # for stylistic dashed-outline-style decorations.
+            if "id" not in a and "cx" not in a:
+                continue
             try:
                 cx = float(a.get("cx", "0"))
                 cy = float(a.get("cy", "0"))

@@ -600,6 +600,7 @@ to reverse them without an issue discussion first.
 - [`docs/PIPELINE.md`](docs/PIPELINE.md) — every route in detail + "how to add a new template" recipe
 - [`docs/REFINEMENT.md`](docs/REFINEMENT.md) — multi-turn worked example
 - [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) — structural critic rule catalog + vision review prompt
+- [`docs/COMPLETENESS.md`](docs/COMPLETENESS.md) — pedagogical-depth quality gate (nine archetypes + brief + critic)
 - [`docs/MATH_CORRECTNESS.md`](docs/MATH_CORRECTNESS.md) — five-tier verifier chain
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — Fargate runbook
 - [`docs/finetune.md`](docs/finetune.md) — local Qwen fine-tune procedure

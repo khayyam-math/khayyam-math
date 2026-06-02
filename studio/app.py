@@ -1073,7 +1073,32 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
     ``--enable-auto-tool-choice --tool-call-parser hermes`` for
     Qwen2.5-Instruct.
     """
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # Per-turn completeness brief — classified once from the user's
+    # literal message; appended to SYSTEM_PROMPT so the chat-LLM (BOTH
+    # reply-in-chat AND tool-call paths) sees what "complete" looks
+    # like for this specific question.  Regex-only classifier; cheap.
+    _sys = SYSTEM_PROMPT
+    try:
+        from studio.templates.completeness import (
+            classify_question as _classify_question,
+            rubric_brief_for_llm as _rubric_brief,
+            is_enabled as _completeness_enabled,
+        )
+        if _completeness_enabled():
+            archetype = _classify_question(
+                req.user, history=[h.content for h in req.history],
+            )
+            brief = _rubric_brief(archetype)
+            if brief:
+                _sys = _sys + "\n\n=== PER-TURN ===\n" + brief
+                _slog(f"completeness archetype: {archetype!r}")
+    except Exception as exc:  # noqa: BLE001
+        _slog(
+            f"completeness classify errored (non-fatal): "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": _sys}]
     # Compact prior turns: keep just role+text, cap each turn's content
     # at ~600 chars, and only retain the most recent 6 turns.  Without
     # this, refinement turns N+ accumulate the full assistant chat-side
