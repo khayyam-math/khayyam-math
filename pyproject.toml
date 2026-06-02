@@ -69,3 +69,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["khayyam_math*", "sevim*", "service*", "mcp_server*", "studio*"]
+
+[tool.pytest.ini_options]
+# --strict-markers turns an unknown mark into a hard error instead of a
+# silent no-op.  This catches typos (intgeration vs integration) and
+# forces every new custom mark to be declared here before use.
+addopts = "--strict-markers"
+markers = [
+    "integration: requires live API credentials (OPENAI_API_KEY); excluded from fork PR CI with -m 'not integration'",
+]

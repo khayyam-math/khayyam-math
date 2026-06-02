@@ -1,0 +1,76 @@
+name: PR check
+
+# Runs on every pull request targeting main, including PRs from forks.
+#
+# SECURITY: this workflow uses the `pull_request` trigger, NOT
+# `pull_request_target`. The difference matters:
+#
+#   pull_request        — runs in the fork's context. GitHub provides NO
+#                         repository secrets. Safe for untrusted code.
+#
+#   pull_request_target — runs in the BASE REPO's context even when the
+#                         PR comes from a fork. Repository secrets ARE
+#                         available. A malicious fork PR could exfiltrate
+#                         OPENAI_API_KEY, SEVIM_AUTH_SECRET, and AWS
+#                         credentials if this trigger is used carelessly.
+#
+# Never change this trigger to pull_request_target unless you have read
+# https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+# and explicitly audited every step that checks out untrusted code.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Minimum permissions. Read-only access to the repository contents is
+# all this workflow needs. No write access, no id-token, no packages.
+permissions:
+  contents: read
+
+# Cancel any in-progress run for the same PR when a new commit is pushed.
+# Prevents two runs from racing on the same PR and wasting runner minutes.
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Test suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # graphviz provides the `dot` binary used by test_graphviz_route.py.
+      # Tests that need it are gated with @pytest.mark.skipif(not _HAS_DOT)
+      # and will skip gracefully if this step is removed, but installing it
+      # here means those tests actually run and are not silently ignored.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends graphviz
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      # --frozen: use the lockfile exactly; never resolve or update deps.
+      # --extra dev: include the dev group (pytest>=7, httpx) alongside
+      # the main production dependencies.
+      # The heavy optional extras (aws, qwen) are not installed.
+      - name: Install Python dependencies
+        run: uv sync --frozen --extra dev
+
+      # No API credentials are set or available in this job.
+      # Static audit on 2026-06-02 confirmed every test in this suite is
+      # credential-free — all API surfaces are mocked with httpx.MockTransport
+      # or unittest.mock.patch.
+      #
+      # -m "not integration": exclude any future test marked
+      # @pytest.mark.integration (requires live OPENAI_API_KEY).
+      # --strict-markers: fail immediately if an unregistered mark is used
+      # (configured in pyproject.toml [tool.pytest.ini_options]).
+      - name: Run test suite
+        run: uv run pytest tests/ khayyam_math/tests/ -q -m "not integration"
