@@ -179,9 +179,23 @@ _DIACRITIC_HINTS: Final[tuple[tuple[str, str], ...]] = (
 
 
 # ---------------------------------------------------------------------------
-# Persian / Arabic letters that are exclusively Persian
+# Persian / Arabic disambiguation.
+# Persian and Arabic share most of the Arabic script, but a few
+# codepoints are exclusively (or almost exclusively) Persian:
+#
+#   پ U+067E pe          ژ U+0698 jeh
+#   چ U+0686 cheh        گ U+06AF gaf
+#   ی U+06CC farsi yeh   (vs Arabic ي U+064A)
+#   ک U+06A9 keheh       (vs Arabic ك U+0643)
+#
+# Plus the Persian digit set ۰-۹ (U+06F0..U+06F9) vs Arabic-Indic
+# ٠-٩ (U+0660..U+0669).  Persian text very commonly contains the
+# Persian Yeh / Keheh even when it doesn't contain pe/cheh/jeh/gaf,
+# so adding them to the check is what saves "روش نیوتن" (Persian
+# 'Newton method') from being classified as Arabic.
 # ---------------------------------------------------------------------------
-_PERSIAN_LETTERS: Final[str] = "پچژگ"
+_PERSIAN_LETTERS: Final[str] = "پچژگیک"
+_PERSIAN_DIGITS: Final[str] = "۰۱۲۳۴۵۶۷۸۹"
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +265,16 @@ def detect_language(text: str) -> str:
         if dominant == "Thai":
             return "th"
         if dominant == "Arabic":
-            # Disambiguate Arabic vs Persian by Persian-specific letters.
+            # Disambiguate Arabic vs Persian.  The Persian Yeh
+            # (ی, U+06CC) and Keheh (ک, U+06A9) are different
+            # codepoints from their Arabic look-alikes (ي
+            # U+064A, ك U+0643) and they appear in essentially
+            # every Persian sentence — so checking for them
+            # catches Persian prompts that don't contain the
+            # rarer pe / cheh / jeh / gaf consonants.
             if any(ch in _PERSIAN_LETTERS for ch in t):
+                return "fa"
+            if any(ch in _PERSIAN_DIGITS for ch in t):
                 return "fa"
             return "ar"
         # Other less-common scripts — pass through.

@@ -58,6 +58,13 @@ DETECT_CASES = [
     # Persian (uses Persian-specific letters پ چ ژ گ)
     ("روش نیوتن را برای پیدا کردن ریشه توضیح دهید", "fa"),
 
+    # Persian WITHOUT pe/cheh/jeh/gaf — relies on Persian Yeh ی
+    # (U+06CC) and/or Keheh ک (U+06A9), which are distinct
+    # codepoints from their Arabic look-alikes.  Regression test
+    # for the field report 2026-06-04 where this prompt was
+    # mis-classified as Arabic.
+    ("روش نیوتن را برای f(x) = x^3 - 2 با شروع از x = 2 توضیح دهید", "fa"),
+
     # Arabic (no Persian-specific letters)
     ("اشرح طريقة نيوتن لإيجاد الجذور", "ar"),
 
