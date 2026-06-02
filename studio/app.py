@@ -1115,6 +1115,47 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
             flush=True, file=__import__("sys").stderr,
         )
 
+    # Per-turn language hard constraint — same idea as the
+    # completeness brief but for output language.  The figure-LLM
+    # and primer-LLM already get a hard target from the same
+    # detector; without this, the CHAT-LLM (which can reply
+    # chat-only under tool_choice='auto') has no per-turn
+    # directive and occasionally hallucinates English even when
+    # the user clearly wrote in Persian / German / Chinese.
+    # Field report 2026-06-03: 'a user asked a question in
+    # Persian but the answer is in English'.
+    try:
+        from studio.language import (
+            detect_language as _detect_lang,
+            describe_language as _describe_lang,
+        )
+        _chat_lang = _detect_lang(req.user)
+        if _chat_lang and _chat_lang not in ("en", "und", ""):
+            _chat_lang_name = _describe_lang(_chat_lang)
+            _sys = _sys + (
+                f"\n\n=== OUTPUT LANGUAGE (HARD CONSTRAINT) ===\n"
+                f"The user wrote in {_chat_lang_name}.  Every word "
+                f"of your chat reply MUST be in {_chat_lang_name}, "
+                f"and any tool prompt you pass to sevim_express "
+                f"MUST also be in {_chat_lang_name}.  The language "
+                f"is pinned by the server based on the user's "
+                f"literal message; you do NOT decide and you do "
+                f"NOT switch.  Math notation (π, ∫, x², √) stays "
+                f"as symbols.  Quote the user's terminology when "
+                f"useful but never default to English just because "
+                f"the codebase / system prompts are in English."
+            )
+            print(
+                f"[chat-loop] chat language pinned: {_chat_lang!r}",
+                flush=True, file=__import__("sys").stderr,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[chat-loop] language pin errored (non-fatal): "
+            f"{type(exc).__name__}: {exc}",
+            flush=True, file=__import__("sys").stderr,
+        )
+
     messages: list[dict[str, Any]] = [{"role": "system", "content": _sys}]
     # Compact prior turns: keep just role+text, cap each turn's content
     # at ~600 chars, and only retain the most recent 6 turns.  Without
