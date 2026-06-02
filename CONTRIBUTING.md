@@ -74,6 +74,11 @@ These are listed roughly in order of "easy first issue" → "hardest":
   decision was made when it would surprise a reader.
 - **No `*args` / `**kwargs` passthroughs** in public APIs. Be
   explicit about what each function takes.
+- **`subprocess` calls must never use `shell=True`.** The command
+  must be a list of strings. No user-controlled or LLM-controlled
+  string may appear in command arguments — pass untrusted input via
+  stdin or a temp file. Violating this is a command-injection
+  vulnerability.
 - **Tests pass before the PR**:
   `.venv/bin/python -m pytest tests/ studio/ khayyam_math/tests/ -q`
   must exit 0 (328 tests on `main`).
@@ -119,8 +124,12 @@ These are listed roughly in order of "easy first issue" → "hardest":
 
 1. Fork → branch from `main` (`feat/foo` or `fix/bar`)
 2. Implement + add tests
-3. Push, open a PR against `khayyam-math/khayyam-math:main`
-4. CI runs the test suite + a small Playwright UX audit
+3. Run the full suite locally before pushing:
+   `.venv/bin/python -m pytest tests/ studio/ khayyam_math/tests/ -q`
+4. Push, open a PR against `khayyam-math/khayyam-math:main`.
+   `.github/workflows/pr-check.yml` runs the offline test suite
+   automatically on the PR. It is currently advisory — once branch
+   protection is enabled, a green run will be required to merge.
 5. A maintainer reviews; expect a turnaround of 1-3 days
 6. On approval: squash-merge into main
 

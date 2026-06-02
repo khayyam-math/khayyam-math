@@ -1,0 +1,48 @@
+# CODEOWNERS
+#
+# Controls which team must approve changes to each part of the codebase.
+# GitHub requires at least one approving review from a listed owner before
+# a PR can be merged (once branch protection is enabled).
+#
+# Last matching rule wins.
+#
+# ── Teams that must exist in the khayyam-math GitHub org ─────────────────────
+#
+#   @khayyam-math/core
+#       The maintainer(s). Full review rights everywhere.
+#       Add members at: github.com/orgs/khayyam-math/teams/core
+#
+#   @khayyam-math/trusted-contributors
+#       Contributors who have had ≥2 templates merged. Can review template
+#       PRs without a core maintainer, but cannot approve Tier A changes.
+#       Add members at: github.com/orgs/khayyam-math/teams/trusted-contributors
+#
+# ── Trust tiers ───────────────────────────────────────────────────────────────
+#
+#   Tier A  core only      Security-critical files, infra, the routing pipeline,
+#                          dependencies, and all governance files. Any change
+#                          requires a review from @khayyam-math/core.
+#
+#   Tier B  core + trusted Individual template modules under studio/templates/.
+#                          A @khayyam-math/trusted-contributors member can
+#                          review and approve. Core can always step in.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── Tier A default ────────────────────────────────────────────────────────────
+# Everything not matched by a more specific rule below requires core review.
+*                                               @khayyam-math/core
+
+
+# ── Tier B: individual template modules ──────────────────────────────────────
+# Pure-Python functions that render one math-operation family deterministically.
+# Trusted contributors can review new templates and template bugfixes here.
+/studio/templates/                              @khayyam-math/core @khayyam-math/trusted-contributors
+
+
+# ── Tier A overrides within the templates directory ───────────────────────────
+# These files control how ALL templates are registered and classified.
+# A change here affects every template, not just one — core review required.
+/studio/templates/router.py                     @khayyam-math/core
+/studio/templates/__init__.py                   @khayyam-math/core
