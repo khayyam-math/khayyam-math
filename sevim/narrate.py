@@ -255,8 +255,32 @@ def synthesize_script(
                       tmp_paths[i], backend)
             for i, entry in enumerate(script)
         ]
-        for fut in futures:
-            fut.result()  # propagate any synth exception
+        actual_backends = [fut.result() for fut in futures]
+
+    # Voice-uniformity check: if OpenAI TTS was requested but ANY phrase
+    # fell back to piper (e.g. OpenAI HTTP timeout on phrase 5 of 8),
+    # the resulting audio would mix two different voices within the
+    # same narration — confusing for the listener.  Re-synthesise the
+    # ENTIRE script with piper so the voice stays consistent for the
+    # whole turn.  Field report 2026-06-07: a "prove the volume of a
+    # sphere" turn played with two different narrator voices because
+    # one phrase timed out on OpenAI and silently fell back to piper.
+    if backend == "openai" and "piper" in actual_backends:
+        print(
+            f"[narrate] voice mixed (openai={actual_backends.count('openai')}, "
+            f"piper={actual_backends.count('piper')}); re-synthesising "
+            f"all {len(script)} phrases with piper for voice uniformity",
+            flush=True, file=sys.stderr,
+        )
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [
+                ex.submit(_synthesize_phrase,
+                          (entry.get("speak") or "").strip(),
+                          tmp_paths[i], "piper")
+                for i, entry in enumerate(script)
+            ]
+            for fut in futures:
+                fut.result()
 
     try:
         for i, entry in enumerate(script):
