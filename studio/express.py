@@ -1810,6 +1810,17 @@ _PRIMER_SYSTEM = (
     "  * Do NOT describe the figure (you cannot see it).  Do NOT say "
     "    'as shown below' or 'in the diagram.'  Speak only the theory.\n"
     "  * Stop after the formula(s).  Do NOT add a closing summary.\n"
+    "  * Do NOT restate a matrix or formula at the end if you have "
+    "    already given it earlier in the primer.  Once is enough — "
+    "    repetition wastes the learner's attention and inflates the "
+    "    token budget.\n"
+    "  * Walk through AT MOST ONE concrete worked numeric example.  "
+    "    If the topic has many results (matrix multiplication, "
+    "    integration by parts, induction across n cases), show one "
+    "    entry / one step in detail and tell the learner that the "
+    "    rest follows the same rule.  Do NOT enumerate every entry, "
+    "    every step, or every case — the figure shows the full "
+    "    result, and over-enumeration truncates mid-formula.\n"
     "  * NEVER mention that another component is generating a figure."
     + _LANGUAGE_RULE
 )
@@ -2019,7 +2030,35 @@ def wrap_bare_latex(text: str) -> str:
         out.append(m.group(0))
         cursor = m.end()
     out.append(_BARE_LATEX_RE.sub(r"$\1$", text[cursor:]))
-    return "".join(out)
+    fixed = "".join(out)
+    # Truncation safety net: if the model ran out of tokens mid-formula,
+    # the tail looks like `... $$ \\begin{bmatrix} 19 & 22 \\\\ 43 & 50 \\end{bmatrix`
+    # or `... For $C_{24}$: $$ $C_{24}$ = (`, both of which leave an
+    # unclosed `$$` / `$` block that KaTeX leaves as raw source.
+    # Detect odd-count delimiters and remove the dangling tail so the
+    # learner sees a clean ellipsis instead of raw `$$ \\begin{...`.
+    # Field report 2026-06-07: 2x3 X 3x4 matmul primer truncated at
+    # `$$ $C_{24}$ = (` because the LLM hit max_tokens mid-walkthrough.
+    n_double = fixed.count("$$")
+    if n_double % 2 == 1:
+        last = fixed.rfind("$$")
+        # Cut everything from the unclosed `$$` onward; sentence-style
+        # ellipsis preserves the conversational voice of the primer.
+        fixed = fixed[:last].rstrip() + " …"
+    else:
+        single_dollars = sum(1 for i, c in enumerate(fixed)
+                             if c == "$"
+                             and (i == 0 or fixed[i-1] != "$")
+                             and (i + 1 >= len(fixed) or fixed[i+1] != "$"))
+        if single_dollars % 2 == 1:
+            j = len(fixed) - 1
+            while j >= 0:
+                if fixed[j] == "$" and (j == 0 or fixed[j-1] != "$") \
+                        and (j + 1 >= len(fixed) or fixed[j+1] != "$"):
+                    fixed = fixed[:j].rstrip() + " …"
+                    break
+                j -= 1
+    return fixed
 
 
 async def generate_theory_primer(
@@ -2069,11 +2108,16 @@ async def generate_theory_primer(
 
     payload = {
         "model": model,
-        # Bumped from 220 -> 700 so the primer can hit the new
-        # 6-12 sentence / ~280-word target without truncation.
-        # Each token ≈ 0.75 words; 700 tokens ≈ 525 words of
-        # English, which comfortably accommodates the upper end.
-        "max_tokens": 700,
+        # 1100 tokens ≈ 825 English words; LaTeX-dense topics (matrix
+        # algebra, integrals) consume ~1.5x tokens per visible char,
+        # so 1100 gives a 2x safety margin over the 280-word target
+        # in the system prompt and prevents mid-formula truncation
+        # like the 2026-06-07 field report where a 2x3 X 3x4 matmul
+        # primer hit 700 tokens partway through C_{24}.  Bumped from
+        # 700 alongside an "at most one worked example" rule in the
+        # system prompt so the average primer does not actually use
+        # the higher budget.
+        "max_tokens": 1100,
         "temperature": 0.3,
         "stream": True,
         "messages": [
