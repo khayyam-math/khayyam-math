@@ -33,6 +33,52 @@ def test_mul_2x2_correct_product():
     assert len(narr) >= 3
 
 
+def test_mul_narration_highlights_rows_columns_not_whole_matrices():
+    """Dot-product narration must highlight ROW of A + COLUMN of B,
+    not the full ``matrix_a`` / ``matrix_b`` groups.
+
+    Regression for 2026-06-06: on a 3x4 X 4x5 multiplication the entire
+    matrices pulsed at once, leaving the learner with no visual cue for
+    which row/column actually contract on each phrase.
+    """
+    a = [[i * 4 + j + 1 for j in range(4)] for i in range(3)]
+    b = [[i * 5 + j + 1 for j in range(5)] for i in range(4)]
+    _, narr = matrix_multiplication(a, b)
+    # Pull the worked-example phrase (the one that names C[1,1]).
+    worked = [p for p in narr if "C row 1 column 1" in p["speak"]]
+    assert worked, [p["speak"] for p in narr]
+    hi = worked[0]["highlight"]
+    # Must include every cell of row 0 of A and every cell of col 0 of B.
+    for j in range(4):
+        assert f"cell_matrix_a_0_{j}" in hi, hi
+    for i in range(4):
+        assert f"cell_matrix_b_{i}_0" in hi, hi
+    # Must include the result cell.
+    assert "cell_matrix_c_0_0" in hi, hi
+    # Must NOT highlight the whole-matrix groups for the dot-product phrase.
+    assert "matrix_a" not in hi and "matrix_b" not in hi, hi
+
+    # Second worked example: row 1 of A + column 1 of B + C[1,1].
+    second = [p for p in narr if "C row 2 column 2" in p["speak"]]
+    assert second, [p["speak"] for p in narr]
+    hi2 = second[0]["highlight"]
+    for j in range(4):
+        assert f"cell_matrix_a_1_{j}" in hi2, hi2
+    for i in range(4):
+        assert f"cell_matrix_b_{i}_1" in hi2, hi2
+    assert "cell_matrix_c_1_1" in hi2, hi2
+
+    # Dot-product rule phrase (no specific entry yet) highlights row 0 + col 0.
+    rule = [p for p in narr if "dot product of row i of A" in p["speak"]
+            and "Worked example" not in p["speak"]
+            and "general rule" not in p["speak"].lower()]
+    assert rule, [p["speak"] for p in narr]
+    hi3 = rule[0]["highlight"]
+    assert "matrix_a" not in hi3 and "matrix_b" not in hi3, hi3
+    assert any(h.startswith("cell_matrix_a_0_") for h in hi3), hi3
+    assert any(h.startswith("cell_matrix_b_") and h.endswith("_0") for h in hi3), hi3
+
+
 def test_mul_nonconformable_shows_error():
     svg, narr = matrix_multiplication([[1, 2], [3, 4]], [[5, 6, 7]])
     assert "dim_error" in svg

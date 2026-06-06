@@ -245,27 +245,45 @@ def matrix_multiplication(
     svg_parts.append("</svg>")
     svg = "".join(svg_parts)
 
-    # Narration — phrase-timed walkthrough with highlight ids pointing
-    # at the matrix groups we just emitted.
+    # Cell-id helpers so narration can highlight rows / columns / single
+    # cells instead of whole matrices.  Field report 2026-06-06: when
+    # the dot-product phrase highlighted "matrix_a" and "matrix_b", the
+    # entire 3x4 and 4x5 matrices pulsed at once, leaving the learner
+    # without a visual cue for *which* row and column actually contract.
+    def _row_ids(mid: str, i: int, ncols: int) -> List[str]:
+        return [f"cell_{mid}_{i}_{j}" for j in range(ncols)]
+
+    def _col_ids(mid: str, j: int, nrows: int) -> List[str]:
+        return [f"cell_{mid}_{i}_{j}" for i in range(nrows)]
+
+    # Narration — phrase-timed walkthrough with granular highlight ids.
     narration: List[dict] = [
         {"speak": (f"We want to multiply matrix A, which is {rows_a} by "
                    f"{cols_a}, with matrix B, which is {rows_b} by {cols_b}."),
          "highlight": ["title"]},
+        # Dimension check: highlight the LAST COLUMN of A (cols-of-A) and
+        # the TOP ROW of B (rows-of-B) so the "cols of A == rows of B"
+        # rule lands as a visual side-by-side, not a whole-matrix pulse.
         {"speak": ("First, check the dimension requirement: matrix "
                    "multiplication is defined only when the number of "
                    "columns of A equals the number of rows of B."),
-         "highlight": ["matrix_a", "matrix_b"]},
+         "highlight": (_col_ids("matrix_a", cols_a - 1, rows_a)
+                       + _row_ids("matrix_b", 0, cols_b))},
     ]
     if conformable and result is not None:
         narration.extend([
             {"speak": (f"Here A has {cols_a} columns and B has {rows_b} "
                        "rows, so they match.  The product C is a "
                        f"{rows_c} by {cols_c} matrix."),
-             "highlight": ["matrix_c"]},
+             "highlight": ["matrix_c_outer"]},
+            # Dot-product rule: light up row 0 of A and column 0 of B so
+            # the contraction is visible *cell by cell*, not as a vague
+            # pulse over both whole blocks.
             {"speak": (f"To compute the entry at row i and column j of C, "
                        f"take the dot product of row i of A with column j "
                        f"of B — multiply matching entries and add."),
-             "highlight": ["matrix_a", "matrix_b"]},
+             "highlight": (_row_ids("matrix_a", 0, cols_a)
+                           + _col_ids("matrix_b", 0, rows_b))},
         ])
         # Walk the top-left entry.
         terms_00 = " plus ".join(
@@ -282,7 +300,9 @@ def matrix_multiplication(
             "speak": (f"Worked example, C row 1 column 1: {terms_00}, "
                       f"which equals {_fmt(result[0][0])} — shown below the "
                       f"formula."),
-            "highlight": ["step_example", "cell_matrix_c_0_0"],
+            "highlight": (_row_ids("matrix_a", 0, cols_a)
+                          + _col_ids("matrix_b", 0, rows_b)
+                          + ["cell_matrix_c_0_0", "step_example"]),
         })
         # Walk a second entry if the matrix is large enough.
         if rows_c >= 2 and cols_c >= 2:
@@ -293,7 +313,9 @@ def matrix_multiplication(
             narration.append({
                 "speak": (f"Another example, C row 2 column 2: {terms_11}, "
                           f"which equals {_fmt(result[1][1])}."),
-                "highlight": ["cell_matrix_c_1_1"],
+                "highlight": (_row_ids("matrix_a", 1, cols_a)
+                              + _col_ids("matrix_b", 1, rows_b)
+                              + ["cell_matrix_c_1_1"]),
             })
         narration.append({
             "speak": ("Repeat the same dot-product rule for every entry "
