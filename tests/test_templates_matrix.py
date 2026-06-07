@@ -79,6 +79,44 @@ def test_mul_narration_highlights_rows_columns_not_whole_matrices():
     assert any(h.startswith("cell_matrix_b_") and h.endswith("_0") for h in hi3), hi3
 
 
+def test_mul_dimension_check_visualises_counts_correctly():
+    """The dimension-check phrase claims 'columns of A equals rows of B'.
+    The highlighted geometry must visualise those counts: a ROW of A
+    has cols_a cells (matching 'columns of A'); a COLUMN of B has
+    rows_b cells (matching 'rows of B').  Regression for 2026-06-07
+    field report: an earlier version highlighted a COLUMN of A + ROW
+    of B, so the visible counts were the inverse of what the narration
+    said (rows_a vs cols_a, cols_b vs rows_b).
+    """
+    a = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]]   # 3x4: 3 rows, 4 cols
+    b = [[1, 2, 3, 4, 5],
+         [6, 7, 8, 9, 10],
+         [11, 12, 13, 14, 15],
+         [16, 17, 18, 19, 20]]                          # 4x5: 4 rows, 5 cols
+    _, narr = matrix_multiplication(a, b)
+    dim_check = [p for p in narr if "dimension requirement" in p["speak"]]
+    assert dim_check, [p["speak"] for p in narr]
+    hi = dim_check[0]["highlight"]
+    # A-side highlight: cols_a = 4 cells, all sharing one row index.
+    a_cells = [h for h in hi if h.startswith("cell_matrix_a_")]
+    assert len(a_cells) == 4, (a_cells, "should be cols_a=4 cells (= length of a row of A)")
+    a_row_indices = {h.split("_")[3] for h in a_cells}
+    a_col_indices = {h.split("_")[4] for h in a_cells}
+    assert len(a_row_indices) == 1, ("expected a single row of A", a_row_indices)
+    assert a_col_indices == {"0", "1", "2", "3"}, (
+        "expected all column indices in the highlighted row", a_col_indices,
+    )
+    # B-side highlight: rows_b = 4 cells, all sharing one column index.
+    b_cells = [h for h in hi if h.startswith("cell_matrix_b_")]
+    assert len(b_cells) == 4, (b_cells, "should be rows_b=4 cells (= length of a column of B)")
+    b_row_indices = {h.split("_")[3] for h in b_cells}
+    b_col_indices = {h.split("_")[4] for h in b_cells}
+    assert len(b_col_indices) == 1, ("expected a single column of B", b_col_indices)
+    assert b_row_indices == {"0", "1", "2", "3"}, (
+        "expected all row indices in the highlighted column", b_row_indices,
+    )
+
+
 def test_mul_nonconformable_shows_error():
     svg, narr = matrix_multiplication([[1, 2], [3, 4]], [[5, 6, 7]])
     assert "dim_error" in svg

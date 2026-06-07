@@ -261,14 +261,18 @@ def matrix_multiplication(
         {"speak": (f"We want to multiply matrix A, which is {rows_a} by "
                    f"{cols_a}, with matrix B, which is {rows_b} by {cols_b}."),
          "highlight": ["title"]},
-        # Dimension check: highlight the LAST COLUMN of A (cols-of-A) and
-        # the TOP ROW of B (rows-of-B) so the "cols of A == rows of B"
-        # rule lands as a visual side-by-side, not a whole-matrix pulse.
+        # Dimension check: visual length must MATCH the count the
+        # narration claims.  A row of A has cols_a entries — that IS
+        # "the number of columns of A".  A column of B has rows_b
+        # entries — that IS "the number of rows of B".  Highlighting
+        # a column of A instead would visually show rows_a entries,
+        # contradicting the narration.  Fix landed 2026-06-07 after
+        # field report on the previous orientation.
         {"speak": ("First, check the dimension requirement: matrix "
                    "multiplication is defined only when the number of "
                    "columns of A equals the number of rows of B."),
-         "highlight": (_col_ids("matrix_a", cols_a - 1, rows_a)
-                       + _row_ids("matrix_b", 0, cols_b))},
+         "highlight": (_row_ids("matrix_a", 0, cols_a)
+                       + _col_ids("matrix_b", 0, rows_b))},
     ]
     if conformable and result is not None:
         narration.extend([
