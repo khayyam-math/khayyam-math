@@ -347,6 +347,44 @@ def inject_text_blocks(svg: str, text_blocks: list[dict[str, Any]]) -> str:
     return svg[:idx] + rendered + svg[idx:]
 
 
+_MIN_FONT_PX = max(1.0, float(os.environ.get("SEVIM_MIN_FONT_PX", "13")))
+
+
+def enforce_min_font_size(svg: str, floor: float | None = None) -> str:
+    """Raise any absolute font-size below ``floor`` px up to the floor so
+    secondary labels stay legible.
+
+    The express LLM sometimes sizes explanatory sub-text at 8–11 px,
+    which renders as squint-text next to 14–20 px primary labels (the
+    "small text" the user flagged on the recursion-theorem figure).
+    This pass ONLY enlarges sub-floor text — it never shrinks — so it
+    cannot make a figure tighter than it already was at the floor size.
+    Percentage sizes (sub/superscript tspans at 80%) are left untouched.
+    Runs BEFORE the layout/overlap passes so they account for the final
+    text size.
+    """
+    floor = _MIN_FONT_PX if floor is None else floor
+    import re
+
+    def _attr(m: "re.Match[str]") -> str:
+        try:
+            n = float(m.group(1))
+        except ValueError:
+            return m.group(0)
+        return f'font-size="{floor:g}"' if n < floor else m.group(0)
+
+    def _style(m: "re.Match[str]") -> str:
+        try:
+            n = float(m.group(1))
+        except ValueError:
+            return m.group(0)
+        return f'font-size:{floor:g}px' if n < floor else m.group(0)
+
+    svg = re.sub(r'font-size="([\d.]+)"', _attr, svg)
+    svg = re.sub(r'font-size:\s*([\d.]+)px', _style, svg)
+    return svg
+
+
 # ── JSON schema the LLM is forced to follow ───────────────────────────────
 
 EXPRESS_SCHEMA: dict[str, Any] = {
@@ -3183,6 +3221,18 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"escape_bare_xml_in_svg FAILED: {type(exc).__name__}: {exc}")
+        # Legibility floor: raise any sub-floor font-size (the LLM
+        # sometimes sets explanatory text to 8-11 px) up to _MIN_FONT_PX
+        # so secondary labels don't render as squint-text.  Runs before
+        # the layout/overlap passes so they account for the final size.
+        try:
+            bumped = enforce_min_font_size(result["svg"])
+            if bumped != result["svg"]:
+                _log(f"enforce_min_font_size: raised sub-{_MIN_FONT_PX:g}px "
+                     f"text to the legibility floor")
+                result["svg"] = bumped
+        except Exception as exc:  # noqa: BLE001
+            _log(f"enforce_min_font_size FAILED: {type(exc).__name__}: {exc}")
         # (Prose-strip post-processor removed in the Phase 1A cleanup.
         # The deterministic text-region layout prevents the original
         # "narration prose stacked at the same y" failure at the
