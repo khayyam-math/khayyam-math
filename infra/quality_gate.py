@@ -814,6 +814,16 @@ def run_prompt(tp: TestPrompt, logbuf: LogCapture) -> PromptResult:
         except Exception:  # noqa: BLE001
             svg = ""
 
+    # Settle: ``express_complete`` arrives on the client stream from the
+    # uvicorn server thread, but that thread may still be flushing this
+    # prompt's trailing stderr lines (e.g. the final math-correctness
+    # verifier outcome) into the LogCapture tee.  Snapshotting the instant
+    # the stream ends can therefore miss a verifier line that WAS emitted,
+    # which false-fails "math verifier outcome logged" on a random prompt
+    # each run.  A short settle lets the buffer catch up before we slice
+    # the per-prompt window.  Sequential battery, so this is pure safety.
+    sys.stderr.flush()
+    time.sleep(float(os.environ.get("SEVIM_GATE_SETTLE_S", "0.6")))
     log = logbuf.snapshot()
     # Slice the log window for this session.  The server log truncates
     # session ids in the POST-received line (session='gate-foo'), so
