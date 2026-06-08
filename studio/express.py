@@ -4111,16 +4111,42 @@ def _normalise_svg_root(svg: str) -> str:
     return svg[:m.start()] + new + svg[m.end():]
 
 
+# Headless Chrome is the single biggest per-request memory consumer in
+# the express path: each rasterisation launches a full browser, and a
+# tall figure makes a tall viewport (height = width * vh/vw), so the
+# bitmap and Chrome's heap can balloon to hundreds of MB.  Two guards:
+#
+#   1. A process-wide concurrency cap (default 1) — _svg_to_png runs
+#      under asyncio.to_thread, so concurrent requests would otherwise
+#      spawn concurrent Chromes and stack their memory.  A single OOM
+#      (2026-06-08) spiked to ~1.6 GB this way.  The semaphore bounds
+#      peak rasterisation memory to one browser regardless of load;
+#      excess renders queue (a few seconds) instead of co-allocating.
+#   2. Hard caps on the render dimensions and total pixel area so an
+#      extreme aspect ratio can't request a giant canvas.
+import threading as _threading
+
+_RASTER_MAX_CONCURRENCY = max(1, int(os.environ.get("SEVIM_MAX_RASTER", "1")))
+_RASTER_SEM = _threading.BoundedSemaphore(_RASTER_MAX_CONCURRENCY)
+_RASTER_MAX_DIM = 4000          # px cap on width and height
+_RASTER_MAX_AREA = 12_000_000   # px cap on width*height (~1200x10000)
+
+
 def _svg_to_png_chrome(svg: str, width: int) -> bytes | None:
     """Rasterise via headless Chrome — the SAME engine as the canvas
     viewer — so the reviewer sees pixel-for-pixel what the learner
-    sees. Returns None on any failure so the caller can fall back."""
+    sees. Returns None on any failure so the caller can fall back.
+
+    Memory-bounded: at most ``SEVIM_MAX_RASTER`` (default 1) Chrome
+    processes run at once, and the render dimensions are clamped so a
+    pathological aspect ratio can't request a multi-GB bitmap."""
     binary = _chrome_binary()
     if not binary:
         return None
     import re
     import subprocess
     import tempfile
+    width = max(1, min(int(width), _RASTER_MAX_DIM))
     height = width
     m = re.search(r'viewBox="([-\d.eE\s]+)"', svg)
     if m:
@@ -4132,6 +4158,14 @@ def _svg_to_png_chrome(svg: str, width: int) -> bytes | None:
                     height = max(1, round(width * vh / vw))
             except ValueError:
                 pass
+    # Clamp height, then the total area (preserving aspect by also
+    # shrinking width if a very tall figure would otherwise exceed the
+    # area budget).
+    height = min(height, _RASTER_MAX_DIM)
+    if width * height > _RASTER_MAX_AREA:
+        scale = (_RASTER_MAX_AREA / (width * height)) ** 0.5
+        width = max(1, int(width * scale))
+        height = max(1, int(height * scale))
     html = (
         '<!doctype html><html><head><meta charset="utf-8"><style>'
         'html,body{margin:0;padding:0;background:#fff}'
@@ -4147,16 +4181,25 @@ def _svg_to_png_chrome(svg: str, width: int) -> bytes | None:
         cmd = [
             binary, "--headless", "--disable-gpu", "--no-sandbox",
             "--disable-dev-shm-usage", "--hide-scrollbars",
+            # --single-process collapses Chrome's browser+renderer+gpu
+            # processes into one, roughly halving the per-render memory
+            # footprint — the dominant lever against the OOM spike.
+            # Safe for one-shot --screenshot rasterisation.
+            "--single-process", "--no-zygote",
+            "--disable-extensions", "--disable-software-rasterizer",
+            "--js-flags=--max-old-space-size=384",
             "--force-device-scale-factor=1",
             "--default-background-color=FFFFFFFF",
             f"--window-size={width},{height}",
             f"--screenshot={out}", f"file://{page}",
         ]
-        try:
-            subprocess.run(cmd, capture_output=True, timeout=25,
-                           check=False)
-        except (subprocess.TimeoutExpired, OSError):
-            return None
+        # Bound concurrent Chrome processes process-wide (see _RASTER_SEM).
+        with _RASTER_SEM:
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=25,
+                               check=False)
+            except (subprocess.TimeoutExpired, OSError):
+                return None
         if not os.path.exists(out):
             return None
         with open(out, "rb") as fh:

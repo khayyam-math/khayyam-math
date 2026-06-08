@@ -611,6 +611,33 @@ class CanvasRegistry:
     def __init__(self) -> None:
         self._canvases: dict[str, Canvas] = {}
         self._lock = threading.Lock()
+        # Bound the in-memory store so it can't grow without limit over a
+        # long-lived process (the slow side of the 2026-06-08 OOM: Canvas
+        # objects, each holding a ~100 KB SVG string, accumulated for every
+        # /studio/chat request and were never evicted).  Eviction is SAFE:
+        # get() rehydrates an evicted canvas from S3 (state.json) on a miss,
+        # so dropping an idle canvas from memory only costs one reload if it
+        # is ever revisited.  LRU by updated_at + a TTL; both keep the
+        # actively-streaming canvas (most recent updated_at) resident.
+        self._max = max(8, int(os.environ.get("SEVIM_REGISTRY_MAX", "256")))
+        self._ttl_s = max(
+            60.0, float(os.environ.get("SEVIM_REGISTRY_TTL_S", "7200")))
+
+    def _evict_locked(self) -> None:
+        """Drop TTL-expired and over-cap canvases.  Caller holds _lock."""
+        now = time.time()
+        # 1. TTL: remove canvases untouched for longer than the window.
+        stale = [cid for cid, c in self._canvases.items()
+                 if now - getattr(c, "updated_at", now) > self._ttl_s]
+        for cid in stale:
+            self._canvases.pop(cid, None)
+        # 2. Size cap: evict oldest (lowest updated_at) until within _max.
+        if len(self._canvases) > self._max:
+            ordered = sorted(
+                self._canvases.items(),
+                key=lambda kv: getattr(kv[1], "updated_at", 0.0))
+            for cid, _ in ordered[: len(self._canvases) - self._max]:
+                self._canvases.pop(cid, None)
 
     def open(
         self,
@@ -636,6 +663,7 @@ class CanvasRegistry:
             # initial empty render so the viewer has something to show
             c._rerender_locked()
             self._canvases[cid] = c
+            self._evict_locked()
             return c
 
     def get(self, canvas_id: str) -> Canvas:
@@ -696,6 +724,7 @@ class CanvasRegistry:
             if existing is not None:
                 return existing
             self._canvases[canvas_id] = c
+            self._evict_locked()
         return c
 
     def close(self, canvas_id: str) -> bool:
