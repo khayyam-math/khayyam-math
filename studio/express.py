@@ -296,11 +296,19 @@ def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
     the region's `line_height`.  Unknown regions fall back to
     "left-column".  Empty lines (whitespace-only) are skipped so the
     LLM can pad without leaving blank rows.
+
+    CRITICAL: multiple blocks may target the SAME region (e.g. the LLM
+    emits one block per "Output P/Q/R").  Each region keeps a running
+    y-cursor so consecutive blocks stack BELOW one another instead of
+    all restarting at the region's fixed y and overlapping into mush.
     """
     if not text_blocks:
         return ""
     import html as _html
     pieces: list[str] = []
+    # region_name -> next free y.  Initialised lazily to the region's y.
+    region_cursor: dict[str, float] = {}
+    BLOCK_GAP = 6.0  # extra px between consecutive blocks in one region
     for block in text_blocks:
         if not isinstance(block, dict):
             continue
@@ -315,10 +323,12 @@ def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
         if not cleaned:
             continue
         x = region["x"]
-        y0 = region["y"]
         anchor = region["anchor"]
         fs = region["font_size"]
         lh = region["line_height"]
+        # Start where the previous block in this region left off (or at
+        # the region's top for the first block).
+        y0 = region_cursor.get(region_name, region["y"])
         pieces.append(f'<g class="text-region-{region_name}">')
         for i, line in enumerate(cleaned):
             y = y0 + i * lh
@@ -328,6 +338,8 @@ def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
                 f'text-anchor="{anchor}" fill="#222">{escaped}</text>'
             )
         pieces.append("</g>")
+        # Advance the cursor past this block plus a small gap.
+        region_cursor[region_name] = y0 + len(cleaned) * lh + BLOCK_GAP
     return "".join(pieces)
 
 
