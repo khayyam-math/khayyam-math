@@ -300,8 +300,18 @@ class SevimStack(Stack):
             self, "Service",
             cluster=cluster,
             cpu=1024,
-            memory_limit_mib=2048,
-            desired_count=1,
+            # Bumped 2048 -> 3072: a single task was OOM-killed (exit
+            # 137) after ~26 h of uptime — a slow memory climb plus a
+            # piper TTS re-synth spike pushed it past the 2 GB hard
+            # limit and ECS had to reschedule, blanking the site until
+            # the replacement went healthy.  3 GB buys headroom while
+            # the underlying leak is profiled separately.
+            memory_limit_mib=3072,
+            # Run TWO tasks so a single OOM (or a rolling deploy) never
+            # takes the whole site down — the ALB keeps serving from the
+            # healthy task while ECS replaces the dead one.  Staggered
+            # start times mean a slow leak won't kill both at once.
+            desired_count=2,
             public_load_balancer=True,
             assign_public_ip=False,
             task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
@@ -341,6 +351,16 @@ class SevimStack(Stack):
             interval=Duration.seconds(30),
             timeout=Duration.seconds(5),
         )
+        # With desired_count=2 a client could be round-robined to the
+        # sibling task mid-generation, before the new canvas has been
+        # flushed to S3 (REGISTRY.get rehydrates from S3 only AFTER the
+        # first write).  Pin each client to one task with LB cookie
+        # stickiness so the /chat, /state, /events and /narration.wav
+        # calls of a single turn all land on the task that is building
+        # the canvas.  Persisted canvases still rehydrate cross-task on
+        # a miss, so stickiness is a hot-path optimisation, not a
+        # correctness crutch.
+        service.target_group.enable_cookie_stickiness(Duration.hours(8))
 
         # Grant the task role least-privileged S3 access.
         canvas_bucket.grant_read_write(service.task_definition.task_role)

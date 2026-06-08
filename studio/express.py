@@ -2847,7 +2847,38 @@ async def express_figure(
             scene = await llm_extract_scene(
                 routing_prompt, api_key=api_key or "",
                 base_url=base_url,
+                target_lang=_detected_lang,
+                target_lang_name=_detected_lang_name,
             )
+            if scene is not None:
+                # ── Deterministic language guard (fast-path inspector) ──
+                # The FDL route bypasses the LLM-SVG reviewer, so it gets
+                # its own cheap, deterministic check: if the rendered
+                # prose language confidently differs from the detected
+                # target language, the route mis-fired (e.g. German
+                # captions for an English prompt) — drop it and fall
+                # through to the reviewed LLM-SVG path rather than ship
+                # wrong-language output.  detect_language defaults to
+                # 'en' for ambiguous Latin/math text, so a genuine
+                # English figure never trips this.
+                try:
+                    from studio.language import detect_language as _dl
+                    _texts = [scene.title or ""]
+                    _texts += [c.text for c in scene.primitives
+                               if getattr(c, "text", None)]
+                    _texts += list(scene.narration or [])
+                    _sample = " ".join(t for t in _texts if t).strip()
+                    _out_lang = _dl(_sample) if len(_sample) >= 12 else "und"
+                    if (_out_lang not in ("und", "")
+                            and _out_lang != _detected_lang):
+                        _log(
+                            f"FDL language guard: output={_out_lang!r} "
+                            f"target={_detected_lang!r} — discarding FDL "
+                            f"scene, falling through to reviewed path"
+                        )
+                        scene = None  # fall through to the reviewed path
+                except Exception:  # noqa: BLE001
+                    pass  # guard must never break the happy path
             if scene is not None:
                 fdl_svg, fdl_narration = render_scene(scene)
                 _log(

@@ -1155,9 +1155,19 @@ _EXTRACTOR_SYSTEM = (
     "  7. label fields are PLAIN identifiers ('f', 'g', 'h'), NOT "
     "     JSON, NOT punctuated, NOT with braces / commas.\n"
     "  8. Numeric fields you don't use MUST be null (not omitted).\n"
-    "  9. Return an EMPTY primitives list ONLY when the prompt is "
-    "     genuinely non-graphable (Venn diagram, flowchart, matrix "
-    "     operation, abstract proof with no curve).\n"
+    "  9. Return an EMPTY primitives list when the prompt is NOT about "
+    "     a real-valued function of one variable.  This includes Venn "
+    "     diagrams, flowcharts, matrix operations, geometry/diagram "
+    "     constructions, and ABSTRACT computer-science / logic / "
+    "     theory-of-computation topics (recursion theorem, halting "
+    "     problem, undecidability, Turing-machine constructions, "
+    "     automata, type theory, set theory, proofs with no curve).  "
+    "     A function plot (y = f(x)) must be GENUINELY what the prompt "
+    "     is about.  NEVER invent an unrelated curve (e.g. y = x²) just "
+    "     to have something to draw — an irrelevant plot is worse than "
+    "     declining.  If no primitive faithfully represents the "
+    "     prompt's actual mathematical content, return [] so a better "
+    "     route handles it.\n"
     "\n"
     "WORKED EXAMPLES (study these — they show the expected density):\n"
     "\n"
@@ -1203,16 +1213,22 @@ _EXTRACTOR_SYSTEM = (
     "Prompt: 'Draw a Venn diagram of A and B.'\n"
     "Output: empty primitives list (non-graphable as a function plot).\n"
     "\n"
+    "Prompt: 'Visually explain the recursion theorem.'\n"
+    "Output: empty primitives list.  This is an abstract theory-of-"
+    "computation topic (self-referential Turing machines), not a "
+    "function of one variable.  Do NOT emit a y = x² plot — it has "
+    "nothing to do with the recursion theorem.  Decline so the "
+    "concept-graph route handles it.\n"
+    "\n"
     "Return JSON conforming to the supplied schema.\n"
     "\n"
-    "LANGUAGE MATCHING — HARD RULE.  Detect the user-prompt language "
-    "and write EVERY caption text and EVERY narration string in that "
-    "same language.  German prompt → German captions, German "
-    "narration.  Persian prompt → Persian captions, Persian "
-    "narration.  Same for French, Chinese, Arabic, Spanish, Italian, "
-    "Russian, Hindi, Turkish, etc.  The TITLE field also matches the "
-    "user's language.  Math notation (π, x², ∫) stays universal; the "
-    "PROSE around it matches the user.\n"
+    "LANGUAGE.  If a later system message pins an OUTPUT LANGUAGE, obey "
+    "it exactly and do NOT choose a language yourself.  Absent such a "
+    "pin, default to English unless the user prompt is itself written "
+    "in another language, in which case match the user's language for "
+    "every caption, narration string, and the TITLE.  Never silently "
+    "switch to a language the user did not use.  Math notation "
+    "(π, x², ∫) stays universal; the PROSE around it matches.\n"
     "\n"
     "NUMBERS IN SPOKEN NARRATION (when language ≠ English).  TTS "
     "engines often swallow digits in non-English text.  In every "
@@ -1230,13 +1246,46 @@ async def llm_extract_scene(
     base_url: str = "https://api.openai.com/v1",
     model: str = "gpt-4o-mini",
     timeout_s: float = 25.0,
+    target_lang: str | None = None,
+    target_lang_name: str | None = None,
 ) -> Optional[Scene]:
     """Ask the FDL extractor LLM to produce a Scene from the prompt.
     Returns None on any error or empty primitives list.
+
+    ``target_lang`` / ``target_lang_name`` carry the caller's
+    deterministically-detected language (e.g. ``"en"`` / ``"English"``).
+    When supplied, the FDL extractor is FORBIDDEN from choosing the
+    output language itself — it is pinned to this language.  This mirrors
+    the main express path's fix (the LLM must never silently switch the
+    prose language, which previously produced German captions for an
+    English prompt).
     """
     import httpx, json
     if os.environ.get("SEVIM_FDL_ROUTE", "on").lower() == "off":
         return None
+    # Build a hard language pin that overrides the system prompt's
+    # "detect the language yourself" default.  Placed in its own system
+    # message AFTER the base prompt so it takes precedence.
+    lang_pin = ""
+    if target_lang:
+        _name = target_lang_name or target_lang
+        if target_lang == "en":
+            lang_pin = (
+                "OUTPUT LANGUAGE (HARD CONSTRAINT). The output language "
+                "is FIXED at English. Write EVERY title, caption, and "
+                "narration string in English. You do NOT detect or "
+                "choose the language. Do NOT switch to German, French, "
+                "or any other language under any circumstances. Math "
+                "notation (π, x², ∫) stays universal."
+            )
+        else:
+            lang_pin = (
+                f"OUTPUT LANGUAGE (HARD CONSTRAINT). The output language "
+                f"is FIXED at {_name}. Write EVERY title, caption, and "
+                f"narration string in {_name}. You do NOT detect or "
+                f"choose the language — it is given. Math notation "
+                f"(π, x², ∫) stays universal; the prose matches {_name}."
+            )
     payload = {
         "model": model,
         "max_tokens": 1200,
@@ -1251,6 +1300,7 @@ async def llm_extract_scene(
         },
         "messages": [
             {"role": "system", "content": _EXTRACTOR_SYSTEM},
+            *([{"role": "system", "content": lang_pin}] if lang_pin else []),
             {"role": "user", "content": user_prompt.strip()},
         ],
     }

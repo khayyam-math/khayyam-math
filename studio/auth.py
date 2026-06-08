@@ -40,8 +40,20 @@ Required env vars when enabled:
 Also reads:
 
   * ``SEVIM_AUTH_LINK_TTL_S``    — magic-link validity (default 900 = 15 min).
-  * ``SEVIM_AUTH_COOKIE_TTL_S``  — login cookie validity
-                                   (default 2592000 = 30 days).
+  * ``SEVIM_AUTH_COOKIE_TTL_S``  — ABSOLUTE login lifetime cap, measured
+                                   from first login (default 2592000 =
+                                   30 days).  A session can never live
+                                   longer than this no matter how active.
+  * ``SEVIM_AUTH_IDLE_TTL_S``    — IDLE timeout (default 86400 = 24 h).
+                                   The login cookie is a *sliding*
+                                   session: each authenticated request
+                                   re-issues it with a fresh idle
+                                   deadline.  If a user goes idle for
+                                   longer than this window the cookie
+                                   expires and they must re-authenticate
+                                   via a new magic link.  This stops a
+                                   single login from staying valid
+                                   indefinitely while unattended.
 """
 from __future__ import annotations
 
@@ -91,6 +103,12 @@ def _cookie_ttl_s() -> int:
     return int(os.environ.get("SEVIM_AUTH_COOKIE_TTL_S", "2592000"))
 
 
+def _idle_ttl_s() -> int:
+    # Sliding idle window.  Default 24 h: an unattended session dies
+    # after a day of inactivity even though the absolute cap is 30 days.
+    return int(os.environ.get("SEVIM_AUTH_IDLE_TTL_S", "86400"))
+
+
 def _ses_from() -> str:
     return os.environ.get("SEVIM_SES_FROM_ADDRESS", "")
 
@@ -135,7 +153,15 @@ def unsign(token: str) -> dict | None:
         body = json.loads(_b64url_decode(body_b64))
     except (ValueError, json.JSONDecodeError):
         return None
-    if body.get("exp", 0) < int(time.time()):
+    now = int(time.time())
+    if body.get("exp", 0) < now:
+        return None
+    # Absolute session cap: a login cookie carries ``mexp`` (max expiry,
+    # set at first login).  Even if the sliding ``exp`` is still in the
+    # future, a session past its absolute cap is dead — this bounds the
+    # total lifetime of any single login regardless of activity.
+    mexp = body.get("mexp")
+    if isinstance(mexp, (int, float)) and mexp < now:
         return None
     return body
 
@@ -206,6 +232,33 @@ def request_magic_link(email: str, request: Request) -> None:
     _send_magic_link(email, link)
 
 
+def _set_login_cookie(email: str, response: Response,
+                      mexp: int | None = None) -> None:
+    """Issue (or re-issue) the sliding login cookie.
+
+    The cookie's own expiry is the IDLE deadline (``now + idle_ttl``),
+    clamped so it can never exceed the absolute session cap ``mexp``.
+    On a fresh login ``mexp`` is ``None`` and gets set to
+    ``now + cookie_ttl``; on a sliding refresh the caller passes the
+    existing ``mexp`` through so the absolute cap doesn't move.
+    """
+    now = int(time.time())
+    if mexp is None:
+        mexp = now + _cookie_ttl_s()
+    # Effective cookie life = idle window, but never beyond the cap.
+    eff_ttl = max(0, min(_idle_ttl_s(), mexp - now))
+    cookie_token = sign({"sub": email, "mexp": mexp}, ttl_s=eff_ttl)
+    response.set_cookie(
+        key=_COOKIE_NAME,
+        value=cookie_token,
+        max_age=eff_ttl,
+        httponly=True,
+        secure=os.environ.get("SEVIM_AUTH_COOKIE_SECURE", "1") == "1",
+        samesite="lax",
+        path="/",
+    )
+
+
 def verify_link_and_set_cookie(token: str, response: Response) -> str | None:
     """Validate magic-link token → set HttpOnly signed login cookie.
 
@@ -218,16 +271,7 @@ def verify_link_and_set_cookie(token: str, response: Response) -> str | None:
     email = payload.get("sub")
     if not isinstance(email, str) or not _EMAIL_RE.match(email):
         return None
-    cookie_token = sign({"sub": email}, ttl_s=_cookie_ttl_s())
-    response.set_cookie(
-        key=_COOKIE_NAME,
-        value=cookie_token,
-        max_age=_cookie_ttl_s(),
-        httponly=True,
-        secure=os.environ.get("SEVIM_AUTH_COOKIE_SECURE", "1") == "1",
-        samesite="lax",
-        path="/",
-    )
+    _set_login_cookie(email, response)  # fresh login: new absolute cap
     return email
 
 
@@ -247,21 +291,45 @@ def current_user(request: Request) -> str | None:
     return sub if isinstance(sub, str) else None
 
 
-def require_user(request: Request) -> str:
+def require_user(request: Request, response: Response | None = None) -> str:
     """FastAPI dependency: 401 if SEVIM_AUTH_REQUIRED=1 and no valid cookie.
 
     When auth is OFF (dev mode), returns ``"anonymous"``; routes can pass
     that straight into telemetry without branching on the auth flag.
+
+    On a valid session this re-issues the cookie with a fresh idle
+    deadline (sliding session), so active users stay logged in while
+    idle ones time out after ``SEVIM_AUTH_IDLE_TTL_S``.  ``response`` is
+    injected by FastAPI; the ``Set-Cookie`` header rides on the route's
+    final response.  No middleware is involved (middleware would break
+    SSE streaming), so streaming routes are unaffected.
     """
     if not is_required():
         return "anonymous"
-    user = current_user(request)
-    if user is None:
+    raw = request.cookies.get(_COOKIE_NAME)
+    payload = unsign(raw) if raw else None
+    if payload is None:
         raise HTTPException(
             status_code=401,
             detail="Enter your email at /studio/auth/login to open Khayyam Math",
         )
-    return user
+    sub = payload.get("sub")
+    if not isinstance(sub, str):
+        raise HTTPException(
+            status_code=401,
+            detail="Enter your email at /studio/auth/login to open Khayyam Math",
+        )
+    # Slide the idle window forward, preserving the absolute cap (mexp).
+    # ``response`` is None only when called directly (e.g. unit tests);
+    # in that case there's nothing to re-issue the cookie onto, so skip
+    # the slide — the validity decision above is unaffected.
+    if response is not None:
+        mexp = payload.get("mexp")
+        _set_login_cookie(
+            sub, response,
+            mexp=int(mexp) if isinstance(mexp, (int, float)) else None,
+        )
+    return sub
 
 
 def _log(msg: str) -> None:
