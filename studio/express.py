@@ -4317,13 +4317,18 @@ def _svg_to_png_chrome(svg: str, width: int) -> bytes | None:
         cmd = [
             binary, "--headless", "--disable-gpu", "--no-sandbox",
             "--disable-dev-shm-usage", "--hide-scrollbars",
-            # --single-process collapses Chrome's browser+renderer+gpu
-            # processes into one, roughly halving the per-render memory
-            # footprint — the dominant lever against the OOM spike.
-            # Safe for one-shot --screenshot rasterisation.
-            "--single-process", "--no-zygote",
+            # Memory containment here is the CONCURRENCY SEMAPHORE (only
+            # one Chrome ever runs) plus the dimension clamps above — that
+            # bounds the peak to a single normal render (~0.5-1 GB), which
+            # is safe on the 3 GB task.  We intentionally do NOT pass
+            # --single-process: it lowers footprint further but slows each
+            # render, and on the heaviest prompt (a proof figure that uses
+            # all 3 retries, each with a vision-review screenshot) those
+            # seconds pushed total generation past the 90 s budget.  The
+            # lighter heap cap + extension/raster disables keep memory
+            # modest without the latency cost.
             "--disable-extensions", "--disable-software-rasterizer",
-            "--js-flags=--max-old-space-size=384",
+            "--js-flags=--max-old-space-size=512",
             "--force-device-scale-factor=1",
             "--default-background-color=FFFFFFFF",
             f"--window-size={width},{height}",
