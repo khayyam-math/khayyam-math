@@ -291,7 +291,7 @@ def current_user(request: Request) -> str | None:
     return sub if isinstance(sub, str) else None
 
 
-def require_user(request: Request, response: Response | None = None) -> str:
+def require_user(request: Request, response: Response = None) -> str:  # type: ignore[assignment]
     """FastAPI dependency: 401 if SEVIM_AUTH_REQUIRED=1 and no valid cookie.
 
     When auth is OFF (dev mode), returns ``"anonymous"``; routes can pass
