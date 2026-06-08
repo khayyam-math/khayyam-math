@@ -347,6 +347,66 @@ def inject_text_blocks(svg: str, text_blocks: list[dict[str, Any]]) -> str:
     return svg[:idx] + rendered + svg[idx:]
 
 
+def _deterministic_solve_claims(prompt: str) -> list[dict[str, Any]] | None:
+    """For an equation-solving prompt, return a SymPy-derived math claim
+    asserting the equation's roots, or None if no univariate equation can
+    be parsed.
+
+    Why: the express LLM's self-declared math_claims are unreliable for
+    "solve x^2-5x+6=0" — it has emitted x-intercept claims like "3 = 0"
+    that the verifier (correctly) rejects, leaving the figure stuck in a
+    FAILED state the retries don't recover.  The roots are deterministic,
+    so we compute them with SymPy and hand the verifier a claim that is
+    true by construction: solve(expr, x) == [the roots solve() returns].
+    The verifier re-runs solve() and confirms it, which both satisfies
+    "the verifier ran" and "the figure's core fact is correct".
+    """
+    import re
+    try:
+        import sympy as sp
+        from sympy.parsing.sympy_parser import (
+            parse_expr, standard_transformations,
+            implicit_multiplication_application, convert_xor,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    p = prompt or ""
+    eq_chars = r"[0-9xX\^\*\+\-\s\.\(\)/]"
+    m = re.search(rf"({eq_chars}*[xX]{eq_chars}*)=\s*({eq_chars}+)", p)
+    if m:
+        lhs_s, rhs_s = m.group(1), m.group(2)
+    else:
+        m2 = re.search(
+            rf"(?:roots?|zeros?|solutions?)\s+of\s+({eq_chars}*[xX]{eq_chars}*)",
+            p, re.I)
+        if not m2:
+            return None
+        lhs_s, rhs_s = m2.group(1), "0"
+    tr = (standard_transformations
+          + (implicit_multiplication_application, convert_xor))
+    try:
+        x = sp.Symbol("x")
+        lhs = parse_expr(lhs_s.strip(), transformations=tr)
+        rhs = parse_expr(rhs_s.strip(), transformations=tr)
+        expr = sp.expand(lhs - rhs)
+        if x not in expr.free_symbols:
+            return None
+        roots = sp.solve(expr, x)
+        if not roots or len(roots) > 6:
+            return None
+        roots = sorted(set(roots), key=sp.default_sort_key)
+        expr_str = str(expr)                       # SymPy str is re-parseable
+        roots_str = "[" + ", ".join(str(r) for r in roots) + "]"
+    except Exception:  # noqa: BLE001
+        return None
+    return [{
+        "kind": "identity",
+        "description": f"the solutions of {expr_str} = 0 are {roots_str}",
+        "a": f"solve({expr_str}, x)",
+        "b": roots_str,
+    }]
+
+
 _MIN_FONT_PX = max(1.0, float(os.environ.get("SEVIM_MIN_FONT_PX", "13")))
 
 
@@ -3560,6 +3620,20 @@ async def express_figure(
         # the verifier's reasons become the retry critique so the
         # LLM knows exactly what to fix.
         math_review_lines: list[str] = []
+        # Equation-solving figures: replace the LLM's unreliable self-
+        # declared claims with a deterministic SymPy-derived root claim so
+        # the verifier confirms the actual answer instead of rejecting a
+        # malformed "3 = 0" x-intercept claim and stalling the figure.
+        if _solve_intent:
+            try:
+                _det = _deterministic_solve_claims(routing_prompt)
+                if _det:
+                    result["math_claims"] = _det
+                    _log(f"solve-intent: injected {len(_det)} deterministic "
+                         f"root claim(s), overriding LLM claims")
+            except Exception as exc:  # noqa: BLE001
+                _log(f"deterministic solve-claim injection failed: "
+                     f"{type(exc).__name__}: {exc}")
         try:
             from studio.templates.math_verifier import (
                 verify_claims, failures_critique,

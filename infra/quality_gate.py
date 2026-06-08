@@ -315,23 +315,24 @@ def check_math_verifier_ran(pr: PromptResult, expect_claims: bool) -> None:
 
 
 def check_no_verifier_failures(pr: PromptResult) -> None:
-    """Math correctness #19b: any verifier outcome logged should be
-    'all verified' by the time the figure ships (retries handle the
-    intermediate failures)."""
-    fails = re.findall(r"math-correctness verifier: \d+ of \d+ "
-                       r"claim\(s\) FAILED", pr.server_log)
-    passed = re.findall(r"math-correctness verifier: all \d+ "
-                        r"claim\(s\) verified", pr.server_log)
-    if not fails and not passed:
+    """Math correctness #19b: the verifier's FINAL outcome must not be a
+    failure by the time the figure ships (retries handle intermediate
+    failures).
+
+    Determined from the LAST 'math-correctness verifier:' line, whatever
+    its exact wording.  A failure line contains 'FAILED'; every success
+    wording ('N verified, M skipped ... of K claim(s)') does not.  The
+    earlier implementation grepped for the literal 'all N claim(s)
+    verified', a wording the express path no longer emits — so it could
+    never see a success line and false-failed any prompt that recovered
+    after an intermediate FAILED.
+    """
+    lines = re.findall(r"math-correctness verifier:[^\n]*", pr.server_log)
+    if not lines:
         pr.add("math verifier accepted final attempt",
                "Math correctness", True, "(no claims)")
         return
-    # The final outcome is the last verifier line.  If the LAST line
-    # says FAILED and no later 'verified' line follows, this is a real
-    # failure.
-    last_fail = pr.server_log.rfind("claim(s) FAILED")
-    last_pass = pr.server_log.rfind("claim(s) verified")
-    final_ok = last_pass > last_fail
+    final_ok = "FAILED" not in lines[-1]
     pr.add("math verifier accepted final attempt",
            "Math correctness",
            passed=final_ok,
