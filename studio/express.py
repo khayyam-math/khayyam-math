@@ -2442,6 +2442,27 @@ async def express_figure(
         _log(f"routing prompt differs from tool prompt: "
              f"routing={routing_prompt[:80]!r}")
 
+    # Equation-SOLVING prompts ("solve x^2-5x+6=0", "find the roots of
+    # ...") must NOT be grabbed by the function-plotter fast-paths
+    # (matplotlib / FDL): those draw the curve but never state the
+    # solved values and skip the math-correctness verifier.  Route them
+    # to the verifier-running LLM-SVG path, which finishes the problem
+    # (states x = 2, x = 3) and SymPy-checks the roots.  Checked against
+    # BOTH the user's literal words and the chat-LLM's tool prompt so a
+    # paraphrase like "Solve the quadratic ... using the quadratic
+    # formula" can't sneak past.
+    try:
+        from studio.templates.matplotlib_route import (
+            is_equation_solving_prompt as _is_solve_intent,
+        )
+        _solve_intent = (_is_solve_intent(routing_prompt)
+                         or _is_solve_intent(user_prompt))
+    except Exception:  # noqa: BLE001
+        _solve_intent = False
+    if _solve_intent:
+        _log("equation-solving intent detected — skipping plotter "
+             "fast-paths (matplotlib/FDL) to reach the verifier path")
+
     # ── Refinement-mode gate ──────────────────────────────────────
     # Only SKIP deterministic templates when the user is making a
     # narrow Case A targeted edit ('change the curve to red', 'add a
@@ -2838,7 +2859,7 @@ async def express_figure(
     # empty / unparseable extraction returns None and we fall
     # through to the LLM-SVG path unchanged.  Disabled via
     # SEVIM_FDL_ROUTE=off.
-    if (api_key and not _refining
+    if (api_key and not _refining and not _solve_intent
             and os.environ.get("SEVIM_FDL_ROUTE", "on").lower() != "off"):
         try:
             from studio.templates.fdl import (

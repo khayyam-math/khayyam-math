@@ -89,9 +89,49 @@ _MATPLOTLIB_KEYWORDS: tuple[str, ...] = (
 )
 
 
+_SOLVE_INTENT_VERBS: tuple[str, ...] = (
+    "solve", "find the root", "find the roots", "find the zero",
+    "find the zeros", "roots of", "zeros of", "find the solution",
+    "find the solutions", "what are the solutions", "what is the solution",
+    "for what x", "for what value", "for which x",
+)
+_EXPLICIT_PLOT_VERBS: tuple[str, ...] = (
+    "plot", "graph", "draw", "sketch", "visualize", "visualise",
+    "show the curve", "show the graph",
+)
+
+
+def is_equation_solving_prompt(prompt: str) -> bool:
+    """True when the user wants the ANSWER to an equation (its roots /
+    solutions), not a picture of a curve.
+
+    The function-plotter fast-paths (matplotlib, FDL) draw the curve but
+    never SOLVE it — they leave narration on "the roots are where the
+    curve crosses the x-axis" without ever stating x = 2, x = 3, and
+    they skip the math-correctness verifier.  So an equation-solving
+    request must fall through to the verifier-running LLM-SVG path, which
+    finishes the problem (states the roots) and SymPy-checks them.
+
+    An explicit "plot/graph the solutions" still wants a plot, so the
+    presence of a plot verb cancels the exclusion.
+    """
+    p = (prompt or "").lower()
+    if not any(v in p for v in _SOLVE_INTENT_VERBS):
+        return False
+    if any(v in p for v in _EXPLICIT_PLOT_VERBS):
+        return False
+    return True
+
+
 def is_matplotlib_prompt(prompt: str) -> bool:
     p = (prompt or "").lower()
-    return any(kw in p for kw in _MATPLOTLIB_KEYWORDS)
+    if not any(kw in p for kw in _MATPLOTLIB_KEYWORDS):
+        return False
+    # "Solve x^2-5x+6=0" matches "quadratic equation" etc., but the user
+    # wants the roots, not a curve — let it reach the verifier path.
+    if is_equation_solving_prompt(prompt):
+        return False
+    return True
 
 
 # --------------------------------------------------------------------
