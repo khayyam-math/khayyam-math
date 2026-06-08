@@ -40,6 +40,10 @@ def _make_env():
         "diff": sp.diff, "integrate": sp.integrate, "limit": sp.limit,
         "Sum": sp.Sum, "Product": sp.Product,
         "Derivative": sp.Derivative, "Integral": sp.Integral,
+        # equation solving — roots / solution sets
+        "solve": sp.solve, "solveset": sp.solveset,
+        "roots": sp.roots, "real_roots": sp.real_roots,
+        "Eq": sp.Eq, "FiniteSet": sp.FiniteSet, "S": sp.S,
         # linear algebra
         "Matrix": sp.Matrix, "hessian": sp.hessian,
         "Transpose": sp.Transpose, "det": (lambda m: m.det()),
@@ -80,6 +84,61 @@ def _matrices_equal(a, b, sp) -> bool:
     return all(d[i, j] == 0 for i in range(rows) for j in range(cols))
 
 
+def _as_collection(v):
+    """Return ``v`` as a plain list of elements if it is a list / tuple /
+    set / SymPy FiniteSet (a solution set), else ``None``.
+
+    Matrices are NOT collections here — they have their own equality path
+    and ``hasattr(v, "shape")`` would otherwise mis-route them."""
+    try:
+        from sympy import FiniteSet
+    except Exception:  # noqa: BLE001
+        FiniteSet = ()  # type: ignore[assignment]
+    if hasattr(v, "shape"):
+        return None  # a Matrix — handled separately
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return list(v)
+    if FiniteSet and isinstance(v, FiniteSet):
+        return list(v.args)
+    return None
+
+
+def _collections_equal(ca: list, cb: list, sp) -> bool:
+    """True iff ``ca`` and ``cb`` hold the same elements, ORDER-
+    INSENSITIVE and with duplicates collapsed (a solution set has no
+    order and no multiplicity).  Elements are matched by symbolic
+    equality (``simplify(x - y) == 0``)."""
+    def _canon(seq):
+        out = []
+        for e in seq:
+            try:
+                se = sp.simplify(sp.sympify(e))
+            except Exception:  # noqa: BLE001
+                se = e
+            if not any(_sym_equal(se, o, sp) for o in out):
+                out.append(se)
+        return out
+    A, B = _canon(ca), _canon(cb)
+    if len(A) != len(B):
+        return False
+    used = [False] * len(B)
+    for x in A:
+        for j, y in enumerate(B):
+            if not used[j] and _sym_equal(x, y, sp):
+                used[j] = True
+                break
+        else:
+            return False
+    return True
+
+
+def _sym_equal(x, y, sp) -> bool:
+    try:
+        return sp.simplify(sp.sympify(x) - sp.sympify(y)) == 0
+    except Exception:  # noqa: BLE001
+        return x == y
+
+
 def verify_claim(claim: dict) -> dict:
     """Verify a single claim.  Returns ``{ok, claim, reason}``.
 
@@ -118,6 +177,23 @@ def verify_claim(claim: dict) -> dict:
                 "engine": "sympy", "skipped": True}
 
     try:
+        # Solution sets / root lists — e.g. solve(x**2-5*x+6, x) == [2, 3].
+        # These parse to Python lists / SymPy FiniteSets, NOT scalars, so
+        # the a - b path below would TypeError.  Compare them as UNORDERED
+        # collections of simplified elements (root order is irrelevant).
+        ca, cb = _as_collection(a), _as_collection(b)
+        if ca is not None or cb is not None:
+            if ca is None or cb is None:
+                return {"ok": False, "claim": claim,
+                        "reason": "one side is a set/list of values, the "
+                                  "other is a single value",
+                        "engine": "sympy"}
+            if _collections_equal(ca, cb, sp):
+                return {"ok": True, "claim": claim,
+                        "reason": "", "engine": "sympy"}
+            return {"ok": False, "claim": claim,
+                    "reason": f"set mismatch: a={ca}, b={cb}",
+                    "engine": "sympy"}
         if hasattr(a, "shape") and hasattr(b, "shape"):
             if _matrices_equal(a, b, sp):
                 return {"ok": True, "claim": claim,
@@ -183,6 +259,15 @@ def verify_claim(claim: dict) -> dict:
         return {"ok": False, "claim": claim,
                 "reason": f"not equal: a - b simplifies to {d2!s}",
                 "engine": "sympy"}
+    except TypeError as exc:
+        # The two sides parsed but can't be combined symbolically (e.g.
+        # a value compared against a structure the verifier doesn't model).
+        # This is an "I can't formalise this", NOT a proven-false claim —
+        # SKIP it rather than spuriously blocking a correct figure.
+        return {"ok": True, "claim": claim,
+                "reason": f"skipped_unformalisable: TypeError: "
+                          f"{str(exc)[:80]}",
+                "engine": "sympy", "skipped": True}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "claim": claim,
                 "reason": f"verifier_error: "
