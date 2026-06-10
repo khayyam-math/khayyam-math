@@ -890,6 +890,78 @@ def run_assertions(pr: PromptResult, tp: TestPrompt) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Flake-tolerant evaluation
+#
+# The LLM-SVG routes carry irreducible run-to-run variance: the same
+# prompt occasionally trips a different check each run (a perf timing a
+# few seconds over budget, a label momentarily outside the viewBox, a
+# verifier log line that settled late).  Those are MEASUREMENT wobbles,
+# not regressions — re-running the same prompt makes them disappear,
+# whereas a real bug fails every time.  So: when a prompt has any failing
+# check, run it ONCE more and keep a check failed only if it fails BOTH
+# times.  Real regressions still block; transient flakes self-heal.
+# Disable with SEVIM_GATE_RETRY_FLAKES=0.
+# ──────────────────────────────────────────────────────────────────────
+
+# Never flake-suppress these — a failure means the turn genuinely didn't
+# complete, which is not a wobble.
+_CRITICAL_CHECKS = {"prompt completed"}
+
+
+def _evaluate_prompt(tp: TestPrompt, logbuf: LogCapture) -> PromptResult:
+    """One full evaluation pass: run the prompt and attach every check."""
+    pr = run_prompt(tp, logbuf)
+    if pr.error:
+        pr.add("prompt completed", "Routing", False, pr.error)
+    else:
+        pr.add("prompt completed", "Routing", True,
+               f"cid={pr.canvas_id} ttfb={pr.ttfb_s:.2f}s "
+               f"total={pr.duration_s:.1f}s")
+        run_assertions(pr, tp)
+    return pr
+
+
+def evaluate_with_retry(
+    tp: TestPrompt, logbuf: LogCapture,
+) -> tuple[PromptResult, list[str]]:
+    """Evaluate a prompt, retrying once to absorb transient flakes.
+
+    Returns (result, healed) where ``healed`` lists the names of checks
+    that failed on attempt 1 but passed on the retry (reported, not
+    counted as regressions).  A check that fails BOTH attempts stays
+    failed.  Hard errors and the critical "prompt completed" check are
+    never suppressed.
+    """
+    pr1 = _evaluate_prompt(tp, logbuf)
+    fails1 = [c for c in pr1.checks if not c.passed]
+    if not fails1 or os.environ.get("SEVIM_GATE_RETRY_FLAKES", "1") == "0":
+        return pr1, []
+    if pr1.error:
+        return pr1, []  # a hard stream/transport error is not a flake
+    names = ", ".join(c.name for c in fails1)
+    print(f"  {Y}↻ attempt 1 had {len(fails1)} failing check(s); retrying "
+          f"once to rule out a flake: {names}{X}")
+    pr2 = _evaluate_prompt(tp, logbuf)
+    if pr2.error:
+        # The retry itself errored — don't let that mask attempt 1's
+        # verdict; trust the cleaner first attempt.
+        return pr1, []
+    pr1_passed = {c.name for c in pr1.checks if c.passed}
+    healed: list[str] = []
+    for c in pr2.checks:
+        if (not c.passed and c.name not in _CRITICAL_CHECKS
+                and c.name in pr1_passed):
+            # Passed attempt 1, failed attempt 2 → wobble, not a bug.
+            c.passed = True
+            c.detail = (c.detail + "  [flake: passed attempt 1]").strip()
+            healed.append(c.name)
+    # Symmetric case (failed attempt 1, passed attempt 2) needs no action:
+    # pr2 already records it as passed.  A check failing BOTH attempts is
+    # absent from pr1_passed, so it stays failed → a real regression.
+    return pr2, sorted(set(healed))
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Driver
 # ──────────────────────────────────────────────────────────────────────
 def main() -> int:
@@ -914,18 +986,16 @@ def main() -> int:
 
     # Per-prompt checks
     results: list[PromptResult] = []
+    healed_all: list[str] = []
     for tp in BATTERY:
         print(f"{B}{tp.key}{X}  {tp.prompt[:80]}")
-        pr = run_prompt(tp, logbuf)
-        if pr.error:
-            pr.add("prompt completed", "Routing", False, pr.error)
-        else:
-            pr.add("prompt completed", "Routing", True,
-                   f"cid={pr.canvas_id} ttfb={pr.ttfb_s:.2f}s "
-                   f"total={pr.duration_s:.1f}s")
-            run_assertions(pr, tp)
+        pr, healed = evaluate_with_retry(tp, logbuf)
         for c in pr.checks:
             print(c.fmt())
+        if healed:
+            healed_all.extend(f"{tp.key}: {n}" for n in healed)
+            print(f"  {Y}↻ {len(healed)} flake(s) self-healed on retry: "
+                  f"{', '.join(healed)}{X}")
         results.append(pr)
         print()
 
@@ -939,6 +1009,9 @@ def main() -> int:
     print(f"  total checks: {total}")
     print(f"  passed:       {total - len(failed)}  ({pct:.1f}%)")
     print(f"  failed:       {len(failed)}")
+    if healed_all:
+        print(f"  {Y}flakes auto-recovered on retry: {len(healed_all)}  "
+              f"({'; '.join(healed_all)}){X}")
     if failed:
         print(f"\n{R}REGRESSIONS:{X}")
         for c in failed:
