@@ -104,3 +104,7 @@ docs/email_openai_education_contact.md
 # landed in each working session.  Useful locally for context
 # continuity, but not part of the open-source product surface.
 SESSION_STATE.md
+
+# Brand logo assets are committed despite the blanket *.svg ignore above.
+!service/static/logo.svg
+!service/static/logo-badge.svg

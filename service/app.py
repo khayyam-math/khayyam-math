@@ -378,8 +378,14 @@ def web_manifest():
         '  "categories": ["education", "productivity"],\n'
         '  "icons": [\n'
         '    {\n'
-        '      "src": "/screenshots/social_preview.png",\n'
-        '      "sizes": "1280x640",\n'
+        '      "src": "/brand/logo-badge-512.png",\n'
+        '      "sizes": "512x512",\n'
+        '      "type": "image/png",\n'
+        '      "purpose": "any maskable"\n'
+        '    },\n'
+        '    {\n'
+        '      "src": "/apple-touch-icon.png",\n'
+        '      "sizes": "180x180",\n'
         '      "type": "image/png",\n'
         '      "purpose": "any"\n'
         '    }\n'
@@ -406,20 +412,65 @@ def security_txt():
                     headers={"cache-control": "public, max-age=86400"})
 
 
+# Brand assets live on disk in service/static and are served through a
+# single whitelisted route so we don't expose a blanket StaticFiles mount.
+# The "K" mark is built from "|<" (pipe + less-than) — see logo.svg.
+_BRAND_ASSETS: dict[str, str] = {
+    "logo.svg": "image/svg+xml",
+    "logo-badge.svg": "image/svg+xml",
+    "logo-badge-512.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "favicon-32.png": "image/png",
+}
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
-    """1x1 transparent PNG — silences browsers' /favicon.ico requests
-    so they don't show 404s in the tab and don't pollute the auth
-    handler's logs.  Replace with a real icon when we have a brand."""
+    """Real brand favicon (the blue "|<" K badge).  Falls back to a 1×1
+    transparent PNG if the asset is missing so we never 404 the tab
+    icon or pollute the auth logs."""
     from fastapi.responses import Response
-    # 67-byte 1×1 transparent PNG
-    png = (
+    icon = _STATIC_DIR / "favicon-32.png"
+    if icon.exists():
+        return FileResponse(
+            icon, media_type="image/png",
+            headers={"cache-control": "public, max-age=86400, immutable"},
+        )
+    png = (  # 67-byte 1×1 transparent PNG fallback
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00"
         b"\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc"
         b"\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     return Response(content=png, media_type="image/png",
                     headers={"cache-control": "public, max-age=86400"})
+
+
+@app.get("/brand/{name}", include_in_schema=False)
+def brand_asset(name: str):
+    """Serve a whitelisted brand asset (logo + icons) from service/static."""
+    media = _BRAND_ASSETS.get(name)
+    if media is None:
+        raise HTTPException(404)
+    path = _STATIC_DIR / name
+    if not path.exists():
+        raise HTTPException(404)
+    return FileResponse(
+        path, media_type=media,
+        headers={"cache-control": "public, max-age=86400, immutable"},
+    )
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+@app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+def apple_touch_icon():
+    """iOS looks for /apple-touch-icon.png at the site root by default."""
+    path = _STATIC_DIR / "apple-touch-icon.png"
+    if not path.exists():
+        raise HTTPException(404)
+    return FileResponse(
+        path, media_type="image/png",
+        headers={"cache-control": "public, max-age=86400, immutable"},
+    )
 
 
 @app.get("/health", include_in_schema=False)

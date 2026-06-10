@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Khayyam Math">
+  <title>Khayyam Math</title>
+  <!-- A "K" built from "|<": a vertical bar (the pipe) and a chevron
+       (the less-than) whose vertex meets the bar's mid-height. -->
+  <g fill="none" stroke="#1f6fe0" stroke-width="13"
+     stroke-linecap="round" stroke-linejoin="round">
+    <!-- | the pipe -->
+    <line x1="27" y1="18" x2="27" y2="82"/>
+    <!-- < the chevron: upper arm and lower arm meeting at (38,50) -->
+    <polyline points="76,20 38,50 76,80"/>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Khayyam Math">
+  <title>Khayyam Math</title>
+  <!-- App-icon / favicon badge: white "K" (built from "|<") on a
+       rounded brand-blue square. -->
+  <rect x="0" y="0" width="100" height="100" rx="22" fill="#1f6fe0"/>
+  <g fill="none" stroke="#ffffff" stroke-width="11"
+     stroke-linecap="round" stroke-linejoin="round">
+    <line x1="33" y1="27" x2="33" y2="73"/>
+    <polyline points="71,29 43,50 71,71"/>
+  </g>
+</svg>
