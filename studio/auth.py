@@ -179,22 +179,57 @@ def _send_magic_link(email: str, link: str) -> None:
         _log("SEVIM_SES_FROM_ADDRESS unset — skipping send (would have mailed link)")
         _log(f"DEV-ONLY magic link for {email}: {link}")
         return
+    # A friendly display name ("Khayyam Math <noreply@…>") reads as a real
+    # sender to both humans and spam filters; a bare address looks
+    # machine-generated.  Only wrap when the operator hasn't already set one.
+    if "<" not in sender:
+        sender = f"Khayyam Math <{sender}>"
     try:
         import boto3
     except ImportError:
         _log("boto3 not installed — skipping SES send")
         return
+    # Deliverability note: spam filters penalise "bare URL + boilerplate"
+    # bodies and reward a natural text-to-link ratio plus a clear reason the
+    # message was sent.  Keep real sentences, one call-to-action, and a
+    # context line explaining why the recipient received this.
     body_text = (
-        "Click the link below to open Khayyam Math.\n\n"
+        "Hi,\n\n"
+        "Here is your sign-in link for Khayyam Math. Open it in the same "
+        "browser where you entered your email:\n\n"
         f"{link}\n\n"
-        "This link is valid for 15 minutes.  If you didn't request it, "
-        "you can ignore this email."
+        "The link works once and expires in 15 minutes. If it expires, just "
+        "request a new one from the sign-in page.\n\n"
+        "You're receiving this because someone entered this address to sign "
+        "in to Khayyam Math. If that wasn't you, no action is needed and you "
+        "can safely ignore this message.\n\n"
+        "Khayyam Math\n"
+        "https://khayyammath.com\n"
     )
     body_html = (
-        "<p>Click the link below to open Khayyam Math.</p>"
-        f"<p><a href=\"{link}\">{link}</a></p>"
-        "<p>This link is valid for 15 minutes.  If you didn't request "
-        "it, you can ignore this email.</p>"
+        "<div style=\"font-family:-apple-system,Segoe UI,Roboto,Helvetica,"
+        "Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;"
+        "max-width:520px\">"
+        "<p>Hi,</p>"
+        "<p>Here is your sign-in link for <strong>Khayyam Math</strong>. "
+        "Open it in the same browser where you entered your email:</p>"
+        f"<p style=\"margin:24px 0\"><a href=\"{link}\" "
+        "style=\"background:#2563eb;color:#ffffff;text-decoration:none;"
+        "padding:12px 22px;border-radius:6px;display:inline-block;"
+        "font-weight:600\">Open Khayyam Math</a></p>"
+        "<p style=\"font-size:13px;color:#555\">Or paste this link into your "
+        f"browser:<br><a href=\"{link}\" style=\"color:#2563eb\">{link}</a></p>"
+        "<p>The link works once and expires in 15 minutes. If it expires, "
+        "just request a new one from the sign-in page.</p>"
+        "<hr style=\"border:none;border-top:1px solid #eee;margin:24px 0\">"
+        "<p style=\"font-size:12px;color:#888\">You're receiving this because "
+        "someone entered this address to sign in to Khayyam Math. If that "
+        "wasn't you, no action is needed and you can safely ignore this "
+        "message.</p>"
+        "<p style=\"font-size:12px;color:#888\">Khayyam Math &middot; "
+        "<a href=\"https://khayyammath.com\" style=\"color:#888\">"
+        "khayyammath.com</a></p>"
+        "</div>"
     )
     try:
         ses = boto3.client("ses")
@@ -202,7 +237,7 @@ def _send_magic_link(email: str, link: str) -> None:
             Source=sender,
             Destination={"ToAddresses": [email]},
             Message={
-                "Subject": {"Data": "Your Khayyam Math link"},
+                "Subject": {"Data": "Your Khayyam Math sign-in link"},
                 "Body": {
                     "Text": {"Data": body_text},
                     "Html": {"Data": body_html},

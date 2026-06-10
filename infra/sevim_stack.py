@@ -370,6 +370,22 @@ class SevimStack(Stack):
         # SES send permission for magic-link delivery.  Scoped to the
         # account default — narrow further to a specific verified
         # identity if you operate multiple senders.
+        #
+        # Email-deliverability records are managed OUT OF BAND (not in this
+        # stack) because the ``khayyammath.com`` SES domain identity was
+        # created manually and is not a CloudFormation resource — declaring
+        # an ``ses.EmailIdentity`` here would collide with it.  The Route 53
+        # hosted zone therefore carries these hand-applied records (see
+        # 2026-06-10 spam-foldering fix):
+        #   • DKIM:      Easy-DKIM CNAMEs (SES-managed, status SUCCESS)
+        #   • SPF apex:  TXT "v=spf1 include:amazonses.com ~all"
+        #   • MAIL FROM: mail.khayyammath.com  (MX feedback-smtp.us-east-1
+        #                .amazonses.com + SPF TXT)  → SPF domain-alignment
+        #   • DMARC:     _dmarc TXT "v=DMARC1; p=none; sp=none; adkim=r;
+        #                aspf=r"  (monitoring mode — tighten to p=quarantine
+        #                once rua reports confirm 100% alignment)
+        # Without the DMARC + MAIL-FROM records, Gmail/Yahoo's 2024 sender
+        # rules dropped the magic-link mail into spam despite valid DKIM.
         service.task_definition.task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["ses:SendEmail", "ses:SendRawEmail"],
