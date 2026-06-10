@@ -416,6 +416,98 @@ def test_autofit_no_rect_in_group_passes_through():
 
 
 # ---------------------------------------------------------------------
+# fit_node_boxes_to_labels — shrinks oversized flow/node boxes to their
+# own labels so neighbouring boxes stop overlapping.  Gated on the
+# presence of a connector arrow so it never touches matrices/tables.
+# ---------------------------------------------------------------------
+
+from studio.express import fit_node_boxes_to_labels
+
+
+def _rects(svg: str):
+    import re
+    out = []
+    for tag in re.findall(r'<rect\b[^>]*?/?>', svg):
+        a = dict(re.findall(r'([A-Za-z_-]+)\s*=\s*"([^"]*)"', tag))
+        try:
+            out.append((float(a["x"]), float(a["y"]),
+                        float(a["width"]), float(a["height"])))
+        except (KeyError, ValueError):
+            pass
+    return out
+
+
+def _overlap(a, b) -> bool:
+    ax, ay, aw, ah = a; bx, by, bw, bh = b
+    return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+
+
+def test_fit_node_boxes_separates_oversized_overlapping_boxes():
+    """The real 'partition' regression: box1 is 333px wide for the label
+    'Set S', so box2 falls inside it.  Sizing each box to its own label
+    must make the two boxes disjoint."""
+    svg = (
+        "<svg viewBox='-24 -24 935 574'>"
+        "<g id='partition_problem'>"
+        "<rect x='271' y='196' width='333' height='58' fill='#e0e0e0'/>"
+        "<text x='275' y='230' font-size='16'>Set S</text>"
+        "<rect x='450' y='200' width='150' height='50' fill='#e0e0e0'/>"
+        "<text x='475' y='230' font-size='16'>Subsets</text>"
+        "<line x1='400' y1='225' x2='450' y2='225' marker-end='url(#arrow)'/>"
+        "</g></svg>"
+    )
+    fixed = fit_node_boxes_to_labels(svg)
+    boxes = _rects(fixed)
+    assert len(boxes) == 2, fixed
+    assert not _overlap(boxes[0], boxes[1]), f"boxes still overlap: {boxes}"
+    # The oversized box must have shrunk.
+    assert boxes[0][2] < 333, f"box1 width not reduced: {boxes}"
+    # Labels are re-centred → text-anchor=middle appears.
+    assert 'text-anchor="middle"' in fixed
+
+
+def test_fit_node_boxes_idempotent():
+    svg = (
+        "<svg viewBox='0 0 900 574'>"
+        "<g id='flow'>"
+        "<rect x='100' y='100' width='300' height='60' fill='#ddd'/>"
+        "<text x='110' y='135' font-size='16'>Start</text>"
+        "<rect x='200' y='110' width='140' height='40' fill='#ddd'/>"
+        "<text x='220' y='135' font-size='16'>End</text>"
+        "<line x1='150' y1='130' x2='200' y2='130' marker-end='url(#a)'/>"
+        "</g></svg>"
+    )
+    once = fit_node_boxes_to_labels(svg)
+    assert fit_node_boxes_to_labels(once) == once
+
+
+def test_fit_node_boxes_leaves_matrix_untouched():
+    """A matrix group has NO connector arrow, so the node-box fitter must
+    not touch it — that stays the job of autofit_group_rects."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g id="matrix_a">'
+        '<rect x="100" y="100" width="200" height="200" stroke="black"/>'
+        '<text x="150" y="140">a11</text>'
+        '<text x="250" y="140">a12</text>'
+        '<text x="150" y="240">a21</text>'
+        '</g></svg>'
+    )
+    assert fit_node_boxes_to_labels(svg) == svg
+
+
+def test_fit_node_boxes_no_arrow_passes_through():
+    """Even a box+label group is left alone when there's no arrow — the
+    arrow is the flow-diagram signature that gates this pass."""
+    svg = (
+        '<svg viewBox="0 0 900 650">'
+        '<g><rect x="50" y="50" width="400" height="80" fill="#eee"/>'
+        '<text x="60" y="95" font-size="16">lonely</text></g></svg>'
+    )
+    assert fit_node_boxes_to_labels(svg) == svg
+
+
+# ---------------------------------------------------------------------
 # reflow_overlapping_text — greedy 2-D layout pass that nudges
 # top-level <text> elements apart when their bounding boxes collide.
 # ---------------------------------------------------------------------

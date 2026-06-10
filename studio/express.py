@@ -3397,6 +3397,22 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"autofit_group_rects FAILED: {type(exc).__name__}: {exc}")
+        # Shrink oversized flow/node boxes to their own labels.  Runs
+        # AFTER autofit (which handles matrix container+cell sizing) and
+        # only fires on groups with a connector arrow, so it can't touch
+        # matrices/tables.  Fixes "giant box with the label in the corner
+        # and the next box overlapping inside it" on template-less
+        # proof/concept figures.
+        try:
+            fixed_svg = fit_node_boxes_to_labels(result["svg"])
+            if fixed_svg != result["svg"]:
+                _log(
+                    f"fit_node_boxes_to_labels: rewrote {len(result['svg'])} -> "
+                    f"{len(fixed_svg)} chars"
+                )
+                result["svg"] = fixed_svg
+        except Exception as exc:  # noqa: BLE001
+            _log(f"fit_node_boxes_to_labels FAILED: {type(exc).__name__}: {exc}")
         # Slide overlapping <g> groups apart — handles the case where
         # the model places matrix_a and matrix_a_inverse at the same y
         # but with overlapping x ranges.  Runs BEFORE reflow_overlap-
@@ -5835,6 +5851,183 @@ def autofit_group_rects(svg: str) -> str:
 
     group_pattern = re.compile(r'<g\b[^>]*>.*?</g>', re.S)
     return group_pattern.sub(_resize_group, svg)
+
+
+def fit_node_boxes_to_labels(svg: str) -> str:
+    """Size flow/node-diagram boxes to their own labels.
+
+    The LLM frequently emits a node box far larger than its label —
+    e.g. a 333-px-wide rect for the two-word label "Set S" — which
+    makes a neighbouring box fall *inside* the oversized one and look
+    overlapping, with the label stranded in a corner.  This is the
+    "empty box, label not bound to it" defect users keep reporting on
+    proof/concept prompts that have no deterministic template.
+
+    ``autofit_group_rects`` can't fix it: it assumes the first rect is
+    a *container* and the other rects are *content* to wrap, so it
+    keeps the container huge to cover the neighbour.  That assumption
+    is right for a matrix (cells nested inside an outer frame) but
+    wrong for a flow chart (sibling boxes joined by arrows).
+
+    This pass therefore runs ONLY on groups that contain a connector
+    arrow (a <line>/<path> with ``marker-end``) — the signature of a
+    flow/node diagram, which matrices and tables never carry.  Inside
+    such a group it assigns every <text> to the SMALLEST rect that
+    contains its anchor, resizes each rect to tightly wrap its own
+    label(s) (padding + a sensible minimum), and re-centres the label
+    in the box.  Rects with no own label, and groups with no arrow,
+    are left untouched.
+
+    Deterministic, idempotent, no LLM call.
+    """
+    import re
+
+    attr_re = re.compile(r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')')
+
+    def _attrs(tag: str) -> dict[str, str]:
+        return {
+            m.group(1): (m.group(2) if m.group(2) is not None else m.group(3))
+            for m in attr_re.finditer(tag)
+        }
+
+    PAD_X, PAD_Y = 14.0, 10.0
+    MIN_W, MIN_H = 40.0, 30.0
+    rect_re = re.compile(r'<rect\b[^>]*?/?>', re.S)
+    # A <text> with simple (no-tspan) content — we only re-centre these.
+    text_re = re.compile(r'<text\b[^>]*?>(?:[^<]*)</text>', re.S)
+    arrow_re = re.compile(r'<(?:line|path)\b[^>]*\bmarker-(?:end|start)\s*=', re.S)
+
+    def _text_w(content: str, fs: float) -> float:
+        return max(len(content), 1) * fs * 0.6
+
+    def _process_group(gm: re.Match) -> str:
+        inner = gm.group(0)
+        if not arrow_re.search(inner):
+            return inner  # not a flow/node diagram — leave to autofit
+        rects = list(rect_re.finditer(inner))
+        texts = list(text_re.finditer(inner))
+        if len(rects) < 1 or not texts:
+            return inner
+
+        # Parse rect geometry.
+        rect_boxes: list[tuple[int, float, float, float, float]] = []
+        for i, rm in enumerate(rects):
+            a = _attrs(rm.group(0))
+            try:
+                rx = float(a.get("x", "0")); ry = float(a.get("y", "0"))
+                rw = float(a["width"]); rh = float(a["height"])
+            except (KeyError, ValueError):
+                continue
+            rect_boxes.append((i, rx, ry, rw, rh))
+        if not rect_boxes:
+            return inner
+
+        # Assign each text to the SMALLEST rect whose box contains its
+        # anchor point.  A text inside no rect is a free label — skip it.
+        assign: dict[int, list[int]] = {}
+        text_info: dict[int, tuple[float, float, str, float, str]] = {}
+        for ti, tm in enumerate(texts):
+            a = _attrs(tm.group(0))
+            try:
+                tx = float(a.get("x", "")); ty = float(a.get("y", ""))
+            except ValueError:
+                continue
+            content_m = re.search(r'>([^<]*)<', tm.group(0))
+            content = (content_m.group(1).strip() if content_m else "")
+            if not content:
+                continue
+            try:
+                fs = float(str(a.get("font-size", "16")).rstrip("pxptem"))
+            except ValueError:
+                fs = 16.0
+            anchor = (a.get("text-anchor") or "start").lower()
+            text_info[ti] = (tx, ty, content, fs, anchor)
+            best = None; best_area = float("inf")
+            for (ri, rx, ry, rw, rh) in rect_boxes:
+                if rx <= tx <= rx + rw and ry <= ty <= ry + rh:
+                    area = rw * rh
+                    if area < best_area:
+                        best_area = area; best = ri
+            if best is not None:
+                assign.setdefault(best, []).append(ti)
+
+        if not assign:
+            return inner
+
+        new_inner = inner
+        for (ri, rx, ry, rw, rh) in rect_boxes:
+            tids = assign.get(ri)
+            if not tids:
+                continue
+            # Union bbox of this rect's own labels (anchor-aware).
+            lx0 = float("inf"); ly0 = float("inf")
+            lx1 = float("-inf"); ly1 = float("-inf")
+            for ti in tids:
+                tx, ty, content, fs, anchor = text_info[ti]
+                w = _text_w(content, fs)
+                if anchor == "middle":
+                    x0 = tx - w / 2
+                elif anchor == "end":
+                    x0 = tx - w
+                else:
+                    x0 = tx
+                lx0 = min(lx0, x0); lx1 = max(lx1, x0 + w)
+                ly0 = min(ly0, ty - fs * 0.9); ly1 = max(ly1, ty + fs * 0.25)
+            lab_cx = (lx0 + lx1) / 2.0
+            lab_cy = (ly0 + ly1) / 2.0
+            new_w = max((lx1 - lx0) + 2 * PAD_X, MIN_W)
+            new_h = max((ly1 - ly0) + 2 * PAD_Y, MIN_H)
+            new_x = lab_cx - new_w / 2.0
+            new_y = lab_cy - new_h / 2.0
+            # Skip if already tight (keeps the pass idempotent).
+            if (abs(new_x - rx) < 2 and abs(new_y - ry) < 2
+                    and abs(new_w - rw) < 6 and abs(new_h - rh) < 6):
+                continue
+            # Rewrite the rect geometry, preserving all other attrs.
+            old_rect = rects[ri].group(0)
+            nr = old_rect
+            for attr, val in (("x", new_x), ("y", new_y),
+                              ("width", new_w), ("height", new_h)):
+                rep = f'{attr}="{val:.0f}"'
+                pat_dq = re.compile(rf'\b{attr}\s*=\s*"[^"]*"')
+                pat_sq = re.compile(rf"\b{attr}\s*=\s*'[^']*'")
+                if pat_dq.search(nr):
+                    nr = pat_dq.sub(rep, nr, count=1)
+                elif pat_sq.search(nr):
+                    nr = pat_sq.sub(rep, nr, count=1)
+                else:
+                    nr = re.sub(r'(/?>)$', f' {rep}\\1', nr, count=1)
+            new_inner = new_inner.replace(old_rect, nr, 1)
+            # Re-centre this rect's label(s) inside the resized box.
+            box_cx = new_x + new_w / 2.0
+            for ti in tids:
+                tx, ty, content, fs, anchor = text_info[ti]
+                old_text = texts[ti].group(0)
+                nt = old_text
+                # Centre horizontally; nudge the baseline to the box's
+                # vertical middle when there's a single label.
+                cy = (new_y + new_h / 2.0 + fs * 0.35) if len(tids) == 1 else ty
+                for attr, val, q in (("x", box_cx, True), ("y", cy, True)):
+                    rep = f'{attr}="{val:.0f}"'
+                    pat_dq = re.compile(rf'\b{attr}\s*=\s*"[^"]*"')
+                    pat_sq = re.compile(rf"\b{attr}\s*=\s*'[^']*'")
+                    if pat_dq.search(nt):
+                        nt = pat_dq.sub(rep, nt, count=1)
+                    elif pat_sq.search(nt):
+                        nt = pat_sq.sub(rep, nt, count=1)
+                if re.search(r'\btext-anchor\s*=', nt):
+                    nt = re.sub(r'\btext-anchor\s*=\s*"[^"]*"',
+                                'text-anchor="middle"', nt, count=1)
+                    nt = re.sub(r"\btext-anchor\s*=\s*'[^']*'",
+                                'text-anchor="middle"', nt, count=1)
+                else:
+                    nt = re.sub(r'(<text\b)', r'\1 text-anchor="middle"',
+                                nt, count=1)
+                new_inner = new_inner.replace(old_text, nt, 1)
+        return new_inner
+
+    group_pattern = re.compile(r'<g\b[^>]*>.*?</g>', re.S)
+    return group_pattern.sub(_process_group, svg)
 
 
 def reflow_overlapping_groups(svg: str) -> str:
