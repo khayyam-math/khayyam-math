@@ -966,6 +966,22 @@ class Telemetry:
             print(f"[telemetry] index_canvas({canvas_id!r}) failed: {exc}",
                   flush=True, file=sys.stderr)
 
+    def dedup_index_by_prompt(self, prompt: str, keep_canvas_id: str) -> None:
+        """Versioning: keep only ``keep_canvas_id`` as the indexed answer for
+        an exactly-repeated prompt, dropping older rows for the same prompt
+        so a repeated question always retrieves the newest accepted figure."""
+        try:
+            with self._lock:
+                self._backend.execute(
+                    "DELETE FROM canvas_index "
+                    "WHERE lower(trim(prompt)) = lower(trim(?)) "
+                    "AND canvas_id <> ?",
+                    (prompt, keep_canvas_id))
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] dedup_index_by_prompt failed: {exc}",
+                  flush=True, file=sys.stderr)
+
     def iter_canvas_index(
         self, accepted_only: bool = True,
     ) -> list[tuple]:

@@ -132,6 +132,17 @@ class AnswerCache:
         fig = self._fetch_figure(cid)
         if fig is None:
             return None
+        # Improve on serve: re-run the safe deterministic layout-repair
+        # passes so a figure cached before a fix landed still benefits from
+        # it.  Polish is idempotent and never calls the LLM, so it cannot
+        # introduce a math error into a previously-accepted figure.
+        try:
+            from studio.express import polish_svg
+            polished = polish_svg(fig.get("svg") or "")
+            if polished:
+                fig["svg"] = polished
+        except Exception:  # noqa: BLE001
+            pass
         fig.update({"cache_hit": True, "cache_cosine": round(cos, 4),
                     "cache_canvas_id": cid,
                     "cache_matched_prompt": matched_prompt})
@@ -179,6 +190,10 @@ class AnswerCache:
                                         "text-embedding-3-small"),
                          accepted=accepted, category_id=category_id)
         if accepted:
+            # Versioning: an exactly-repeated question keeps only this
+            # newest accepted figure as its indexed answer, so a repeat
+            # retrieves the latest (improved) figure rather than a stale one.
+            tel.dedup_index_by_prompt(prompt, canvas_id)
             # Hot-add to the live matrix so the very next identical prompt
             # hits without a reload.
             self._hot_add(canvas_id, prompt, qv)

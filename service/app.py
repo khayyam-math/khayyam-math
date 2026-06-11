@@ -149,6 +149,50 @@ if _STUDIO_AVAILABLE:
 from service.contact import router as _contact_router  # noqa: E402
 app.include_router(_contact_router)
 
+
+@app.on_event("startup")
+def _init_taxonomy() -> None:
+    """Bring up the answer-cache / taxonomy layer when enabled, off the boot
+    path so it never blocks the health check.
+
+    * Loads the answer-cache index from the canvas_index table.
+    * Seeds the category--template taxonomy idempotently: only when the
+      taxonomy is enabled, embeddings are available, and the categories
+      table is still empty (so a warm task does not re-embed on every boot).
+    Both are best-effort; failures are logged and never crash startup.
+    """
+    import os
+    import threading
+
+    def _bg() -> None:
+        # Answer cache: load the in-memory cosine index.
+        try:
+            from studio.answer_cache import enabled as _ac_on, get_cache
+            if _ac_on():
+                get_cache().load()
+                print("[startup] answer cache index loaded", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[startup] answer-cache load failed: {exc}", flush=True)
+        # Taxonomy: seed once if empty.
+        try:
+            from studio.taxonomy import enabled as _tax_on, get_taxonomy
+            if _tax_on():
+                from sevim.telemetry import get_telemetry
+                from sevim import embeddings as _emb
+                tel = get_telemetry()
+                if tel is not None and _emb.available():
+                    if not tel.iter_categories():
+                        from studio.taxonomy_seed import seed
+                        summary = seed(tel, _emb.embed)
+                        print(f"[startup] taxonomy seeded: {summary}",
+                              flush=True)
+                    get_taxonomy().load()
+                    print("[startup] taxonomy index loaded", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[startup] taxonomy seed/load failed: {exc}", flush=True)
+
+    threading.Thread(target=_bg, daemon=True).start()
+
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 

@@ -110,3 +110,14 @@ def test_disabled_by_env(tmp_path, monkeypatch):
     _seeded_tel(tmp_path, monkeypatch)
     t = tax.Taxonomy()
     assert t.serve("multiply matrix A and B") is None
+
+
+def test_seed_is_idempotent(tmp_path, monkeypatch):
+    """Re-seeding must not duplicate categories/templates (upsert), so the
+    startup auto-seed is safe to re-run."""
+    tel = _seeded_tel(tmp_path, monkeypatch)
+    c1 = len(tel.iter_categories())
+    t1 = len(tel.iter_templates(status="live"))
+    taxonomy_seed.seed(tel, _toy_embed)          # seed again
+    assert len(tel.iter_categories()) == c1
+    assert len(tel.iter_templates(status="live")) == t1

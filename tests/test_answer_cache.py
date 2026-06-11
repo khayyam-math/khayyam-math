@@ -113,3 +113,38 @@ def test_disabled_by_env(tmp_path, monkeypatch):
     cache.add("c1", "prove vertex cover is np complete", accepted=True)
     # Even an exact-match prompt returns None when the cache is off.
     assert cache.lookup_figure("prove vertex cover is np complete") is None
+
+
+def test_served_figure_is_polished(tmp_path, monkeypatch):
+    """On a hit, the stored SVG is re-run through the deterministic polish
+    passes before being served (so an old cached figure gets recent fixes)."""
+    tel = _mk_telemetry(tmp_path)
+    monkeypatch.setattr("sevim.telemetry.get_telemetry", lambda: tel)
+    _seed_canvas(tel, "c1", "prove vertex cover is np complete",
+                 "<svg id='raw'></svg>")
+    cache = ac.AnswerCache()
+    cache.add("c1", "prove vertex cover is np complete", accepted=True)
+    # Stub polish_svg so we can prove it was applied to the served SVG.
+    import studio.express as _ex
+    monkeypatch.setattr(_ex, "polish_svg",
+                        lambda s: s.replace("raw", "polished"))
+    hit = cache.lookup_figure("prove vertex cover np complete")
+    assert hit is not None
+    assert "polished" in hit["svg"], "served SVG should be polished"
+
+
+def test_repeated_prompt_keeps_newest(tmp_path, monkeypatch):
+    """Versioning: re-answering the same question keeps only the newest
+    accepted figure as the indexed answer."""
+    tel = _mk_telemetry(tmp_path)
+    monkeypatch.setattr("sevim.telemetry.get_telemetry", lambda: tel)
+    _seed_canvas(tel, "old", "explain the spectral theorem",
+                 "<svg id='old'></svg>")
+    _seed_canvas(tel, "new", "explain the spectral theorem",
+                 "<svg id='new'></svg>")
+    cache = ac.AnswerCache()
+    cache.add("old", "explain the spectral theorem", accepted=True)
+    cache.add("new", "explain the spectral theorem", accepted=True)
+    rows = tel.iter_canvas_index(accepted_only=True)
+    ids = {r[0] for r in rows}
+    assert ids == {"new"}, f"only the newest should remain, got {ids}"

@@ -5295,6 +5295,30 @@ def fit_viewbox_to_content(svg: str) -> str:
         return svg
 
 
+def polish_svg(svg: str) -> str:
+    """Apply the safe, self-contained, idempotent layout-repair passes to a
+    finished SVG.  Used to re-polish a CACHED figure before serving it, so a
+    figure stored before a layout fix landed still benefits from it.  Each
+    pass is svg->svg and fail-open; none calls the LLM.  Idempotent: running
+    it on an already-clean figure is a no-op.
+    """
+    if not svg or "<svg" not in svg:
+        return svg
+    passes = (strip_latex_in_svg_text, normalize_matrix_layout,
+              autofit_group_rects, fit_node_boxes_to_labels,
+              wrap_overlong_text, reflow_overlapping_groups,
+              clamp_text_to_viewbox, raise_text_to_front,
+              fit_viewbox_to_content)
+    for fn in passes:
+        try:
+            out = fn(svg)
+            if isinstance(out, str) and out:
+                svg = out
+        except Exception:  # noqa: BLE001 — polish is best-effort
+            pass
+    return svg
+
+
 def strip_latex_in_svg_text(svg: str) -> str:
     """Walk every <text> / <tspan> body in the SVG and remove any
     LaTeX syntax the LLM leaked through.  Idempotent.

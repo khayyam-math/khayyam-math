@@ -257,6 +257,18 @@ class SevimStack(Stack):
             "SEVIM_STORAGE_URL": f"s3://{canvas_bucket.bucket_name}",
             "SEVIM_EXPORT_S3_BUCKET": training_bucket.bucket_name,
             "SEVIM_LORA_S3_BUCKET": lora_bucket.bucket_name,
+            # Category->template taxonomy (live).  The answer cache retrieves
+            # a prior accepted figure for a NEAR-IDENTICAL repeat question
+            # (consistency + cost); the threshold is deliberately HIGH (0.93)
+            # because a precision sweep showed surface-similar but DIFFERENT
+            # math questions (e.g. vertex-cover vs 3-SAT proofs) score up to
+            # ~0.78, so only near-verbatim retrieval is safe.  Taxonomy
+            # recognition seeds categories at boot and feeds the offline
+            # admin-approved curation loop; exemplars are only served once an
+            # operator promotes them.
+            "SEVIM_ANSWER_CACHE": "1",
+            "SEVIM_ANSWER_CACHE_TAU": "0.93",
+            "SEVIM_TAXONOMY": "1",
             "AWS_REGION": self.region,
         }
         if domain:
