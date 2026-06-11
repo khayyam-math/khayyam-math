@@ -706,6 +706,19 @@ async def _execute_tool(
                         good_narration=pair.get("good_narration"),
                         model_id=resolved_model_id,
                     )
+                # Index this turn into the answer cache so a future
+                # near-identical prompt retrieves it.  A figure the user
+                # didn't flag as wrong counts as accepted.  Best-effort,
+                # only when the cache is enabled (avoids paying for
+                # embeddings we won't use).
+                try:
+                    from studio.answer_cache import get_cache, enabled
+                    if enabled() and svg:
+                        get_cache().add(canvas_id, prompt,
+                                        accepted=not flagged)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[answer-cache] index FAILED: {exc}",
+                          flush=True, file=__import__("sys").stderr)
             except Exception as exc:  # noqa: BLE001
                 print(
                     f"[telemetry] background record FAILED: "

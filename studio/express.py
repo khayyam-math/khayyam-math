@@ -2643,6 +2643,35 @@ async def express_figure(
              f"canvas(es)) but request is Case B/C — deterministic "
              f"templates still eligible")
 
+    # ── Answer cache (Phase 1 taxonomy) ───────────────────────────
+    # If this prompt is near-identical to one we've already answered
+    # well, retrieve that accepted figure instead of regenerating it —
+    # consistency + speed + cost.  Gated behind SEVIM_ANSWER_CACHE and
+    # tuned to be high-precision (fails closed on any doubt).  Skipped
+    # for refinement edits, which must operate on the attached canvas.
+    if not _refining:
+        try:
+            from studio.answer_cache import get_cache, enabled as _cache_on
+            if _cache_on():
+                hit = get_cache().lookup_figure(
+                    original_user_prompt or user_prompt or "")
+                if hit is not None:
+                    _log(f"answer-cache HIT cos={hit['cache_cosine']} "
+                         f"canvas={hit['cache_canvas_id']} "
+                         f"(matched {hit['cache_matched_prompt']!r})")
+                    return {
+                        "svg": hit["svg"],
+                        "narration": hit["narration"],
+                        "title": hit.get("title", ""),
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "answer_cache",
+                        "cache_cosine": hit["cache_cosine"],
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"answer-cache lookup errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and

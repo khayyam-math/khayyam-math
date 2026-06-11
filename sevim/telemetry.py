@@ -160,11 +160,26 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_city       TEXT
 );
 
+-- Answer-cache / recognition index: one row per indexed canvas, holding
+-- the prompt that produced it and the prompt's embedding (JSON array of
+-- floats).  ``accepted`` mirrors canvases.accepted; ``category_id`` is
+-- populated by the Phase-2 taxonomy (nullable until then).
+CREATE TABLE IF NOT EXISTS canvas_index (
+    canvas_id   TEXT PRIMARY KEY,
+    prompt      TEXT NOT NULL,
+    embedding   TEXT NOT NULL,
+    embed_model TEXT NOT NULL,
+    accepted    INTEGER NOT NULL DEFAULT 0,
+    category_id TEXT,
+    created_at  REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_turn ON repairs (turn_id);
 CREATE INDEX IF NOT EXISTS idx_users_country ON users (last_login_country);
+CREATE INDEX IF NOT EXISTS idx_canvas_index_accepted ON canvas_index (accepted);
 """
 
 _SCHEMA_POSTGRES = """
@@ -297,6 +312,16 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_city       TEXT
 );
 
+CREATE TABLE IF NOT EXISTS canvas_index (
+    canvas_id   TEXT PRIMARY KEY,
+    prompt      TEXT NOT NULL,
+    embedding   TEXT NOT NULL,
+    embed_model TEXT NOT NULL,
+    accepted    INTEGER NOT NULL DEFAULT 0,
+    category_id TEXT,
+    created_at  DOUBLE PRECISION NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
@@ -305,6 +330,7 @@ CREATE INDEX IF NOT EXISTS idx_turns_model ON turns (model_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_users_country ON users (last_login_country);
 CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users (last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_country ON sessions (country);
+CREATE INDEX IF NOT EXISTS idx_canvas_index_accepted ON canvas_index (accepted);
 """
 
 
@@ -817,6 +843,54 @@ class Telemetry:
         except Exception as exc:  # noqa: BLE001
             print(f"[telemetry] set_setting({key!r}) failed: {exc}",
                   flush=True, file=sys.stderr)
+
+    def index_canvas(self, canvas_id: str, prompt: str,
+                     embedding_json: str, embed_model: str,
+                     accepted: bool = False,
+                     category_id: str | None = None) -> None:
+        """Upsert a row into the answer-cache / recognition index.
+
+        ``embedding_json`` is a JSON-encoded list of floats.  Best-effort:
+        failures are logged, never raised (the cache is an optimisation,
+        not a correctness dependency)."""
+        try:
+            with self._lock:
+                self._backend.execute(
+                    """
+                    INSERT INTO canvas_index
+                        (canvas_id, prompt, embedding, embed_model,
+                         accepted, category_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (canvas_id) DO UPDATE SET
+                        prompt      = EXCLUDED.prompt,
+                        embedding   = EXCLUDED.embedding,
+                        embed_model = EXCLUDED.embed_model,
+                        accepted    = EXCLUDED.accepted,
+                        category_id = EXCLUDED.category_id
+                    """,
+                    (canvas_id, prompt, embedding_json, embed_model,
+                     1 if accepted else 0, category_id, time.time()),
+                )
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] index_canvas({canvas_id!r}) failed: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def iter_canvas_index(
+        self, accepted_only: bool = True,
+    ) -> list[tuple]:
+        """Return ``[(canvas_id, prompt, embedding_json, category_id), …]``
+        for building the in-memory recognition index at boot."""
+        try:
+            sql = ("SELECT canvas_id, prompt, embedding, category_id "
+                   "FROM canvas_index")
+            if accepted_only:
+                sql += " WHERE accepted = 1"
+            return self.query(sql)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] iter_canvas_index failed: {exc}",
+                  flush=True, file=sys.stderr)
+            return []
 
     def usage_by_model(self, since_s: float = 86400.0) -> list[dict]:
         """Aggregate turns by ``model_id`` over the last ``since_s``
