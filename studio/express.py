@@ -388,16 +388,53 @@ def inject_text_blocks(svg: str, text_blocks: list[dict[str, Any]]) -> str:
     """Splice rendered text-block markup into the SVG just before
     </svg>.  No-op when text_blocks is empty.  When the SVG has no
     closing tag (malformed), append the markup at the end so it still
-    renders inside the broken document instead of being lost."""
+    renders inside the broken document instead of being lost.
+
+    De-duplication: the LLM sometimes emits the SAME explanatory text BOTH
+    as a raw <text> in the SVG AND as a text_block (the "dual-channel"
+    bug — observed garbling the spectral-theorem figure: the paragraph
+    rendered twice, the raw copy self-overlapping at top-centre).  The
+    text_block channel is the cleanly-stacked, wrapped one, so we DROP any
+    raw <text> whose content is already covered by the text_blocks."""
     rendered = render_text_blocks(text_blocks)
     if not rendered:
         return svg
     if not svg:
         return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620">{rendered}</svg>'
+    svg = _drop_textblock_duplicates(svg, text_blocks)
     idx = svg.rfind("</svg>")
     if idx < 0:
         return svg + rendered
     return svg[:idx] + rendered + svg[idx:]
+
+
+def _norm_text(s: str) -> str:
+    import re as _re
+    return _re.sub(r"\s+", " ", (s or "")).strip().lower()
+
+
+def _drop_textblock_duplicates(svg: str,
+                               text_blocks: list[dict[str, Any]]) -> str:
+    """Remove raw <text> elements whose (long) content is already present
+    in the text_blocks, so the cleanly-stacked text_block copy is the only
+    one that renders.  Only acts on substantial text (>= 14 chars) to never
+    touch short labels like a matrix entry or an axis tick."""
+    import re as _re
+    block_text = " ".join(
+        _norm_text(str(ln))
+        for b in text_blocks if isinstance(b, dict)
+        for ln in (b.get("lines") or []) if str(ln).strip()
+    )
+    if not block_text:
+        return svg
+
+    def _maybe_drop(m: "_re.Match") -> str:
+        content = _norm_text(m.group(1))
+        if len(content) >= 14 and content in block_text:
+            return ""  # duplicate of a text_block line — drop the raw copy
+        return m.group(0)
+
+    return _re.sub(r"<text\b[^>]*>([^<]*)</text>", _maybe_drop, svg)
 
 
 def _deterministic_solve_claims(prompt: str) -> list[dict[str, Any]] | None:

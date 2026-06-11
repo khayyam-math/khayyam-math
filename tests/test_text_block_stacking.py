@@ -90,3 +90,31 @@ def test_short_lines_not_over_wrapped():
                                "lines": ["Set S = {3, 1, 1}"]}])
     texts = re.findall(r'<text[^>]*>([^<]*)</text>', svg)
     assert texts == ["Set S = {3, 1, 1}"], texts
+
+
+def test_dual_channel_duplicate_text_dropped():
+    """Regression (2026-06-11, spectral theorem): the LLM emitted the same
+    paragraph as BOTH a raw <text> and a text_block, so it rendered twice
+    (the raw copy self-overlapping). inject_text_blocks drops the raw
+    duplicate, keeping only the cleanly-stacked text_block copy. Short
+    labels (matrix cells, ticks) are never touched."""
+    from studio.express import inject_text_blocks
+    raw = ('<svg viewBox="0 0 900 620">'
+           '<text x="450" y="90">The spectral theorem applies to '
+           'symmetric matrices.</text>'
+           '<text x="350" y="300">2</text>'
+           '<text x="360" y="300">A</text></svg>')
+    blocks = [{"region": "left-column", "lines": [
+        "The spectral theorem applies to symmetric matrices.",
+        "It states that such matrices decompose as Q L Q^T."]}]
+    out = inject_text_blocks(raw, blocks)
+    assert 'x="450" y="90"' not in out          # raw duplicate dropped
+    assert "spectral theorem applies" in out     # text_block copy kept
+    assert ">2<" in out and ">A<" in out         # short labels survive
+
+
+def test_unique_raw_text_not_dropped():
+    from studio.express import inject_text_blocks
+    raw = '<svg><text x="1" y="1">A unique standalone caption</text></svg>'
+    blocks = [{"region": "left-column", "lines": ["something else entirely"]}]
+    assert "A unique standalone caption" in inject_text_blocks(raw, blocks)
