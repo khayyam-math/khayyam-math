@@ -59,3 +59,34 @@ if __name__ == "__main__":
     test_single_block_still_stacks()
     test_distinct_regions_independent()
     print("All text-block stacking tests passed.")
+
+
+def test_long_lines_wrap_without_y_collision():
+    """Regression (2026-06-11): long side-column lines used to be wrapped
+    by a later pass that inserted continuations at y+18 without pushing the
+    next line down, producing colliding y-coords (218/220/238/240...) and a
+    garbled, unreadable right column.  render_text_blocks now wraps to the
+    column width itself, so every visual line is cleanly stacked."""
+    import re
+    from studio.express import render_text_blocks
+    svg = render_text_blocks([{"region": "right-column", "lines": [
+        "To show vertex cover is NP-hard, we reduce from a known "
+        "NP-complete problem, such as 3-SAT.",
+        "For each variable in the 3-SAT instance, create a pair of "
+        "vertices connected by an edge.",
+    ]}])
+    ys = [float(m) for m in re.findall(r'<text[^>]*y="([0-9.]+)"', svg)]
+    assert len(ys) >= 6, f"long lines should wrap into several rows: {ys}"
+    # Strictly increasing with a real gap — no two lines share a row.
+    gaps = [round(ys[i + 1] - ys[i], 1) for i in range(len(ys) - 1)]
+    assert all(g >= 12 for g in gaps), f"rows collide: ys={ys} gaps={gaps}"
+
+
+def test_short_lines_not_over_wrapped():
+    """A short label must stay on one line (no spurious wrapping)."""
+    import re
+    from studio.express import render_text_blocks
+    svg = render_text_blocks([{"region": "left-column",
+                               "lines": ["Set S = {3, 1, 1}"]}])
+    texts = re.findall(r'<text[^>]*>([^<]*)</text>', svg)
+    assert texts == ["Set S = {3, 1, 1}"], texts

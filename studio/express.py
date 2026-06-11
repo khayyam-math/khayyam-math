@@ -288,12 +288,39 @@ TEXT_REGIONS: dict[str, dict[str, Any]] = {
 }
 
 
+def _wrap_to_width(text: str, max_chars: int) -> list[str]:
+    """Greedy word-wrap ``text`` to at most ``max_chars`` per line.
+
+    A single word longer than ``max_chars`` (a long URL, a formula) is
+    kept whole on its own line rather than hard-split — breaking a token
+    mid-character is worse than a slight overflow.
+    """
+    if max_chars < 1:
+        return [text]
+    words = text.split()
+    if not words:
+        return []
+    out: list[str] = []
+    cur = ""
+    for w in words:
+        if not cur:
+            cur = w
+        elif len(cur) + 1 + len(w) <= max_chars:
+            cur += " " + w
+        else:
+            out.append(cur)
+            cur = w
+    if cur:
+        out.append(cur)
+    return out
+
+
 def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
     """Convert a list of {region, lines} entries into SVG markup.
 
     Output is a sequence of <g class="text-region-NAME"> groups, each
-    containing one <text> per line, with y-coordinates auto-stacked at
-    the region's `line_height`.  Unknown regions fall back to
+    containing one <text> per VISUAL line, with y-coordinates auto-stacked
+    at the region's `line_height`.  Unknown regions fall back to
     "left-column".  Empty lines (whitespace-only) are skipped so the
     LLM can pad without leaving blank rows.
 
@@ -301,6 +328,13 @@ def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
     emits one block per "Output P/Q/R").  Each region keeps a running
     y-cursor so consecutive blocks stack BELOW one another instead of
     all restarting at the region's fixed y and overlapping into mush.
+
+    Long lines are word-wrapped to the region width HERE, while we still
+    control the y-cursor, so every wrapped continuation gets its own
+    correctly-stacked row.  The old design left wrapping to a later
+    ``wrap_overlong_text`` pass that inserted a continuation at y+18 without
+    pushing the following line down — so continuations landed on top of the
+    next line (the garbled right-column text in proof/concept figures).
     """
     if not text_blocks:
         return ""
@@ -326,11 +360,18 @@ def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
         anchor = region["anchor"]
         fs = region["font_size"]
         lh = region["line_height"]
+        # Word-wrap each logical line to the region width, then stack every
+        # resulting visual line.  ~0.55*fs per glyph is a conservative
+        # average advance width for the sans-serif stack we render in.
+        max_chars = max(8, int(region["width"] / (fs * 0.55)))
+        visual: list[str] = []
+        for line in cleaned:
+            visual.extend(_wrap_to_width(line, max_chars) or [line])
         # Start where the previous block in this region left off (or at
         # the region's top for the first block).
         y0 = region_cursor.get(region_name, region["y"])
         pieces.append(f'<g class="text-region-{region_name}">')
-        for i, line in enumerate(cleaned):
+        for i, line in enumerate(visual):
             y = y0 + i * lh
             escaped = _html.escape(line, quote=False)
             pieces.append(
@@ -339,7 +380,7 @@ def render_text_blocks(text_blocks: list[dict[str, Any]]) -> str:
             )
         pieces.append("</g>")
         # Advance the cursor past this block plus a small gap.
-        region_cursor[region_name] = y0 + len(cleaned) * lh + BLOCK_GAP
+        region_cursor[region_name] = y0 + len(visual) * lh + BLOCK_GAP
     return "".join(pieces)
 
 
