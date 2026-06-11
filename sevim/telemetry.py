@@ -204,6 +204,22 @@ CREATE TABLE IF NOT EXISTS template_examples (
     source_canvas_id TEXT
 );
 
+-- Phase-3 curation: proposals from clustered gaps awaiting admin review.
+CREATE TABLE IF NOT EXISTS taxonomy_candidates (
+    candidate_id  TEXT PRIMARY KEY,
+    kind          TEXT NOT NULL,         -- 'new_category' | 'new_template'
+    category_id   TEXT,                  -- target/new category
+    template_id   TEXT,                  -- proposed template id
+    title         TEXT,
+    golden_prompt TEXT,
+    member_count  INTEGER NOT NULL DEFAULT 0,
+    centroid      TEXT,                  -- JSON vector
+    exemplar_canvas_id TEXT,             -- best canvas in the cluster
+    note          TEXT,
+    status        TEXT NOT NULL DEFAULT 'proposed',  -- proposed|approved|rejected
+    created_at    REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
@@ -379,6 +395,21 @@ CREATE TABLE IF NOT EXISTS template_examples (
     prompt           TEXT NOT NULL,
     embedding        TEXT NOT NULL,
     source_canvas_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS taxonomy_candidates (
+    candidate_id  TEXT PRIMARY KEY,
+    kind          TEXT NOT NULL,
+    category_id   TEXT,
+    template_id   TEXT,
+    title         TEXT,
+    golden_prompt TEXT,
+    member_count  INTEGER NOT NULL DEFAULT 0,
+    centroid      TEXT,
+    exemplar_canvas_id TEXT,
+    note          TEXT,
+    status        TEXT NOT NULL DEFAULT 'proposed',
+    created_at    DOUBLE PRECISION NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
@@ -1058,6 +1089,82 @@ class Telemetry:
                 "SELECT template_id, prompt, embedding FROM template_examples")
         except Exception:  # noqa: BLE001
             return []
+
+    def upsert_candidate(self, candidate_id: str, kind: str,
+                         category_id: str | None = None,
+                         template_id: str | None = None,
+                         title: str | None = None,
+                         golden_prompt: str | None = None,
+                         member_count: int = 0,
+                         centroid_json: str | None = None,
+                         exemplar_canvas_id: str | None = None,
+                         note: str | None = None,
+                         status: str = "proposed") -> None:
+        try:
+            with self._lock:
+                self._backend.execute(
+                    """
+                    INSERT INTO taxonomy_candidates
+                        (candidate_id, kind, category_id, template_id, title,
+                         golden_prompt, member_count, centroid,
+                         exemplar_canvas_id, note, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (candidate_id) DO UPDATE SET
+                        kind = EXCLUDED.kind,
+                        category_id = EXCLUDED.category_id,
+                        template_id = EXCLUDED.template_id,
+                        title = EXCLUDED.title,
+                        golden_prompt = EXCLUDED.golden_prompt,
+                        member_count = EXCLUDED.member_count,
+                        centroid = EXCLUDED.centroid,
+                        exemplar_canvas_id = EXCLUDED.exemplar_canvas_id,
+                        note = EXCLUDED.note,
+                        status = EXCLUDED.status
+                    """,
+                    (candidate_id, kind, category_id, template_id, title,
+                     golden_prompt, member_count, centroid_json,
+                     exemplar_canvas_id, note, status, time.time()),
+                )
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] upsert_candidate failed: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def iter_candidates(self, status: str | None = "proposed") -> list[tuple]:
+        try:
+            sql = ("SELECT candidate_id, kind, category_id, template_id, "
+                   "title, golden_prompt, member_count, exemplar_canvas_id, "
+                   "note, status FROM taxonomy_candidates")
+            params: tuple = ()
+            if status:
+                sql += " WHERE status = ?"
+                params = (status,)
+            sql += " ORDER BY member_count DESC"
+            return self.query(sql, params)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def get_candidate(self, candidate_id: str) -> tuple | None:
+        try:
+            rows = self.query(
+                "SELECT candidate_id, kind, category_id, template_id, title, "
+                "golden_prompt, member_count, centroid, exemplar_canvas_id, "
+                "note, status FROM taxonomy_candidates WHERE candidate_id = ?",
+                (candidate_id,))
+            return rows[0] if rows else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def set_candidate_status(self, candidate_id: str, status: str) -> None:
+        try:
+            with self._lock:
+                self._backend.execute(
+                    "UPDATE taxonomy_candidates SET status = ? "
+                    "WHERE candidate_id = ?", (status, candidate_id))
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] set_candidate_status failed: {exc}",
+                  flush=True, file=sys.stderr)
 
     def usage_by_model(self, since_s: float = 86400.0) -> list[dict]:
         """Aggregate turns by ``model_id`` over the last ``since_s``

@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -2286,6 +2286,148 @@ async def admin_diagnose(
                 "diagnosis": "Could not generate a diagnosis right now."}
     return {"available": True, "diagnosis": text,
             "report_count": len(lines)}
+
+
+# ── Phase-3 taxonomy curation admin ──────────────────────────────────
+@router.get("/admin/taxonomy", include_in_schema=False)
+def admin_taxonomy(_user: str = Depends(require_admin)) -> dict[str, Any]:
+    """Live taxonomy state: categories, templates, pending candidates,
+    cross-category duplicate flags, and migration suggestions."""
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"available": False, "reason": "telemetry disabled"}
+    out: dict[str, Any] = {"available": True}
+    cats = tel.iter_categories()
+    tpls = tel.iter_templates(status="live")
+    out["categories"] = [
+        {"category_id": c[0], "title": c[2],
+         "templates": sum(1 for t in tpls if t[1] == c[0])}
+        for c in cats
+    ]
+    out["templates"] = [
+        {"template_id": t[0], "category_id": t[1], "kind": t[2],
+         "renderer_name": t[3], "status": t[7]} for t in tpls
+    ]
+    out["candidates"] = [
+        {"candidate_id": r[0], "kind": r[1], "category_id": r[2],
+         "template_id": r[3], "title": r[4], "golden_prompt": r[5],
+         "member_count": r[6], "note": r[8], "status": r[9]}
+        for r in tel.iter_candidates(status="proposed")
+    ]
+    try:
+        from studio import curation
+        from studio.taxonomy import get_taxonomy
+        out["duplicate_flags"] = curation.dedup_templates(tel)
+        out["migration_suggestions"] = curation.suggest_migrations(
+            tel, get_taxonomy())
+    except Exception as exc:  # noqa: BLE001
+        out["analysis_error"] = repr(exc)
+    return out
+
+
+@router.post("/admin/taxonomy/candidate", include_in_schema=False)
+def admin_taxonomy_candidate(
+    body: dict[str, Any] = Body(...),
+    _user: str = Depends(require_admin),
+) -> dict[str, Any]:
+    """Approve (promote) or reject a candidate.  Body:
+    {"candidate_id": "...", "action": "approve"|"reject"}."""
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"ok": False, "reason": "telemetry disabled"}
+    cid = body.get("candidate_id")
+    action = body.get("action")
+    if not cid or action not in ("approve", "reject"):
+        raise HTTPException(400, "candidate_id + action required")
+    if action == "reject":
+        tel.set_candidate_status(cid, "rejected")
+        return {"ok": True, "status": "rejected"}
+    from studio import curation
+    return curation.promote(tel, cid)
+
+
+@router.post("/admin/taxonomy/refresh", include_in_schema=False)
+def admin_taxonomy_refresh(
+    _user: str = Depends(require_admin),
+) -> dict[str, Any]:
+    """Run the offline curation pass (find gaps → cluster → propose) to
+    repopulate candidates.  Cheap-ish over the indexed corpus; admin-
+    triggered, not on the request path."""
+    from sevim.telemetry import get_telemetry
+    tel = get_telemetry()
+    if tel is None:
+        return {"ok": False, "reason": "telemetry disabled"}
+    from studio import curation
+    from studio.taxonomy import get_taxonomy
+    tax = get_taxonomy()
+    tax.load()
+    gaps = curation.find_gaps(tel, tax)
+    clusters = curation.cluster_gaps(gaps)
+    created = curation.propose(tel, tax, clusters)
+    return {"ok": True, "gaps": len(gaps), "clusters": len(clusters),
+            "candidates_created": len(created)}
+
+
+@router.get("/admin/taxonomy/view", include_in_schema=False,
+            response_class=HTMLResponse)
+def admin_taxonomy_view(_user: str = Depends(require_admin)) -> str:
+    """Minimal admin dashboard for the taxonomy: lists categories +
+    pending candidates with approve/reject, a refresh button, and the
+    duplicate / migration flags.  Fetches /admin/taxonomy as JSON."""
+    return """<!doctype html><html><head><meta charset=utf-8>
+<title>Taxonomy — Khayyam Math admin</title>
+<link rel="icon" href="/favicon.ico?v=k3">
+<style>
+body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:2rem;color:#1a1d24}
+h1{font-size:1.3rem} h2{font-size:1.05rem;margin-top:1.6rem}
+.card{border:1px solid #dfe4ec;border-radius:8px;padding:.6rem .9rem;margin:.4rem 0}
+button{font:inherit;padding:.25rem .7rem;border-radius:6px;border:1px solid #c7ced8;background:#f4f7fb;cursor:pointer}
+button.ok{background:#1f6fe0;color:#fff;border-color:#1f6fe0}
+.muted{color:#5a6470} code{background:#eef2f7;padding:0 .25rem;border-radius:3px}
+.flag{color:#a10e2b}
+</style></head><body>
+<h1>Taxonomy</h1>
+<p><button class=ok onclick="refresh()">Run curation pass</button>
+<span id=msg class=muted></span></p>
+<div id=root>loading…</div>
+<script>
+async function load(){
+  const d = await (await fetch('/studio/admin/taxonomy')).json();
+  if(!d.available){document.getElementById('root').textContent='telemetry disabled';return;}
+  let h='<h2>Categories ('+d.categories.length+')</h2>';
+  for(const c of d.categories) h+=`<div class=card><b>${c.title}</b> <code>${c.category_id}</code> · ${c.templates} template(s)</div>`;
+  h+='<h2>Pending candidates ('+d.candidates.length+')</h2>';
+  if(!d.candidates.length) h+='<p class=muted>none — run a curation pass.</p>';
+  for(const c of d.candidates){
+    h+=`<div class=card><b>${c.title||c.template_id}</b> <code>${c.kind}</code> → <code>${c.category_id}</code>
+        <br><span class=muted>${c.member_count} similar prompts · golden: "${(c.golden_prompt||'').slice(0,80)}"</span><br>
+        <button class=ok onclick="act('${c.candidate_id}','approve')">Approve</button>
+        <button onclick="act('${c.candidate_id}','reject')">Reject</button></div>`;
+  }
+  if(d.duplicate_flags&&d.duplicate_flags.length){
+    h+='<h2 class=flag>Cross-category duplicates ('+d.duplicate_flags.length+')</h2>';
+    for(const f of d.duplicate_flags) h+=`<div class=card>cos ${f.cosine}: <code>${f.template_a}</code>@${f.category_a} ↔ <code>${f.template_b}</code>@${f.category_b}</div>`;
+  }
+  if(d.migration_suggestions&&d.migration_suggestions.length){
+    h+='<h2>Migration suggestions ('+d.migration_suggestions.length+')</h2>';
+    for(const m of d.migration_suggestions) h+=`<div class=card><code>${m.template_id}</code> ${m.from} → ${m.to} (${m.own_cos}→${m.to_cos})</div>`;
+  }
+  document.getElementById('root').innerHTML=h;
+}
+async function act(id,action){
+  await fetch('/studio/admin/taxonomy/candidate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({candidate_id:id,action})});
+  load();
+}
+async function refresh(){
+  document.getElementById('msg').textContent=' running…';
+  const r=await (await fetch('/studio/admin/taxonomy/refresh',{method:'POST'})).json();
+  document.getElementById('msg').textContent=' '+JSON.stringify(r);
+  load();
+}
+load();
+</script></body></html>"""
 
 
 @router.get("/health", include_in_schema=False)
