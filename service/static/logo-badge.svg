@@ -6,6 +6,6 @@
   <g fill="none" stroke="#ffffff" stroke-width="11"
      stroke-linecap="round" stroke-linejoin="round">
     <line x1="33" y1="27" x2="33" y2="73"/>
-    <polyline points="71,29 43,50 71,71"/>
+    <polyline points="73,29 48,50 73,71"/>
   </g>
 </svg>
