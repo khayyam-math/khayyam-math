@@ -6,7 +6,8 @@
      stroke-linecap="round" stroke-linejoin="round">
     <!-- | the pipe -->
     <line x1="27" y1="18" x2="27" y2="82"/>
-    <!-- < the chevron: vertex pulled right of the bar to leave a gap -->
-    <polyline points="78,20 44,50 78,80"/>
+    <!-- < the chevron: vertex pulled well right of the bar so the
+         "|" and "<" read as two clearly separated components -->
+    <polyline points="80,18 51,50 80,82"/>
   </g>
 </svg>
