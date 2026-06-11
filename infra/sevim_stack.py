@@ -715,7 +715,7 @@ class SevimStack(Stack):
             # HARD STOP: the scheduler stops firing after this instant.
             # The probe script ALSO no-ops past 2026-08-31 as a belt-and-
             # braces guarantee it never runs into September.
-            end_date="2026-08-31T23:59:59Z",
+            end_date="2026-08-31T23:59:59.000Z",
             state="ENABLED",
             target=scheduler.CfnSchedule.TargetProperty(
                 arn=cluster.cluster_arn,
