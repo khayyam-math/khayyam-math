@@ -49,25 +49,36 @@ from a one-line prompt.
 Most "AI generates a figure" products are wrappers around a single
 LLM call: ask GPT-4 for SVG, hope it isn't wrong. **We don't do that.**
 
-Khayyam Math uses a **layered architecture** with ten deterministic
+Khayyam Math uses a **layered architecture** with eleven deterministic
 figure routes that are tried in order before any "LLM draws SVG"
 fallback fires. Each route is correct by construction for the figure
 shapes it handles.
 
 | # | Route | Used for | How |
 |---|---|---|---|
-| 1 | `algorithm_trace` | Sorts, Gaussian elimination, determinant cofactor, Euclid gcd | Python runs the algorithm, renders each step |
-| 2 | `process` / cycle | Cell cycle, scientific method, Krebs / water cycle | Ring (cyclic) or vertical flow (linear) |
-| 3 | `symbolic` | Derivatives, gradients, Hessians, integrals, limits, critical points | SymPy solves exactly; matplotlib typesets |
-| 4 | `graph_homomorphism` | Two-graph mappings | Deterministic O(\|E_G\|) verifier before render |
-| 5 | `panels` | Side-by-side comparisons | Recursive decomposition + deterministic grid |
-| 6 | `graphviz` (`dot`, `circo`, `fdp`) | DFA / Turing / DAG / tree / Hasse / Cayley | LLM emits DOT; Graphviz renders |
-| 7 | `matplotlib` | Function plots, regression, decision boundaries, 3-D surfaces | LLM emits closed-vocabulary plot spec; matplotlib renders |
-| 8 | `template_router` | Matrix mul / transpose / det / inverse, Pythagoras, Newton, sphere/cone volume, fraction, unit circle, Venn, etc. (19 named templates) | Per-template gpt-4o-mini classifier + pure-Python renderer |
-| 9 | `FDL` (Figure Description Language) | Function-graphable prompts that aren't a named template — "explain Newton's method visually" | LLM emits a `Scene` of ten composable primitives; SymPy backs every tangent slope and intersection |
-| 10 | `sequential` (fallback) | Generic "step by step" prompts | Decomposes into ordered sub-prompts, recurses per step |
+| 1 | `np_completeness` | Proofs that a problem is NP-complete (vertex cover, 3-SAT, clique, partition, …) | Deterministic proof-structure renderer (in-NP + NP-hard reduction diagram); the LLM fills the content slots only, never coordinates |
+| 2 | `algorithm_trace` | Sorts, Gaussian elimination, determinant cofactor, Euclid gcd | Python runs the algorithm, renders each step |
+| 3 | `process` / cycle | Cell cycle, scientific method, Krebs / water cycle | Ring (cyclic) or vertical flow (linear) |
+| 4 | `symbolic` | Derivatives, gradients, Hessians, integrals, limits, critical points | SymPy solves exactly; matplotlib typesets |
+| 5 | `graph_homomorphism` | Two-graph mappings | Deterministic O(\|E_G\|) verifier before render |
+| 6 | `panels` | Side-by-side comparisons | Recursive decomposition + deterministic grid |
+| 7 | `graphviz` (`dot`, `circo`, `fdp`) | DFA / Turing / DAG / tree / Hasse / Cayley | LLM emits DOT; Graphviz renders |
+| 8 | `matplotlib` | Function plots, regression, decision boundaries, 3-D surfaces | LLM emits closed-vocabulary plot spec; matplotlib renders |
+| 9 | `template_router` | Matrix mul / transpose / det / inverse, Pythagoras, Newton, sphere/cone volume, fraction, unit circle, Venn, etc. (19 named templates) | Per-template gpt-4o-mini classifier + pure-Python renderer |
+| 10 | `FDL` (Figure Description Language) | Function-graphable prompts that aren't a named template — "explain Newton's method visually" | LLM emits a `Scene` of ten composable primitives; SymPy backs every tangent slope and intersection |
+| 11 | `sequential` (fallback) | Generic "step by step" prompts | Decomposes into ordered sub-prompts, recurses per step |
 
-When none of the ten match, the **LLM-SVG fallback** runs with a
+On top of the fixed cascade sits an optional **category→template
+taxonomy** (`SEVIM_TAXONOMY`, `SEVIM_ANSWER_CACHE`): prompts are embedded
+and matched to a two-level category→template index, so a near-duplicate
+of an already-answered question retrieves the prior accepted figure
+(consistency + speed) instead of regenerating it, and an offline curation
+loop grows the taxonomy from unmatched prompts under operator review with
+a cross-category de-duplication guarantee. The `np_completeness` route
+above is the first **renderer-first** conversion of a formerly open-ended
+class. See [docs/TEMPLATE_TAXONOMY_PLAN.md](docs/TEMPLATE_TAXONOMY_PLAN.md).
+
+When none of the eleven match, the **LLM-SVG fallback** runs with a
 **structural critic + vision review + completeness critic + retry
 loop** (up to 3 attempts):
 

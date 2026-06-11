@@ -4,12 +4,14 @@ A new-contributor map of how Khayyam Math turns a one-line prompt
 into a voice-narrated SVG figure. Read this before opening a
 non-trivial PR.
 
-The system has grown into ten deterministic figure routes, a
-graph-conditioned discrete-diffusion neural layout module, a
-five-tier math-correctness verifier, an FDL (Figure Description
-Language) extractor with ten composable primitives, a three-case
-refinement model, and a magic-link-auth FastAPI service deployed
-on AWS Fargate. This doc is the top-down map; the deep-dives live
+The system has grown into eleven deterministic figure routes, an
+embedding-indexed category→template taxonomy with answer-cache
+retrieval and an offline curation loop, a graph-conditioned
+discrete-diffusion neural layout module, a five-tier math-correctness
+verifier, an FDL (Figure Description Language) extractor with ten
+composable primitives, a three-case refinement model, and a
+magic-link-auth FastAPI service deployed on AWS Fargate. This doc is
+the top-down map; the deep-dives live
 under `docs/`.
 
 ## Table of contents
@@ -221,6 +223,38 @@ the result.
 For the deep-dive (per-route classifier rules, FDL primitive
 catalog, "how to add a new template"), see
 [`docs/PIPELINE.md`](docs/PIPELINE.md).
+
+---
+
+## Category→template taxonomy (recognition, retrieval, curation)
+
+A learned layer sits on top of the fixed cascade. Full design in
+[`docs/TEMPLATE_TAXONOMY_PLAN.md`](docs/TEMPLATE_TAXONOMY_PLAN.md).
+
+- **Embeddings** (`sevim/embeddings.py`) — `text-embedding-3-small` via
+  httpx, hash-cached, degrades to `None` without a key.
+- **Answer cache** (`studio/answer_cache.py`, `SEVIM_ANSWER_CACHE`) —
+  a numpy cosine index over accepted canvases (`canvas_index` table).
+  A near-identical prompt retrieves the prior accepted figure instead
+  of regenerating it (consistency + speed). Fails closed; checked at
+  the top of `express_figure`, before the cascade.
+- **Taxonomy + recognition** (`studio/taxonomy.py`, `SEVIM_TAXONOMY`) —
+  `categories`/`templates`/`template_examples` tables; two-level
+  recognition (nearest category centroid → nearest template). A
+  *renderer* template is a parameterized program; an *exemplar* is a
+  curated figure retrieved + adapted. Renderer matches stay advisory
+  (the cascade is the authority); exemplar matches are served.
+- **Curation** (`studio/curation.py`, admin `/studio/admin/taxonomy`) —
+  offline: find gaps → cluster → propose candidate → cross-category
+  dedup → migration suggestions → promote (admin-approved, gated by the
+  quality gate). Never mutates the live taxonomy at request time.
+- **Renderer-first** — `studio/templates/np_completeness.py` is the
+  first conversion of an open-ended class (NP-completeness proofs) into
+  a deterministic renderer (route #1, `SEVIM_NPC_ROUTE`).
+
+The cache/taxonomy/curation layers ship behind flags (default off)
+until thresholds are tuned on the live corpus; the NP-completeness
+renderer ships on.
 
 ---
 
