@@ -2672,6 +2672,40 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"answer-cache lookup errored: {type(exc).__name__}: {exc}")
 
+    # ── Taxonomy recognition (Phase 2) ────────────────────────────
+    # Recognize the prompt's category and best template.  When it matches
+    # a curated EXEMPLAR template (an open-ended class like an NP-complete-
+    # ness proof) with high confidence, serve that canonical figure.  For
+    # renderer matches we only LOG the recognised category — the existing
+    # cascade below remains the authority for parameterized renderers.
+    if not _refining:
+        try:
+            from studio.taxonomy import get_taxonomy, enabled as _tax_on
+            if _tax_on():
+                rec = get_taxonomy().serve(
+                    original_user_prompt or user_prompt or "")
+                if rec and rec.get("svg"):
+                    _log(f"taxonomy EXEMPLAR hit template={rec.get('template_hit')} "
+                         f"cat={rec.get('recognized_category')} "
+                         f"cos={rec.get('template_cos')}")
+                    return {
+                        "svg": rec["svg"],
+                        "narration": rec.get("narration") or [],
+                        "title": rec.get("title", ""),
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "taxonomy_exemplar",
+                        "recognized_category": rec.get("recognized_category"),
+                    }
+                elif rec and rec.get("recognized_category"):
+                    _log(f"taxonomy recognised category="
+                         f"{rec.get('recognized_category')} "
+                         f"cat_cos={rec.get('category_cos')} "
+                         f"(routing via cascade)")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"taxonomy recognition errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and

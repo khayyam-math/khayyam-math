@@ -174,6 +174,36 @@ CREATE TABLE IF NOT EXISTS canvas_index (
     created_at  REAL NOT NULL
 );
 
+-- Phase-2 taxonomy: category -> template, both embedding-indexed.
+CREATE TABLE IF NOT EXISTS categories (
+    category_id TEXT PRIMARY KEY,
+    parent_id   TEXT,
+    title       TEXT NOT NULL,
+    centroid    TEXT,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS templates (
+    template_id        TEXT PRIMARY KEY,
+    category_id        TEXT NOT NULL,
+    kind               TEXT NOT NULL,           -- 'renderer' | 'exemplar'
+    renderer_name      TEXT,                    -- dispatch key when renderer
+    exemplar_canvas_id TEXT,                    -- canvas holding the SVG
+    embedding          TEXT,                    -- representative vector (JSON)
+    golden_prompt      TEXT,
+    version            INTEGER NOT NULL DEFAULT 1,
+    status             TEXT NOT NULL DEFAULT 'live',  -- live|candidate|retired
+    created_at         REAL NOT NULL,
+    updated_at         REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS template_examples (
+    example_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id     TEXT NOT NULL,
+    prompt          TEXT NOT NULL,
+    embedding       TEXT NOT NULL,
+    source_canvas_id TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases (session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_repairs_session ON repairs (session_id, timestamp);
@@ -320,6 +350,35 @@ CREATE TABLE IF NOT EXISTS canvas_index (
     accepted    INTEGER NOT NULL DEFAULT 0,
     category_id TEXT,
     created_at  DOUBLE PRECISION NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+    category_id TEXT PRIMARY KEY,
+    parent_id   TEXT,
+    title       TEXT NOT NULL,
+    centroid    TEXT,
+    created_at  DOUBLE PRECISION NOT NULL,
+    updated_at  DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS templates (
+    template_id        TEXT PRIMARY KEY,
+    category_id        TEXT NOT NULL,
+    kind               TEXT NOT NULL,
+    renderer_name      TEXT,
+    exemplar_canvas_id TEXT,
+    embedding          TEXT,
+    golden_prompt      TEXT,
+    version            INTEGER NOT NULL DEFAULT 1,
+    status             TEXT NOT NULL DEFAULT 'live',
+    created_at         DOUBLE PRECISION NOT NULL,
+    updated_at         DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS template_examples (
+    example_id       BIGSERIAL PRIMARY KEY,
+    template_id      TEXT NOT NULL,
+    prompt           TEXT NOT NULL,
+    embedding        TEXT NOT NULL,
+    source_canvas_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_turns_session ON turns (session_id, timestamp);
@@ -890,6 +949,114 @@ class Telemetry:
         except Exception as exc:  # noqa: BLE001
             print(f"[telemetry] iter_canvas_index failed: {exc}",
                   flush=True, file=sys.stderr)
+            return []
+
+    # -- Phase-2 taxonomy persistence ------------------------------------
+    def upsert_category(self, category_id: str, title: str,
+                        parent_id: str | None = None,
+                        centroid_json: str | None = None) -> None:
+        try:
+            with self._lock:
+                now = time.time()
+                self._backend.execute(
+                    """
+                    INSERT INTO categories
+                        (category_id, parent_id, title, centroid,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (category_id) DO UPDATE SET
+                        parent_id  = EXCLUDED.parent_id,
+                        title      = EXCLUDED.title,
+                        centroid   = EXCLUDED.centroid,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (category_id, parent_id, title, centroid_json, now, now),
+                )
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] upsert_category failed: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def upsert_template(self, template_id: str, category_id: str, kind: str,
+                        renderer_name: str | None = None,
+                        exemplar_canvas_id: str | None = None,
+                        embedding_json: str | None = None,
+                        golden_prompt: str | None = None,
+                        status: str = "live") -> None:
+        try:
+            with self._lock:
+                now = time.time()
+                self._backend.execute(
+                    """
+                    INSERT INTO templates
+                        (template_id, category_id, kind, renderer_name,
+                         exemplar_canvas_id, embedding, golden_prompt,
+                         version, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                    ON CONFLICT (template_id) DO UPDATE SET
+                        category_id        = EXCLUDED.category_id,
+                        kind               = EXCLUDED.kind,
+                        renderer_name      = EXCLUDED.renderer_name,
+                        exemplar_canvas_id = EXCLUDED.exemplar_canvas_id,
+                        embedding          = EXCLUDED.embedding,
+                        golden_prompt      = EXCLUDED.golden_prompt,
+                        status             = EXCLUDED.status,
+                        version            = templates.version + 1,
+                        updated_at         = EXCLUDED.updated_at
+                    """,
+                    (template_id, category_id, kind, renderer_name,
+                     exemplar_canvas_id, embedding_json, golden_prompt,
+                     status, now, now),
+                )
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] upsert_template failed: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def add_template_example(self, template_id: str, prompt: str,
+                             embedding_json: str,
+                             source_canvas_id: str | None = None) -> None:
+        try:
+            with self._lock:
+                self._backend.execute(
+                    """
+                    INSERT INTO template_examples
+                        (template_id, prompt, embedding, source_canvas_id)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (template_id, prompt, embedding_json, source_canvas_id),
+                )
+                self._backend.commit()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[telemetry] add_template_example failed: {exc}",
+                  flush=True, file=sys.stderr)
+
+    def iter_categories(self) -> list[tuple]:
+        try:
+            return self.query(
+                "SELECT category_id, parent_id, title, centroid "
+                "FROM categories")
+        except Exception:  # noqa: BLE001
+            return []
+
+    def iter_templates(self, status: str | None = "live") -> list[tuple]:
+        try:
+            sql = ("SELECT template_id, category_id, kind, renderer_name, "
+                   "exemplar_canvas_id, embedding, golden_prompt, status "
+                   "FROM templates")
+            params: tuple = ()
+            if status:
+                sql += " WHERE status = ?"
+                params = (status,)
+            return self.query(sql, params)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def iter_template_examples(self) -> list[tuple]:
+        try:
+            return self.query(
+                "SELECT template_id, prompt, embedding FROM template_examples")
+        except Exception:  # noqa: BLE001
             return []
 
     def usage_by_model(self, since_s: float = 86400.0) -> list[dict]:
