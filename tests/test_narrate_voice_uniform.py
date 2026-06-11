@@ -101,3 +101,52 @@ def test_all_openai_success_no_resynth_with_piper(tmp_path, monkeypatch):
 
     # All calls should have used openai backend; no piper recovery pass.
     assert backends_seen == ["openai", "openai"], backends_seen
+
+
+# ---------------------------------------------------------------------
+# 2026-06-11: a single transient OpenAI TTS timeout used to stall the
+# whole parallel batch for 45s and then drop the phrase to piper, which
+# forced a full all-piper re-synth.  _synthesize_phrase now retries
+# OpenAI once so a transient blip stays all-OpenAI and fast.
+# ---------------------------------------------------------------------
+
+def test_openai_transient_failure_retries_and_stays_openai(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls = {"n": 0}
+
+    def flaky(text, out_path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("read operation timed out")
+        _make_wav(out_path)  # second attempt succeeds
+
+    with patch.object(narrate, "_openai_synthesize_wav", side_effect=flaky):
+        backend = narrate._synthesize_phrase(
+            "hello", tmp_path / "p.wav", "openai")
+    assert backend == "openai", "transient failure must retry, not drop to piper"
+    assert calls["n"] == 2, "should have retried exactly once"
+
+
+def test_openai_persistent_failure_falls_back_to_piper(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls = {"n": 0}
+
+    def always_fail(text, out_path):
+        calls["n"] += 1
+        raise RuntimeError("503 service unavailable")
+
+    def fake_synth_wav(text, wav):
+        # Mimic piper: set the WAV params then write a frame.
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(22050)
+        wav.writeframes(b"\x00\x00")
+
+    with patch.object(narrate, "_openai_synthesize_wav", side_effect=always_fail), \
+         patch.object(narrate, "voice_available", return_value=True), \
+         patch.object(narrate, "_load_voice") as lv:
+        lv.return_value.synthesize_wav = fake_synth_wav
+        backend = narrate._synthesize_phrase(
+            "hello", tmp_path / "p.wav", "openai")
+    assert backend == "piper", "two failures must fall back to piper"
+    assert calls["n"] == 2, "should try OpenAI exactly twice before piper"

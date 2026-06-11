@@ -2516,6 +2516,9 @@ async def express_figure(
     # 3-SAT case had attempt 1 with 5 overlap pairs vs attempt 0 with
     # 1; the old code shipped attempt 2 (worst).  See _attempt_score().
     attempts: list[dict[str, Any]] = []
+    # Best (lowest) attempt score before the current retry round — used to
+    # early-stop the retry loop once retries stop improving the figure.
+    _best_score_prev: float | None = None
 
     import sys as _sys
     def _log(msg: str) -> None:
@@ -3868,6 +3871,25 @@ async def express_figure(
         # 3. Inject critique + image + prior SVG, ask for a PATCH.
         if attempt >= max_retries:
             break
+        # Early-stop when retries stop helping.  A figure whose vision
+        # verdict keeps FAILing with the same score (e.g. "prove vertex
+        # cover is NP-complete": attempts scored 8 / 8 / 8, each a full
+        # ~30 s LLM+vision round) gains nothing from exhausting the retry
+        # budget — we ship the best attempt either way.  So if a retry did
+        # NOT improve the best score, skip the remaining retries.  The
+        # first retry (attempt 0 -> 1) always runs; only later, unhelpful
+        # retries are skipped.  Override with SEVIM_EXPRESS_EARLY_STOP=0.
+        _cur_best = min(a["score"] for a in attempts)
+        if (os.environ.get("SEVIM_EXPRESS_EARLY_STOP", "1") != "0"
+                and attempt >= 1 and _best_score_prev is not None
+                and _cur_best >= _best_score_prev):
+            _log(
+                f"early-stop: retry {attempt} did not improve best score "
+                f"({_cur_best}); shipping best attempt instead of using the "
+                f"remaining {max_retries - attempt} retry(ies)"
+            )
+            break
+        _best_score_prev = _cur_best
         # Patch-retry framing: hand the LLM the prior SVG verbatim
         # and ask for a MODIFIED copy that fixes only the listed
         # issues, preserving every working element (same ids,

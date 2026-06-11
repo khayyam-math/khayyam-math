@@ -112,7 +112,13 @@ def _openai_synthesize_wav(text: str, out_path: Path) -> None:
         "input": text,
         "response_format": "wav",
     }
-    with httpx.Client(timeout=45.0) as c:
+    # A short phrase synthesises in ~1-3 s.  The old 45 s ceiling meant a
+    # single hung request stalled the WHOLE parallel batch for 45 s (the
+    # batch waits on its slowest phrase) before falling back — the dominant
+    # cause of a "narration took ~60 s" turn.  Cap aggressively; the caller
+    # retries once on failure.  Override via SEVIM_TTS_TIMEOUT_S.
+    timeout_s = float(os.environ.get("SEVIM_TTS_TIMEOUT_S", "12"))
+    with httpx.Client(timeout=timeout_s) as c:
         r = c.post(
             _OPENAI_TTS_URL,
             headers={
@@ -133,15 +139,22 @@ def _synthesize_phrase(text: str, out_path: Path, backend: str) -> str:
     actually produced the audio (may differ from the requested one if
     OpenAI failed and we fell back to piper)."""
     if backend == "openai":
-        try:
-            _openai_synthesize_wav(text, out_path)
-            return "openai"
-        except Exception as exc:  # noqa: BLE001
-            # Fall back to piper rather than fail the whole turn.  Log
-            # so it's visible in CloudWatch.
-            print(f"[narrate] OpenAI TTS failed ({exc}); "
-                  "falling back to piper for this phrase",
-                  flush=True, file=sys.stderr)
+        # Retry once before giving up: a single transient timeout/5xx must
+        # NOT drop this phrase to piper, because one piper phrase forces a
+        # full all-piper re-synth (voice uniformity) and throws away every
+        # already-synthesised OpenAI phrase.  Two short-timeout attempts
+        # are still far cheaper than the old single 45 s try, and they keep
+        # the narration all-OpenAI through a transient blip.
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                _openai_synthesize_wav(text, out_path)
+                return "openai"
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        print(f"[narrate] OpenAI TTS failed after 2 tries ({last_exc}); "
+              "falling back to piper for this phrase",
+              flush=True, file=sys.stderr)
     if not voice_available():
         raise FileNotFoundError(
             f"piper voice model not found at {_voice_path()} and OpenAI "
