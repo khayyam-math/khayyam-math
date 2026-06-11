@@ -79,10 +79,10 @@ SEED: dict[str, tuple] = {
         ("data_table", "data_table",
          ["make a data table", "tabulate these values", "comparison table"]),
     ]),
-    # Open-ended class with no renderer yet — an exemplar category that the
-    # Phase-3 curation loop fills with a canonical figure from the corpus.
+    # Phase-4 renderer-first: this class now has a deterministic renderer
+    # (studio/templates/np_completeness.py), so it's a 'renderer' template.
     "complexity_proofs": ("NP-completeness proofs", [
-        ("np_complete_reduction", None,
+        ("np_complete_reduction", "np_completeness",
          ["prove vertex cover is NP-complete", "prove 3-SAT is NP-complete",
           "show the partition problem is NP-complete", "NP-completeness reduction"]),
     ]),

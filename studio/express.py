@@ -2706,6 +2706,37 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"taxonomy recognition errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic NP-completeness proof renderer (Phase 4) ────
+    # "Prove X is NP-complete" shares one fixed structure (in NP +
+    # NP-hard via a reduction).  Extract the content and draw it
+    # correct-by-construction — this was the worst LLM-SVG case
+    # (garbled columns, 3 vision retries).  The renderer controls
+    # layout, so it's clean and consistent every time.
+    if (api_key and not _refining
+            and os.environ.get("SEVIM_NPC_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.np_completeness import (
+                generate_np_completeness_svg, is_np_completeness_prompt,
+            )
+            if is_np_completeness_prompt(routing_prompt):
+                npc = await generate_np_completeness_svg(
+                    user_prompt, api_key=api_key or "", base_url=base_url,
+                    model=model)
+                if npc is not None:
+                    npc_svg, npc_narr = npc
+                    _log(f"np-completeness fast-path: svg={len(npc_svg)} chars")
+                    return {
+                        "svg": npc_svg,
+                        "narration": npc_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "np_completeness",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"np-completeness route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and

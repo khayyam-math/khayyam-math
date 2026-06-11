@@ -58,13 +58,15 @@ def test_recognises_matrix_category(tmp_path, monkeypatch):
     assert rec.template_cos > 0.5
 
 
-def test_recognises_np_completeness_as_exemplar(tmp_path, monkeypatch):
+def test_recognises_np_completeness_class(tmp_path, monkeypatch):
     _seeded_tel(tmp_path, monkeypatch)
     t = tax.Taxonomy()
     rec = t.recognize(_toy_embed("prove that vertex cover is np complete"))
     assert rec is not None
     assert rec.category_id == "complexity_proofs"
-    assert rec.kind == "exemplar"
+    # Phase 4 upgraded this class to a deterministic renderer.
+    assert rec.kind == "renderer"
+    assert rec.renderer_name == "np_completeness"
     assert rec.template_id == "np_complete_reduction"
 
 
