@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """6-hourly figure-quality probe (runs as a scheduled ECS task).
 
+Invoked as ``python -m studio.quality_probe`` so it ships inside the
+``studio`` package that the production image already carries (the image
+copies whole packages, not the repo's ``scripts/`` dir).
+
 Feeds one challenging problem through the SAME production code path
 (``express_figure``), inspects the result, and e-mails the operator only
 when something is wrong.  Designed to run unattended from EventBridge

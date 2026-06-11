@@ -635,7 +635,7 @@ class SevimStack(Stack):
                       value=qwen_instance.instance_id)
 
         # ── 6c. 6-hourly figure-quality probe (EventBridge Scheduler) ──
-        # A scheduled Fargate task runs scripts/quality_probe.py every 6
+        # A scheduled Fargate task runs studio/quality_probe.py every 6
         # hours: it feeds ONE challenging prompt through the SAME
         # production code path (express_figure), inspects the figure, and
         # e-mails the operator ONLY when something is wrong.  Two hard
@@ -652,7 +652,7 @@ class SevimStack(Stack):
         probe_task.add_container(
             "probe",
             image=ecs.ContainerImage.from_docker_image_asset(image_asset),
-            command=["python", "scripts/quality_probe.py"],
+            command=["python", "-m", "studio.quality_probe"],
             environment={**env_vars, "SEVIM_PROBE_ALERT_EMAIL": "arash_kermani@yahoo.com"},
             secrets=secrets_map,
             logging=ecs.LogDrivers.aws_logs(
