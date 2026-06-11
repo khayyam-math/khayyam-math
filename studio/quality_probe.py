@@ -88,6 +88,89 @@ def send_alert(subject: str, body: str) -> None:
               flush=True, file=sys.stderr)
 
 
+_IDENTITY = (1.0, 1.0, 0.0, 0.0)  # (sx, sy, tx, ty)
+
+
+def _compose(outer: tuple, inner: tuple) -> tuple:
+    """Compose two translate+scale transforms so the result maps a child
+    point through ``inner`` then ``outer``:  p -> outer(inner(p))."""
+    so_x, so_y, to_x, to_y = outer
+    si_x, si_y, ti_x, ti_y = inner
+    return (so_x * si_x, so_y * si_y, so_x * ti_x + to_x, so_y * ti_y + to_y)
+
+
+def _parse_transform(s: str):
+    """Reduce an SVG ``transform`` attribute to a (sx, sy, tx, ty) tuple.
+
+    Returns ``None`` if it carries a real rotation / skew / matrix we
+    can't fold into pure translate+scale --- the caller then treats the
+    bounds check as inconclusive rather than risk a false positive.
+    Graphviz (and our deterministic routes) only ever emit
+    ``scale(...) rotate(0) translate(...)``, which folds cleanly."""
+    acc = _IDENTITY
+    for name, body in re.findall(r"(\w+)\s*\(([^)]*)\)", s or ""):
+        nums = [float(n) for n in re.findall(r"[-+0-9.eE]+", body)]
+        if name == "translate":
+            op = (1.0, 1.0, nums[0] if nums else 0.0,
+                  nums[1] if len(nums) > 1 else 0.0)
+        elif name == "scale":
+            sx = nums[0] if nums else 1.0
+            op = (sx, nums[1] if len(nums) > 1 else sx, 0.0, 0.0)
+        elif name == "rotate":
+            if nums and abs(nums[0]) > 1e-6:
+                return None  # genuine rotation — can't reduce
+            op = _IDENTITY
+        else:  # matrix, skewX, skewY, …
+            return None
+        acc = _compose(acc, op)
+    return acc
+
+
+def _texts_outside_viewbox(svg: str, vx, vy, vw, vh, pad=6.0):
+    """Count <text> anchors falling outside the viewBox AFTER applying the
+    cumulative ancestor transform.  Returns ``None`` when the result is
+    inconclusive (unparseable, or an unresolved rotation/matrix), so the
+    caller can decline to alert rather than fire a false positive on the
+    transform-wrapped output that graphviz and friends emit."""
+    from xml.dom import minidom
+    try:
+        doc = minidom.parseString(svg)
+    except Exception:  # noqa: BLE001
+        return None
+    outside = 0
+    aborted = False
+
+    def walk(node, ctm):
+        nonlocal outside, aborted
+        if aborted or node.nodeType != node.ELEMENT_NODE:
+            return
+        tf = node.getAttribute("transform")
+        if tf:
+            local = _parse_transform(tf)
+            if local is None:
+                aborted = True
+                return
+            ctm = _compose(ctm, local)
+        if node.tagName.split(":")[-1] == "text":
+            sx = node.getAttribute("x").split()[:1]
+            sy = node.getAttribute("y").split()[:1]
+            if sx and sy:
+                try:
+                    x, y = float(sx[0]), float(sy[0])
+                except ValueError:
+                    x = y = None
+                if x is not None:
+                    X, Y = ctm[0] * x + ctm[2], ctm[1] * y + ctm[3]
+                    if (X < vx - pad or X > vx + vw + pad
+                            or Y < vy - pad or Y > vy + vh + pad):
+                        outside += 1
+        for c in node.childNodes:
+            walk(c, ctm)
+
+    walk(doc.documentElement, _IDENTITY)
+    return None if aborted else outside
+
+
 def inspect_quality(prompt: str, result: dict) -> list[str]:
     """Return a list of detected problems; empty means the figure is fine.
     Pure string/structural checks (no browser) on top of the in-pipeline
@@ -109,12 +192,12 @@ def inspect_quality(prompt: str, result: dict) -> list[str]:
     m = re.search(r'viewBox="([\-0-9.]+)\s+([\-0-9.]+)\s+([\-0-9.]+)\s+([\-0-9.]+)"', svg)
     if m:
         vx, vy, vw, vh = (float(g) for g in m.groups())
-        pad = 6.0
-        outside = 0
-        for tm in re.finditer(r'<text\b[^>]*\bx="([\-0-9.]+)"[^>]*\by="([\-0-9.]+)"', svg):
-            x, y = float(tm.group(1)), float(tm.group(2))
-            if x < vx - pad or x > vx + vw + pad or y < vy - pad or y > vy + vh + pad:
-                outside += 1
+        # Resolve each <text>'s ancestor transforms before bounds-checking:
+        # graphviz wraps the whole figure in a <g transform="translate(...)">
+        # so raw x/y look out-of-bounds while the rendered glyph sits inside.
+        # _texts_outside_viewbox returns None when it can't reduce a
+        # transform (rotation/matrix) — we don't alert on inconclusive.
+        outside = _texts_outside_viewbox(svg, vx, vy, vw, vh)
         if outside:
             issues.append(f"{outside} text element(s) outside the viewBox")
         # oversized element: any rect/circle covering most of the canvas
