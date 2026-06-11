@@ -1,6 +1,10 @@
 # Category → Template taxonomy with retrieval, growth, and dedup
 
-Design proposal (2026-06-11). Status: proposal, not yet implemented.
+Design proposal (2026-06-11). Status: **all 4 phases implemented** (see
+the matching commits + `project_taxonomy_system` memory). Phase 4
+(NP-completeness renderer) ships ON; Phases 1-3 ship behind flags
+(`SEVIM_ANSWER_CACHE`, `SEVIM_TAXONOMY`, default OFF) until thresholds are
+tuned on the live corpus.
 
 ## 1. The core reframing
 
