@@ -332,6 +332,25 @@ A clean run is silent, so the inbox carries real problems only. The
 implementation is `studio/quality_probe.py`; the AWS deployment wires it
 to EventBridge Scheduler in `infra/sevim_stack.py`.
 
+**How it executes.** Amazon EventBridge Scheduler holds a
+`rate(6 hours)` schedule with a hard `EndDate`. On each firing it
+launches a single short-lived ECS Fargate task from the *same* container
+image the website runs, in the private subnets. The task runs
+`python -m studio.quality_probe`, which picks one prompt from a rotating
+pool, calls `express_figure`, runs the structural checks, emails on a
+problem, and exits. Cost is one brief task four times a day (cents per
+month). Least privilege is preserved: the probe task gets a dedicated
+security group with read access to the telemetry database (for the
+answer-cache and taxonomy lookups) and an IAM role scoped to
+`ses:SendEmail`; a separate scheduler role is allowed only `ecs:RunTask`
+plus `iam:PassRole` on the probe's own task roles. Two independent stops
+bound the run to a fixed window: the schedule's `EndDate`, and the script
+itself no-ops once past its own end date, so it cannot run a single
+iteration beyond the window even if the schedule were left in place. The
+schedule, task definition, security group and roles all live in
+`infra/sevim_stack.py` and are created only when `SEVIM_PROBE_ENABLED` is
+set, so a clone that runs `deploy.sh` provisions none of them.
+
 It is **off by default**. Nothing about it is hard-coded: the probe is
 created only when these variables are present in the deploying operator's
 environment (for example a gitignored `.env` that `infra/deploy.sh`
