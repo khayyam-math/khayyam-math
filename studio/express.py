@@ -2811,6 +2811,38 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"reduction route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic Bayes probability-tree route ────────────────
+    # "Bayes theorem with a tree diagram" used to fall to the graphviz
+    # route, where the LLM-emitted DOT produced orphan/floating nodes and
+    # misaligned branch labels.  A probability tree has one fixed shape,
+    # so draw it correct-by-construction with an arithmetic-checked worked
+    # example.  Runs BEFORE graphviz so it wins for this class.
+    if (not _refining
+            and os.environ.get("SEVIM_BAYES_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.bayes_tree import (
+                generate_bayes_tree_svg, is_bayes_tree_prompt,
+            )
+            if is_bayes_tree_prompt(routing_prompt):
+                bsvg, bnarr = await generate_bayes_tree_svg(routing_prompt)
+                _log(f"bayes-tree fast-path: svg={len(bsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(bsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": bsvg,
+                    "narration": bnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "bayes_tree",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"bayes-tree route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and
