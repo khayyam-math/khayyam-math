@@ -2843,6 +2843,48 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"bayes-tree route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic stats templates (normal dist + confusion matrix) ─
+    # Two more classes the LLM drew unreliably (lopsided bell curves with
+    # wrong percentages; confusion matrices with swapped FP/FN or wrong
+    # metrics).  Both are pure arithmetic, so draw them
+    # correct-by-construction.  Flag SEVIM_STATS_ROUTE (default on).
+    if (not _refining
+            and os.environ.get("SEVIM_STATS_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.normal_distribution import (
+                generate_normal_distribution_svg,
+                is_normal_distribution_prompt,
+            )
+            from studio.templates.confusion_matrix import (
+                generate_confusion_matrix_svg, is_confusion_matrix_prompt,
+            )
+            _stats = None
+            if is_normal_distribution_prompt(routing_prompt):
+                _stats = ("normal_distribution",
+                          await generate_normal_distribution_svg(routing_prompt))
+            elif is_confusion_matrix_prompt(routing_prompt):
+                _stats = ("confusion_matrix",
+                          await generate_confusion_matrix_svg(routing_prompt))
+            if _stats is not None:
+                _tmpl, (ssvg, snarr) = _stats
+                _log(f"{_tmpl} fast-path: svg={len(ssvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(ssvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": ssvg,
+                    "narration": snarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": _tmpl,
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"stats route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and
