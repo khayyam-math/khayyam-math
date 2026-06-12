@@ -2843,6 +2843,37 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"bayes-tree route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic Euclid infinitude-of-primes proof ───────────
+    # "Prove there are infinitely many primes" fell to LLM-SVG, which drew
+    # a thin illustration with no statement / deduction steps / QED and so
+    # failed the 'proof' completeness rubric on every retry.  Euclid's
+    # proof has one fixed structure; render it correct-by-construction.
+    if (not _refining
+            and os.environ.get("SEVIM_PRIMES_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.infinitude_primes import (
+                generate_infinitude_primes_svg, is_infinitude_primes_prompt,
+            )
+            if is_infinitude_primes_prompt(routing_prompt):
+                psvg, pnarr = await generate_infinitude_primes_svg(routing_prompt)
+                _log(f"infinitude-primes fast-path: svg={len(psvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(psvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": psvg,
+                    "narration": pnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "infinitude_primes",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"infinitude-primes route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic stats templates (normal dist + confusion matrix) ─
     # Two more classes the LLM drew unreliably (lopsided bell curves with
     # wrong percentages; confusion matrices with swapped FP/FN or wrong
