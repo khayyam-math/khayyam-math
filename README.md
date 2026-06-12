@@ -294,17 +294,28 @@ svg = client.generate_figure("Show the unit circle with 30°, 45°, 60°")
 
 ### What's bundled, what's not
 
-The `khayyam-math` pip package is the **public client API** + the
-three provider back-ends. The full production stack on
+The **documented public API** is the `KhayyamMath` client plus its three
+provider back-ends: one model call per `generate()`, returning SVG and
+narration. The full production stack on
 [khayyammath.com](https://khayyammath.com) layers additional
 deterministic engines on top (Graphviz, matplotlib, Plotly, SymPy
 templates, the CP-SAT layout planner, the Lean+Z3+Mathlib verifier
 chain). Those live in this same git repo under `studio/` and
-`service/` and are imported by the production runtime — they are
-not part of the pip-installable surface today. If you need the full
-production behaviour, clone the repo and run `studio/` directly
-(see the next section), or call the production HTTP API at
-khayyammath.com.
+`service/`. They **are installed by the pip command above** (the
+distribution ships the `studio`, `service`, `sevim` and `mcp_server`
+packages), so you can `from studio.express import express_figure` and
+run the same engine the website runs. They do need extra system
+tooling, though (the Graphviz `dot` binary, a headless Chrome for
+Plotly/Kaleido), and they are not part of the supported, version-stable
+client surface. The cleanest way to get the full production behaviour is
+to clone the repo and run `studio/` directly (see the next section), or
+call the production HTTP API at khayyammath.com.
+
+The three usage tiers (thin client, full engine, and offline
+deterministic) are demonstrated end-to-end in
+[`examples/three_tiers.py`](examples/three_tiers.py)
+(`python examples/three_tiers.py`). See [`examples/README.md`](examples/README.md)
+for a table of where each tier's figure actually comes from.
 
 The fine-tuned Qwen model is documented on Hugging Face:
 **[huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)**.

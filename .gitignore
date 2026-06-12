@@ -108,3 +108,6 @@ SESSION_STATE.md
 # Brand logo assets are committed despite the blanket *.svg ignore above.
 !service/static/logo.svg
 !service/static/logo-badge.svg
+
+# Artifact written by examples/three_tiers.py
+examples/tier3_reduction.svg
