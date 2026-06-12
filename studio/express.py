@@ -2774,6 +2774,43 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"np-completeness route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic complexity-reduction renderer ───────────────
+    # "Reduce X to Y" / "show the reduction from X to Y" has no NP keyword
+    # so it slips past the np-completeness route and used to fall all the
+    # way to the LLM-SVG path, which produced colliding/duplicated set
+    # labels and WRONG arithmetic (halves that didn't actually match).
+    # The canonical Subset Sum ≤p Partition pair is drawn fully
+    # deterministically from an arithmetic-checked example; any other
+    # recognised pair gets a number-free schematic.  Needs no api_key.
+    if (not _refining
+            and os.environ.get("SEVIM_REDUCTION_ROUTE", "on").lower()
+            != "off"):
+        try:
+            from studio.templates.reduction import (
+                generate_reduction_svg, is_reduction_prompt,
+            )
+            if is_reduction_prompt(routing_prompt):
+                red = await generate_reduction_svg(routing_prompt)
+                if red is not None:
+                    red_svg, red_narr = red
+                    _log(f"reduction fast-path: svg={len(red_svg)} chars")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(red_svg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": red_svg,
+                        "narration": red_narr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "reduction",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"reduction route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and
@@ -3622,6 +3659,18 @@ async def express_figure(
                 result["svg"] = fixed_svg
         except Exception as exc:  # noqa: BLE001
             _log(f"wrap_overlong_text FAILED: {type(exc).__name__}: {exc}")
+        # Drop exact-duplicate labels stamped at the same spot BEFORE
+        # reflow — nudging two identical strings apart would just show
+        # the duplicate twice, so the redundant copy must be removed
+        # first.  (The 'S2 = {1,2,2,6}' printed twice failure mode.)
+        try:
+            deduped = drop_duplicate_texts(result["svg"])
+            if deduped != result["svg"]:
+                _log(f"drop_duplicate_texts: rewrote {len(result['svg'])} -> "
+                     f"{len(deduped)} chars")
+                result["svg"] = deduped
+        except Exception as exc:  # noqa: BLE001
+            _log(f"drop_duplicate_texts FAILED: {type(exc).__name__}: {exc}")
         # Run reflow up to 3 times until idempotent.  A single pass
         # can introduce new overlaps when it shifts text into a region
         # that already has neighbours; iterating converges the layout.
@@ -5295,6 +5344,94 @@ def fit_viewbox_to_content(svg: str) -> str:
         return svg
 
 
+def _text_bbox(x: float, y: float, content: str, fs: float,
+               anchor: str) -> tuple[float, float, float, float]:
+    """Anchor-aware estimated bbox (left, top, right, bottom) for a <text>.
+    0.6em average glyph advance; ascent ~fs, descent ~0.25fs."""
+    w = max(1.0, len(content)) * 0.6 * fs
+    if anchor == "middle":
+        left = x - w / 2
+    elif anchor == "end":
+        left = x - w
+    else:
+        left = x
+    return left, y - fs, left + w, y + 0.25 * fs
+
+
+def drop_duplicate_texts(svg: str) -> str:
+    """Remove a <text> whose normalized content is IDENTICAL to an earlier
+    <text> and whose estimated bbox OVERLAPS it.
+
+    This is the gap left by the single-channel dedup and the nudging
+    passes: the LLM sometimes stamps the SAME label twice at nearly the
+    same spot (observed as 'S2 = {1, 2, 2, 6}' printed twice, and a set
+    label drawn once as a shape annotation and again as a caption).
+    _drop_textblock_duplicates only removes raw-vs-text_block copies, and
+    reflow_overlapping_text would just nudge two identical strings apart —
+    you'd still see the duplicate.  Dropping the redundant copy is the
+    only correct fix.
+
+    Conservative + idempotent:
+      • only acts on content >= 5 visible chars (never axis ticks, single
+        symbols, or matrix entries),
+      • only drops when the bboxes actually overlap, so a legend that
+        legitimately repeats a label elsewhere is kept,
+      • compares raw coordinates (both copies of a duplicate sit in the
+        same coordinate frame in practice).
+    Fail-open: any error returns the input unchanged.
+    """
+    import re
+    try:
+        attr_re = re.compile(r'\b([A-Za-z_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')')
+
+        def _attrs(tag: str) -> dict:
+            return {m.group(1): (m.group(2) if m.group(2) is not None
+                                 else m.group(3))
+                    for m in attr_re.finditer(tag)}
+
+        kept: list[tuple[str, tuple]] = []  # (norm_content, bbox)
+        drop_spans: list[tuple[int, int]] = []
+        for m in re.finditer(r'<text\b([^>]*)>(.*?)</text>', svg, re.S):
+            head, body = m.group(1), m.group(2)
+            content = re.sub(r"<[^>]+>", "", body)  # strip tspans
+            norm = re.sub(r"\s+", " ", content).strip().lower()
+            if len(norm) < 5:
+                continue
+            a = _attrs("<text" + head + ">")
+            try:
+                x = float(a.get("x", "0"))
+                y = float(a.get("y", "0"))
+            except ValueError:
+                continue
+            fs = 14.0
+            try:
+                fs = float(re.sub(r"[^0-9.]", "", a.get("font-size", "14")) or 14)
+            except ValueError:
+                pass
+            box = _text_bbox(x, y, content, fs, a.get("text-anchor", "start"))
+            is_dup = False
+            for kn, kb in kept:
+                if kn == norm and not (box[2] <= kb[0] or box[0] >= kb[2]
+                                       or box[3] <= kb[1] or box[1] >= kb[3]):
+                    is_dup = True
+                    break
+            if is_dup:
+                drop_spans.append((m.start(), m.end()))
+            else:
+                kept.append((norm, box))
+        if not drop_spans:
+            return svg
+        out = []
+        prev = 0
+        for s, e in drop_spans:
+            out.append(svg[prev:s])
+            prev = e
+        out.append(svg[prev:])
+        return "".join(out)
+    except Exception:  # noqa: BLE001 — best-effort
+        return svg
+
+
 def polish_svg(svg: str) -> str:
     """Apply the safe, self-contained, idempotent layout-repair passes to a
     finished SVG.  Used to re-polish a CACHED figure before serving it, so a
@@ -5306,6 +5443,7 @@ def polish_svg(svg: str) -> str:
         return svg
     passes = (strip_latex_in_svg_text, normalize_matrix_layout,
               autofit_group_rects, fit_node_boxes_to_labels,
+              drop_duplicate_texts,
               wrap_overlong_text, reflow_overlapping_groups,
               clamp_text_to_viewbox, raise_text_to_front,
               fit_viewbox_to_content)

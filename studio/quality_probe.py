@@ -171,6 +171,97 @@ def _texts_outside_viewbox(svg: str, vx, vy, vw, vh, pad=6.0):
     return None if aborted else outside
 
 
+def _node_text(node) -> str:
+    """Concatenate the text of a <text> node and any <tspan> children."""
+    out = []
+    for c in node.childNodes:
+        if c.nodeType == c.TEXT_NODE:
+            out.append(c.data)
+        elif c.nodeType == c.ELEMENT_NODE:
+            out.append(_node_text(c))
+    return "".join(out)
+
+
+def _overlapping_text_pairs(svg: str):
+    """Count pairs of <text> whose estimated bounding boxes overlap
+    heavily (>50% of the smaller box), AFTER resolving ancestor
+    transforms.  This catches the colliding / duplicated labels that the
+    LLM-SVG path occasionally emits and that the bounds / oversize checks
+    don't see.  Returns ``None`` when inconclusive (unparseable, or an
+    irreducible rotation/matrix) so the caller declines to alert rather
+    than false-positive on transformed output.
+
+    Conservative: only considers labels of >= 5 visible chars (never axis
+    ticks or single symbols), matching the de-collision pass so a figure
+    that survives that pass and still overlaps is a genuine defect."""
+    from xml.dom import minidom
+    try:
+        doc = minidom.parseString(svg)
+    except Exception:  # noqa: BLE001
+        return None
+    boxes: list[tuple[float, float, float, float]] = []
+    aborted = False
+
+    def walk(node, ctm):
+        nonlocal aborted
+        if aborted or node.nodeType != node.ELEMENT_NODE:
+            return
+        tf = node.getAttribute("transform")
+        if tf:
+            local = _parse_transform(tf)
+            if local is None:
+                aborted = True
+                return
+            ctm = _compose(ctm, local)
+        if node.tagName.split(":")[-1] == "text":
+            content = re.sub(r"\s+", " ", _node_text(node)).strip()
+            sx = node.getAttribute("x").split()[:1]
+            sy = node.getAttribute("y").split()[:1]
+            if len(content) >= 5 and sx and sy:
+                try:
+                    x, y = float(sx[0]), float(sy[0])
+                    fs = float(re.sub(r"[^0-9.]", "",
+                                      node.getAttribute("font-size") or "14")
+                               or 14)
+                except ValueError:
+                    fs = None
+                if fs:
+                    w = max(1, len(content)) * 0.6 * fs * abs(ctm[0])
+                    anchor = node.getAttribute("text-anchor") or "start"
+                    X = ctm[0] * x + ctm[2]
+                    Y = ctm[1] * y + ctm[3]
+                    if anchor == "middle":
+                        left = X - w / 2
+                    elif anchor == "end":
+                        left = X - w
+                    else:
+                        left = X
+                    h = fs * 1.2 * abs(ctm[1])
+                    boxes.append((left, Y - fs * abs(ctm[1]), left + w, Y + 0.25 * h))
+        for c in node.childNodes:
+            walk(c, ctm)
+
+    walk(doc.documentElement, _IDENTITY)
+    if aborted:
+        return None
+    pairs = 0
+    for i in range(len(boxes)):
+        ax0, ay0, ax1, ay1 = boxes[i]
+        area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+        for j in range(i + 1, len(boxes)):
+            bx0, by0, bx1, by1 = boxes[j]
+            ix = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+            iy = max(0.0, min(ay1, by1) - max(ay0, by0))
+            inter = ix * iy
+            if inter <= 0:
+                continue
+            area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+            smaller = min(area_a, area_b)
+            if smaller > 0 and inter / smaller > 0.5:
+                pairs += 1
+    return pairs
+
+
 def inspect_quality(prompt: str, result: dict) -> list[str]:
     """Return a list of detected problems; empty means the figure is fine.
     Pure string/structural checks (no browser) on top of the in-pipeline
@@ -205,6 +296,13 @@ def inspect_quality(prompt: str, result: dict) -> list[str]:
             if float(rm.group(1)) > 0.92 * vw and float(rm.group(2)) > 0.92 * vh:
                 issues.append("an element nearly fills the whole canvas")
                 break
+    # Colliding / duplicated labels: heavily-overlapping text pairs.  The
+    # de-collision pass should remove these, so any that survive to a
+    # served figure are a real defect (and the class the bounds/oversize
+    # checks miss).  None = inconclusive (don't alert).
+    overlaps = _overlapping_text_pairs(svg)
+    if overlaps:
+        issues.append(f"{overlaps} pair(s) of heavily-overlapping text labels")
     # Leaked internals (model/provider names should never reach the SVG)
     low = svg.lower()
     for bad in ("gpt-4o", "openai", "claude", "system prompt", "as an ai"):

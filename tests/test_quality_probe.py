@@ -74,6 +74,35 @@ def test_retries_exhausted_flagged():
     assert any("retries exhausted" in i for i in issues)
 
 
+def test_overlapping_labels_flagged():
+    bad = _wrap = (
+        '<svg viewBox="0 0 900 560">'
+        '<text x="600" y="300" font-size="15" text-anchor="middle">S2 = {1, 2, 2, 6}</text>'
+        '<text x="605" y="305" font-size="15" text-anchor="middle">S2 = {1, 2, 2, 6}</text>'
+        '</svg>')
+    assert qp._overlapping_text_pairs(bad) == 1
+    assert any("overlapping text" in i for i in qp.inspect_quality("p", {"svg": bad}))
+
+
+def test_graphviz_transform_not_flagged_for_overlap():
+    # The translate-wrapped graphviz figure must not look like overlap.
+    assert qp._overlapping_text_pairs(GRAPHVIZ_SVG) == 0
+
+
+def test_separated_labels_not_flagged():
+    ok = ('<svg viewBox="0 0 900 560">'
+          '<text x="40" y="100" font-size="14">first label here</text>'
+          '<text x="40" y="200" font-size="14">second label here</text></svg>')
+    assert qp._overlapping_text_pairs(ok) == 0
+
+
+def test_overlap_rotation_inconclusive():
+    rot = ('<svg viewBox="0 0 100 100"><g transform="rotate(30)">'
+           '<text x="10" y="10" font-size="14">overlap one</text>'
+           '<text x="11" y="11" font-size="14">overlap one</text></g></svg>')
+    assert qp._overlapping_text_pairs(rot) is None
+
+
 def test_parse_transform_folds_scale_then_translate():
     # scale(2) translate(10 5): a child point (0,0) -> (20,10).
     sx, sy, tx, ty = qp._parse_transform("scale(2) translate(10 5)")
