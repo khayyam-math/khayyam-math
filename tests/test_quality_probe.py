@@ -103,6 +103,67 @@ def test_overlap_rotation_inconclusive():
     assert qp._overlapping_text_pairs(rot) is None
 
 
+def test_matplotlib_full_background_not_flagged():
+    # Deterministic route (template set) with a full-canvas white backdrop
+    # is BY DESIGN, not an oversized-element defect.
+    mpl = {"template": "matplotlib",
+           "svg": '<svg viewBox="0 0 640 480">'
+                  '<rect x="0" y="0" width="640" height="480" style="fill:#ffffff;"/>'
+                  '</svg>'}
+    assert all("nearly fills" not in i for i in qp.inspect_quality("p", mpl))
+
+
+def test_llm_giant_coloured_box_still_flagged():
+    bad = {"template": "",
+           "svg": '<svg viewBox="0 0 900 560">'
+                  '<rect x="0" y="0" width="880" height="540" fill="#ff0000"/></svg>'}
+    assert any("nearly fills" in i for i in qp.inspect_quality("p", bad))
+
+
+def test_llm_white_background_not_flagged():
+    ok = {"template": "",
+          "svg": '<svg viewBox="0 0 900 560">'
+                 '<rect x="0" y="0" width="890" height="550" fill="#ffffff"/></svg>'}
+    assert all("nearly fills" not in i for i in qp.inspect_quality("p", ok))
+
+
+def test_autofix_and_email_default_off_when_env_unset(monkeypatch):
+    # Import-time constants reflect the environment.  Control it explicitly
+    # (the full suite may have loaded an operator .env into os.environ) and
+    # reload, so we genuinely test the OFF default a fresh clone sees.
+    import importlib
+    monkeypatch.delenv("SEVIM_PROBE_AUTOFIX", raising=False)
+    monkeypatch.delenv("SEVIM_PROBE_ALERT_EMAIL", raising=False)
+    importlib.reload(qp)
+    assert qp.AUTOFIX is False
+    assert qp.ALERT_EMAIL == ""
+
+
+def test_send_alert_without_recipient_is_noop(monkeypatch, capsys):
+    # With no recipient, send_alert logs instead of crashing on empty dest.
+    monkeypatch.setattr(qp, "ALERT_EMAIL", "")
+    qp.send_alert("subj", "body")
+    out = capsys.readouterr().out
+    assert "not e-mailed" in out
+
+
+def test_attempt_autofix_resolves_via_repolish():
+    import asyncio
+    # A figure with a duplicate label that inspect flags as overlap; the
+    # re-polish step (drop_duplicate_texts inside polish_svg) clears it
+    # with no regeneration.
+    dup = ('<svg viewBox="0 0 900 560">'
+           '<text x="600" y="300" font-size="15" text-anchor="middle">S2 = {1, 2, 2, 6}</text>'
+           '<text x="604" y="304" font-size="15" text-anchor="middle">S2 = {1, 2, 2, 6}</text>'
+           '</svg>')
+    result = {"template": "", "svg": dup}
+    assert qp.inspect_quality("p", result)  # flagged first
+    resolved, method, fixed = asyncio.run(qp.attempt_autofix("p", result))
+    assert resolved is True
+    assert method == "layout re-polish"
+    assert qp.inspect_quality("p", fixed) == []
+
+
 def test_parse_transform_folds_scale_then_translate():
     # scale(2) translate(10 5): a child point (0,0) -> (20,10).
     sx, sy, tx, ty = qp._parse_transform("scale(2) translate(10 5)")

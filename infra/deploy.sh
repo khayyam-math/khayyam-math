@@ -33,6 +33,18 @@ set -euo pipefail
 # ``cdk.json`` regardless of the caller's PWD.
 cd "$(dirname "$(readlink -f "$0")")"
 
+# Source the operator's gitignored repo-root .env so deploy-time-only
+# settings reach `cdk synth` WITHOUT being committed to source.  This is
+# where personal / per-operator values live (e.g. SEVIM_ADMIN_EMAILS,
+# SEVIM_PROBE_ENABLED, SEVIM_PROBE_ALERT_EMAIL).  A fresh clone with no
+# .env simply deploys the public defaults: no admin whitelist, no probe.
+if [ -f ../.env ]; then
+    set -a            # export every var the file defines
+    # shellcheck disable=SC1091
+    . ../.env
+    set +a
+fi
+
 # Required env vars — no defaults, to avoid accidentally deploying
 # into the wrong AWS account.
 : "${AWS_PROFILE:?Set AWS_PROFILE to the CLI profile that should run cdk deploy}"

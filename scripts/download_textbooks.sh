@@ -26,7 +26,7 @@ TEXTBOOK_DIR="${TEXTBOOK_DIR:-$HOME/.local/share/sevim/textbooks}"
 mkdir -p "$TEXTBOOK_DIR"
 cd "$TEXTBOOK_DIR"
 
-UA="Khayyam-Math-Distillation/1.0 (https://khayyammath.com; arash_kermani@yahoo.com)"
+UA="Khayyam-Math-Distillation/1.0 (+https://khayyammath.com)"
 
 # Each line: filename | url
 # Verified URLs as of 2026-05-10.  If a URL rotates, the wget will

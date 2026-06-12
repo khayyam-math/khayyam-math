@@ -253,8 +253,12 @@ class SevimStack(Stack):
             # Admin dashboard (/studio/admin) is gated by an email
             # whitelist; only signed-in users whose magic-link cookie
             # carries one of these e-mails can see it.  Everyone else
-            # gets a 404, so the route is effectively invisible.
-            "SEVIM_ADMIN_EMAILS": "arash_kermani@yahoo.com",
+            # gets a 404, so the route is effectively invisible.  The
+            # whitelist comes ONLY from the deploying machine's
+            # environment (the operator's gitignored .env) — it is never
+            # committed to source.  Unset => empty whitelist => the admin
+            # route 404s for everyone (safe: locks out, never opens up).
+            "SEVIM_ADMIN_EMAILS": os.environ.get("SEVIM_ADMIN_EMAILS", ""),
             "SEVIM_STORAGE_URL": f"s3://{canvas_bucket.bucket_name}",
             "SEVIM_EXPORT_S3_BUCKET": training_bucket.bucket_name,
             "SEVIM_LORA_S3_BUCKET": lora_bucket.bucket_name,
@@ -635,105 +639,128 @@ class SevimStack(Stack):
                       value=qwen_instance.instance_id)
 
         # ── 6c. 6-hourly figure-quality probe (EventBridge Scheduler) ──
-        # A scheduled Fargate task runs studio/quality_probe.py every 6
-        # hours: it feeds ONE challenging prompt through the SAME
-        # production code path (express_figure), inspects the figure, and
-        # e-mails the operator ONLY when something is wrong.  Two hard
-        # stops bound it to the end of August 2026 — the schedule's
-        # EndDate below, AND the script no-ops past its own END_DATE — so
-        # it cannot run a single iteration into September.  Cost is one
-        # short Fargate task 4x/day (cents/month); the probe shares the
-        # app image, env and secrets so it tests exactly what users hit.
-        probe_task = ecs.FargateTaskDefinition(
-            self, "ProbeTask",
-            cpu=1024,
-            memory_limit_mib=3072,  # same headroom as the app task
-        )
-        probe_task.add_container(
-            "probe",
-            image=ecs.ContainerImage.from_docker_image_asset(image_asset),
-            command=["python", "-m", "studio.quality_probe"],
-            environment={**env_vars, "SEVIM_PROBE_ALERT_EMAIL": "arash_kermani@yahoo.com"},
-            secrets=secrets_map,
-            logging=ecs.LogDrivers.aws_logs(
-                stream_prefix="probe", log_group=log_group,
-            ),
-        )
-        # Same least-privilege grants the app task has: S3 for canvas
-        # persistence/indexing, and SES so the probe can e-mail alerts.
-        canvas_bucket.grant_read_write(probe_task.task_role)
-        training_bucket.grant_read_write(probe_task.task_role)
-        lora_bucket.grant_read(probe_task.task_role)
-        probe_task.task_role.add_to_principal_policy(
-            iam.PolicyStatement(
-                actions=["ses:SendEmail", "ses:SendRawEmail"],
-                resources=["*"],
+        # OFF by default.  A scheduled Fargate task runs
+        # studio/quality_probe.py every 6 hours: it feeds ONE challenging
+        # prompt through the SAME production code path (express_figure),
+        # inspects the figure, and e-mails the operator ONLY when
+        # something is wrong.  Two hard stops bound it to the end of
+        # August 2026 — the schedule's EndDate below, AND the script
+        # no-ops past its own END_DATE — so it cannot run a single
+        # iteration into September.  Cost is one short Fargate task 4x/day
+        # (cents/month); the probe shares the app image, env and secrets
+        # so it tests exactly what users hit.
+        #
+        # This whole block only materialises when SEVIM_PROBE_ENABLED is
+        # truthy in the DEPLOYING machine's environment (e.g. the
+        # operator's gitignored .env, sourced by deploy.sh).  A clone that
+        # runs `deploy.sh` without the flag gets NO probe, no schedule,
+        # and no hard-coded alert address.  The recipient likewise comes
+        # only from SEVIM_PROBE_ALERT_EMAIL in that environment — it is
+        # never committed to source.
+        _probe_enabled = os.environ.get(
+            "SEVIM_PROBE_ENABLED", "").strip().lower() in (
+                "1", "true", "on", "yes")
+        _probe_alert_email = os.environ.get("SEVIM_PROBE_ALERT_EMAIL", "").strip()
+        _probe_autofix = os.environ.get("SEVIM_PROBE_AUTOFIX", "").strip()
+        if _probe_enabled:
+            probe_task = ecs.FargateTaskDefinition(
+                self, "ProbeTask",
+                cpu=1024,
+                memory_limit_mib=3072,  # same headroom as the app task
             )
-        )
-        # Dedicated SG so we can open RDS only to the probe (it reads the
-        # telemetry DB for answer-cache / taxonomy recognition).
-        probe_sg = ec2.SecurityGroup(
-            self, "ProbeSg", vpc=vpc, allow_all_outbound=True,
-            description="6-hourly quality probe Fargate task",
-        )
-        db.connections.allow_default_port_from(probe_sg)
-
-        # IAM role EventBridge Scheduler assumes to launch the task.
-        probe_sched_role = iam.Role(
-            self, "ProbeSchedulerRole",
-            assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
-        )
-        probe_sched_role.add_to_principal_policy(
-            iam.PolicyStatement(
-                actions=["ecs:RunTask"],
-                # The task-definition ARN plus its :* revisions so a new
-                # image deploy (which bumps the revision) keeps working.
-                resources=[probe_task.task_definition_arn,
-                           f"{probe_task.task_definition_arn}:*"],
-            )
-        )
-        # PassRole for both the task's execution and task roles.
-        probe_sched_role.add_to_principal_policy(
-            iam.PolicyStatement(
-                actions=["iam:PassRole"],
-                resources=[
-                    probe_task.task_role.role_arn,
-                    probe_task.execution_role.role_arn,  # type: ignore[union-attr]
-                ],
-                conditions={
-                    "StringLike": {"iam:PassedToService": "ecs-tasks.amazonaws.com"},
+            probe_task.add_container(
+                "probe",
+                image=ecs.ContainerImage.from_docker_image_asset(image_asset),
+                command=["python", "-m", "studio.quality_probe"],
+                environment={
+                    **env_vars,
+                    **({"SEVIM_PROBE_ALERT_EMAIL": _probe_alert_email}
+                       if _probe_alert_email else {}),
+                    **({"SEVIM_PROBE_AUTOFIX": _probe_autofix}
+                       if _probe_autofix else {}),
                 },
+                secrets=secrets_map,
+                logging=ecs.LogDrivers.aws_logs(
+                    stream_prefix="probe", log_group=log_group,
+                ),
             )
-        )
+            # Same least-privilege grants the app task has: S3 for canvas
+            # persistence/indexing, and SES so the probe can e-mail alerts.
+            canvas_bucket.grant_read_write(probe_task.task_role)
+            training_bucket.grant_read_write(probe_task.task_role)
+            lora_bucket.grant_read(probe_task.task_role)
+            probe_task.task_role.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["ses:SendEmail", "ses:SendRawEmail"],
+                    resources=["*"],
+                )
+            )
+            # Dedicated SG so we can open RDS only to the probe (it reads
+            # the telemetry DB for answer-cache / taxonomy recognition).
+            probe_sg = ec2.SecurityGroup(
+                self, "ProbeSg", vpc=vpc, allow_all_outbound=True,
+                description="6-hourly quality probe Fargate task",
+            )
+            db.connections.allow_default_port_from(probe_sg)
 
-        scheduler.CfnSchedule(
-            self, "ProbeSchedule",
-            flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(
-                mode="OFF",
-            ),
-            schedule_expression="rate(6 hours)",
-            # HARD STOP: the scheduler stops firing after this instant.
-            # The probe script ALSO no-ops past 2026-08-31 as a belt-and-
-            # braces guarantee it never runs into September.
-            end_date="2026-08-31T23:59:59.000Z",
-            state="ENABLED",
-            target=scheduler.CfnSchedule.TargetProperty(
-                arn=cluster.cluster_arn,
-                role_arn=probe_sched_role.role_arn,
-                ecs_parameters=scheduler.CfnSchedule.EcsParametersProperty(
-                    task_definition_arn=probe_task.task_definition_arn,
-                    launch_type="FARGATE",
-                    task_count=1,
-                    network_configuration=scheduler.CfnSchedule.NetworkConfigurationProperty(
-                        awsvpc_configuration=scheduler.CfnSchedule.AwsVpcConfigurationProperty(
-                            subnets=[s.subnet_id for s in vpc.private_subnets],
-                            security_groups=[probe_sg.security_group_id],
-                            assign_public_ip="DISABLED",
+            # IAM role EventBridge Scheduler assumes to launch the task.
+            probe_sched_role = iam.Role(
+                self, "ProbeSchedulerRole",
+                assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+            )
+            probe_sched_role.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["ecs:RunTask"],
+                    # The task-definition ARN plus its :* revisions so a
+                    # new image deploy (which bumps the revision) keeps
+                    # working.
+                    resources=[probe_task.task_definition_arn,
+                               f"{probe_task.task_definition_arn}:*"],
+                )
+            )
+            # PassRole for both the task's execution and task roles.
+            probe_sched_role.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["iam:PassRole"],
+                    resources=[
+                        probe_task.task_role.role_arn,
+                        probe_task.execution_role.role_arn,  # type: ignore[union-attr]
+                    ],
+                    conditions={
+                        "StringLike": {
+                            "iam:PassedToService": "ecs-tasks.amazonaws.com"},
+                    },
+                )
+            )
+
+            scheduler.CfnSchedule(
+                self, "ProbeSchedule",
+                flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(
+                    mode="OFF",
+                ),
+                schedule_expression="rate(6 hours)",
+                # HARD STOP: the scheduler stops firing after this instant.
+                # The probe script ALSO no-ops past 2026-08-31 as a belt-
+                # and-braces guarantee it never runs into September.
+                end_date="2026-08-31T23:59:59.000Z",
+                state="ENABLED",
+                target=scheduler.CfnSchedule.TargetProperty(
+                    arn=cluster.cluster_arn,
+                    role_arn=probe_sched_role.role_arn,
+                    ecs_parameters=scheduler.CfnSchedule.EcsParametersProperty(
+                        task_definition_arn=probe_task.task_definition_arn,
+                        launch_type="FARGATE",
+                        task_count=1,
+                        network_configuration=scheduler.CfnSchedule.NetworkConfigurationProperty(
+                            awsvpc_configuration=scheduler.CfnSchedule.AwsVpcConfigurationProperty(
+                                subnets=[s.subnet_id for s in vpc.private_subnets],
+                                security_groups=[probe_sg.security_group_id],
+                                assign_public_ip="DISABLED",
+                            ),
                         ),
                     ),
                 ),
-            ),
-        )
+            )
 
         # ── 7. Outputs ───────────────────────────────────────────────
         url = f"https://{domain}" if domain else f"http://{service.load_balancer.load_balancer_dns_name}"

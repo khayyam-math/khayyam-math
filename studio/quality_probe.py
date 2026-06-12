@@ -32,7 +32,22 @@ import traceback
 
 # Hard window: do nothing once this date is past.
 END_DATE = datetime.date(2026, 8, 31)
-ALERT_EMAIL = os.environ.get("SEVIM_PROBE_ALERT_EMAIL", "arash_kermani@yahoo.com")
+# Alert recipient comes ONLY from the environment — never hard-coded, so
+# the public repo carries no personal address.  In production it is set on
+# the probe's ECS task (from the operator's .env at deploy time).  Empty =>
+# no e-mail is sent (the run still logs to stdout / CloudWatch).
+ALERT_EMAIL = os.environ.get("SEVIM_PROBE_ALERT_EMAIL", "").strip()
+
+# Auto-remediation.  OFF by default (so a clone never tries to "fix" things
+# unattended).  When ON (set in the operator's .env), a detected problem is
+# first re-attempted IN PLACE — re-run the safe layout passes, then
+# regenerate the figure — and the operator is e-mailed ONLY if that fails,
+# i.e. only for PERSISTENT issues.  This NEVER edits code or redeploys; the
+# probe runs in a task with no git-write or deploy credentials, and the
+# live system is never autonomously self-modified.  It repairs the figure
+# OUTPUT, not the system.
+AUTOFIX = os.environ.get("SEVIM_PROBE_AUTOFIX", "").strip().lower() in (
+    "1", "true", "on", "yes")
 
 # A rotating pool of deliberately demanding prompts spanning the routes
 # and the open-ended long tail.
@@ -73,6 +88,13 @@ def _sender() -> str:
 
 
 def send_alert(subject: str, body: str) -> None:
+    if not ALERT_EMAIL:
+        # No recipient configured (e.g. a clone without the env var):
+        # surface the alert in the logs instead of crashing on an empty
+        # SES destination.
+        print(f"[probe] no SEVIM_PROBE_ALERT_EMAIL set; alert not e-mailed.\n"
+              f"{subject}\n{body}", flush=True)
+        return
     try:
         import boto3
         boto3.client("ses").send_email(
@@ -291,11 +313,32 @@ def inspect_quality(prompt: str, result: dict) -> list[str]:
         outside = _texts_outside_viewbox(svg, vx, vy, vw, vh)
         if outside:
             issues.append(f"{outside} text element(s) outside the viewBox")
-        # oversized element: any rect/circle covering most of the canvas
-        for rm in re.finditer(r'<rect\b[^>]*\bwidth="([0-9.]+)"[^>]*\bheight="([0-9.]+)"', svg):
-            if float(rm.group(1)) > 0.92 * vw and float(rm.group(2)) > 0.92 * vh:
-                issues.append("an element nearly fills the whole canvas")
-                break
+        # Oversized element: a single rect that nearly fills the canvas.
+        # This heuristic only makes sense for the free-form LLM-SVG
+        # fallback, where a giant coloured box is a real defect.
+        # Deterministic routes (matplotlib / plotly / graphviz / …) draw a
+        # full-canvas background + plot area BY DESIGN, so they are trusted
+        # and skipped.  Even on the LLM path, ignore background-like rects
+        # (white / none / transparent) — a white backdrop is not a defect.
+        if not (result.get("template") or "").strip():
+            for rm in re.finditer(r'<rect\b[^>]*?>', svg):
+                tag = rm.group(0)
+                wm = re.search(r'\bwidth="([0-9.]+)"', tag)
+                hm = re.search(r'\bheight="([0-9.]+)"', tag)
+                if not (wm and hm):
+                    continue
+                if (float(wm.group(1)) > 0.92 * vw
+                        and float(hm.group(1)) > 0.92 * vh):
+                    # A rect with NO fill attribute renders BLACK (a real
+                    # box) — only an EXPLICIT light/none fill is a backdrop.
+                    fm = re.search(r'fill\s*[:=]\s*["\']?\s*([#a-z0-9()]+)',
+                                   tag, re.I)
+                    fill = fm.group(1).lower() if fm else ""
+                    if fill in ("none", "#fff", "#ffffff", "white",
+                                "transparent"):
+                        continue
+                    issues.append("an element nearly fills the whole canvas")
+                    break
     # Colliding / duplicated labels: heavily-overlapping text pairs.  The
     # de-collision pass should remove these, so any that survive to a
     # served figure are a real defect (and the class the bounds/oversize
@@ -317,8 +360,8 @@ def inspect_quality(prompt: str, result: dict) -> list[str]:
     return issues
 
 
-async def _run() -> tuple[str, dict]:
-    prompt = _which_problem()
+async def _generate(prompt: str) -> dict:
+    """Run one prompt through the SAME production path the website uses."""
     sys.path.insert(0, os.getcwd())
     from studio.express import express_figure
     base = os.environ.get("OPENAI_BASE_URL") or os.environ.get(
@@ -326,8 +369,46 @@ async def _run() -> tuple[str, dict]:
     model = (os.environ.get("SEVIM_FORCE_ACTIVE_MODEL")
              or os.environ.get("SEVIM_VLLM_MODEL") or "gpt-4o")
     key = os.environ.get("OPENAI_API_KEY", "")
-    result = await express_figure(prompt, base_url=base, model=model, api_key=key)
-    return prompt, result
+    return await express_figure(prompt, base_url=base, model=model, api_key=key)
+
+
+async def _run() -> tuple[str, dict]:
+    prompt = _which_problem()
+    return prompt, await _generate(prompt)
+
+
+async def attempt_autofix(prompt: str, result: dict) -> tuple[bool, str, dict]:
+    """Try to remediate a flagged figure WITHOUT touching code or the live
+    system.  Two bounded steps, cheapest first:
+
+      1. Re-run the safe, deterministic layout passes (`polish_svg`) on the
+         existing SVG and re-inspect.  This alone fixes the common cases
+         (duplicate labels, recoverable overlap) with no LLM call.
+      2. Regenerate the figure from scratch and re-inspect.  This clears a
+         TRANSIENT LLM-variance defect; a deterministic-route bug
+         reproduces the same output and correctly stays unresolved, so it
+         escalates to a human.
+
+    Returns (resolved, method, fixed_result)."""
+    # Step 1 — re-polish in place.
+    try:
+        from studio.express import polish_svg
+        svg = result.get("svg") or ""
+        repolished = polish_svg(svg)
+        if repolished and repolished != svg:
+            cand = {**result, "svg": repolished}
+            if not inspect_quality(prompt, cand):
+                return True, "layout re-polish", cand
+    except Exception as exc:  # noqa: BLE001
+        print(f"[probe] autofix re-polish errored: {exc}", flush=True)
+    # Step 2 — regenerate.
+    try:
+        regen = await _generate(prompt)
+        if not inspect_quality(prompt, regen):
+            return True, "regeneration", regen
+    except Exception as exc:  # noqa: BLE001
+        print(f"[probe] autofix regeneration errored: {exc}", flush=True)
+    return False, "", result
 
 
 def main() -> int:
@@ -343,22 +424,43 @@ def main() -> int:
             + traceback.format_exc())
         return 1
     problems = inspect_quality(prompt, result)
-    if problems:
-        body = (
-            f"The 6-hourly quality probe flagged a figure on khayyammath.com.\n\n"
-            f"Prompt:\n  {prompt}\n\nProblems detected:\n"
-            + "\n".join(f"  - {p}" for p in problems)
-            + f"\n\nroute={result.get('template')}  "
-            f"retries_used={result.get('retries_used')}  "
-            f"svg_len={len(result.get('svg') or '')}\n\n"
-            "This is an automated probe; reply is not monitored. Inspect and "
-            "fix the system as needed.")
-        send_alert(
-            f"[Khayyam probe] quality issue: {prompt[:60]}", body)
-        print(f"[probe] PROBLEMS on {prompt!r}: {problems}", flush=True)
-    else:
+    if not problems:
         print(f"[probe] clean: {prompt!r} (route={result.get('template')})",
               flush=True)
+        return 0
+
+    # A problem was detected.  Optionally try to auto-remediate the figure
+    # before bothering the operator — escalate only PERSISTENT issues.
+    if AUTOFIX:
+        try:
+            resolved, method, _fixed = asyncio.run(attempt_autofix(prompt, result))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[probe] autofix crashed: {exc}", flush=True)
+            resolved, method = False, ""
+        if resolved:
+            print(f"[probe] AUTO-FIXED via {method}: {prompt!r} "
+                  f"(was: {problems})", flush=True)
+            return 0
+        autofix_note = (
+            "Auto-fix was ON and attempted (re-polish + regeneration) but the "
+            "figure still fails inspection, so this looks PERSISTENT and needs "
+            "a human (likely a deterministic-route or systemic bug, not a "
+            "transient flake).")
+    else:
+        autofix_note = "Auto-fix is OFF (SEVIM_PROBE_AUTOFIX not set)."
+
+    body = (
+        f"The 6-hourly quality probe flagged a figure on khayyammath.com.\n\n"
+        f"Prompt:\n  {prompt}\n\nProblems detected:\n"
+        + "\n".join(f"  - {p}" for p in problems)
+        + f"\n\nroute={result.get('template')}  "
+        f"retries_used={result.get('retries_used')}  "
+        f"svg_len={len(result.get('svg') or '')}\n\n"
+        + autofix_note
+        + "\n\nThis is an automated probe; reply is not monitored. Inspect "
+        "and fix the system as needed.")
+    send_alert(f"[Khayyam probe] quality issue: {prompt[:60]}", body)
+    print(f"[probe] PROBLEMS on {prompt!r}: {problems}", flush=True)
     return 0
 
 

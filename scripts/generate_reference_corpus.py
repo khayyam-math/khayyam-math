@@ -69,7 +69,7 @@ def _ref_user_text(prompt: str, citation: str) -> str:
 _UA = {
     "User-Agent": (
         "Khayyam-Math-Distillation/1.0 "
-        "(https://khayyammath.com; arash_kermani@yahoo.com) httpx"
+        "(+https://khayyammath.com) httpx"
     ),
 }
 

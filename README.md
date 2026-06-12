@@ -320,6 +320,46 @@ for a table of where each tier's figure actually comes from.
 The fine-tuned Qwen model is documented on Hugging Face:
 **[huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4](https://huggingface.co/khayyam-math/khayyam-math-qwen2.5-7b-v4)**.
 
+## Operational quality probe (optional, off by default)
+
+A self-hosted deployment can run a lightweight quality probe that, on a
+schedule, feeds one challenging prompt through the same production path
+your users hit (`express_figure`), inspects the resulting figure with
+structural checks (empty or malformed SVG, text outside the viewBox,
+oversized elements, overlapping or duplicated labels, leaked internals,
+generation errors), and emails the operator only when something is wrong.
+A clean run is silent, so the inbox carries real problems only. The
+implementation is `studio/quality_probe.py`; the AWS deployment wires it
+to EventBridge Scheduler in `infra/sevim_stack.py`.
+
+It is **off by default**. Nothing about it is hard-coded: the probe is
+created only when these variables are present in the deploying operator's
+environment (for example a gitignored `.env` that `infra/deploy.sh`
+sources). A fresh clone that runs `deploy.sh` gets no probe and no
+recipient address baked into the image.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SEVIM_PROBE_ENABLED` | off | Creates the schedule + probe task. Set to `1` to turn the probe on. |
+| `SEVIM_PROBE_ALERT_EMAIL` | unset | Where alerts are sent. Unset means the probe logs the problem but sends no email. |
+| `SEVIM_PROBE_AUTOFIX` | off | When `1`, a flagged figure is auto-remediated before any email (see below). |
+
+**Auto-remediation (`SEVIM_PROBE_AUTOFIX`).** When enabled, a detected
+problem is first re-attempted in place: the probe re-runs the safe,
+deterministic layout passes on the figure, and if that does not clear it,
+regenerates the figure once and re-inspects. The operator is emailed only
+if the problem **persists** after that, which distinguishes a transient
+generation flake from a real, systemic bug. This repairs the figure
+**output** only. It never edits code, never redeploys, and never modifies
+the running service. The probe task has no git-write or deploy
+credentials, so the live system is never autonomously self-modified;
+fixing a persistent bug stays a human-in-the-loop step.
+
+The admin dashboard whitelist follows the same rule:
+`SEVIM_ADMIN_EMAILS` comes only from the deploying environment, never from
+committed source. Unset means the admin route is invisible (404) to
+everyone.
+
 ## How it's built
 
 Roughly 25 K LOC Python + a small amount of HTML/JS, 275 tests passing.
