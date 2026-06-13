@@ -276,12 +276,335 @@ def render_menger():
     return _frame("".join(body)), narration
 
 
+# ── escape-time fractals (Mandelbrot / Julia) ────────────────────────
+_MAXIT = 60
+
+
+def _palette(it):
+    if it >= _MAXIT:
+        return "#0a1124"                      # interior
+    t = it / _MAXIT
+    r = max(0, min(255, int(12 + 243 * t ** 0.6)))
+    g = max(0, min(255, int(28 + 180 * t ** 1.2)))
+    b = max(0, min(255, int(90 + 120 * (1 - t))))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _rle(rows, ox, oy, cell):
+    out = []
+    for jy, row in enumerate(rows):
+        ix, n = 0, len(row)
+        while ix < n:
+            it = row[ix]
+            run = 1
+            while ix + run < n and row[ix + run] == it:
+                run += 1
+            out.append(f'<rect x="{ox + ix * cell:.1f}" y="{oy + jy * cell:.1f}" '
+                       f'width="{run * cell + 0.4:.1f}" height="{cell + 0.4:.1f}" '
+                       f'fill="{_palette(it)}"/>')
+            ix += run
+    return "".join(out)
+
+
+def _escape_field(wc, hc, xmin, xmax, ymin, ymax, step):
+    rows = []
+    for jy in range(hc):
+        cy = ymin + (ymax - ymin) * jy / (hc - 1)
+        row = []
+        for ix in range(wc):
+            cx = xmin + (xmax - xmin) * ix / (wc - 1)
+            row.append(step(cx, cy))
+        rows.append(row)
+    return rows
+
+
+def render_mandelbrot():
+    def step(cx, cy):
+        zr = zi = 0.0
+        for it in range(_MAXIT):
+            zr2, zi2 = zr * zr, zi * zi
+            if zr2 + zi2 > 4.0:
+                return it
+            zi = 2 * zr * zi + cy
+            zr = zr2 - zi2 + cx
+        return _MAXIT
+    wc, hc, cell = 168, 138, 2.3
+    rows = _escape_field(wc, hc, -2.4, 0.8, -1.3, 1.3, step)
+    ox = (_W - wc * cell) / 2
+    body = [_text(_W / 2, 40, "The Mandelbrot Set", fs=21, anchor="middle",
+                  weight="700"), _rle(rows, ox, 90, cell)]
+    body.append(_text(_W / 2, 90 + hc * cell + 28,
+                      "Points c for which z ↦ z² + c stays bounded from "
+                      "z₀ = 0. The boundary is an infinitely intricate "
+                      "fractal of dimension 2.",
+                      fs=13, anchor="middle", fill="#3a4250"))
+    narration = [
+        {"speak": "The Mandelbrot set is the most famous fractal in "
+                  "mathematics, living in the plane of complex numbers."},
+        {"speak": "For each point c, repeatedly apply the rule z becomes z "
+                  "squared plus c, starting from zero."},
+        {"speak": "If the values stay bounded forever, c belongs to the set, "
+                  "the dark interior; if they fly off to infinity, c is "
+                  "outside."},
+        {"speak": "The colours outside record how quickly each point escapes, "
+                  "which is what paints the glowing bands around the set."},
+        {"speak": "Its boundary is endlessly detailed: zoom in anywhere and "
+                  "tiny copies of the whole shape reappear, a hallmark of "
+                  "self-similar fractals."},
+    ]
+    return _frame("".join(body)), narration
+
+
+def render_julia():
+    cr, ci = -0.8, 0.156
+
+    def step(zr, zi):
+        for it in range(_MAXIT):
+            zr2, zi2 = zr * zr, zi * zi
+            if zr2 + zi2 > 4.0:
+                return it
+            zi = 2 * zr * zi + ci
+            zr = zr2 - zi2 + cr
+        return _MAXIT
+    wc, hc, cell = 168, 130, 2.3
+    rows = _escape_field(wc, hc, -1.7, 1.7, -1.3, 1.3, step)
+    ox = (_W - wc * cell) / 2
+    body = [_text(_W / 2, 40, "A Julia Set", fs=21, anchor="middle",
+                  weight="700"), _rle(rows, ox, 90, cell)]
+    body.append(_text(_W / 2, 90 + hc * cell + 28,
+                      "Same rule z ↦ z² + c, but c = −0.8 + 0.156i is FIXED "
+                      "and the starting point z₀ varies. Each c gives a "
+                      "different Julia set.",
+                      fs=13, anchor="middle", fill="#3a4250"))
+    narration = [
+        {"speak": "A Julia set uses the same rule as the Mandelbrot set, z "
+                  "becomes z squared plus c, but with the roles swapped."},
+        {"speak": "Here the constant c is fixed, and we instead vary the "
+                  "starting point and ask whether its orbit stays bounded."},
+        {"speak": "The points whose orbits remain bounded form this filled "
+                  "shape; the colours again measure escape speed outside it."},
+        {"speak": "Every value of c produces its own Julia set, ranging from "
+                  "connected blobs to scattered dust."},
+        {"speak": "In fact c belongs to the Mandelbrot set exactly when its "
+                  "Julia set is connected, tying the two fractals together."},
+    ]
+    return _frame("".join(body)), narration
+
+
+# ── Barnsley fern (an IFS fractal modelling a natural object) ─────────
+def render_barnsley_fern():
+    import random
+    rnd = random.Random(20240613)
+    x, y = 0.0, 0.0
+    pts = []
+    for i in range(9000):
+        r = rnd.random()
+        if r < 0.01:
+            x, y = 0.0, 0.16 * y
+        elif r < 0.86:
+            x, y = 0.85 * x + 0.04 * y, -0.04 * x + 0.85 * y + 1.6
+        elif r < 0.93:
+            x, y = 0.20 * x - 0.26 * y, 0.23 * x + 0.22 * y + 1.6
+        else:
+            x, y = -0.15 * x + 0.28 * y, 0.26 * x + 0.24 * y + 0.44
+        if i > 30:
+            pts.append((x, y))
+    # map x in [-2.2, 2.7], y in [0, 10] to screen (y up)
+    ox, oy, sc = 320, 540, 47
+    dots = "".join(
+        f'<circle cx="{ox + px * sc:.1f}" cy="{oy - py * sc:.1f}" r="0.7" '
+        f'fill="#1f7a33"/>' for px, py in pts)
+    body = [_text(_W / 2, 40, "The Barnsley Fern", fs=21, anchor="middle",
+                  weight="700"), dots]
+    body.append(_text(650, 150, "An iterated function system:", fs=14,
+                      weight="700"))
+    for k, ln in enumerate(["four affine maps, each a",
+                            "rotate-scale-shift of the plane,",
+                            "applied at random with fixed",
+                            "probabilities to a single point."]):
+        body.append(_text(650, 176 + k * 20, ln, fs=13, fill="#3a4250"))
+    body.append(_text(650, 286,
+                      "The orbit fills out a fern whose", fs=13))
+    body.append(_text(650, 306,
+                      "fronds are smaller copies of the", fs=13))
+    body.append(_text(650, 326, "whole — self-similar, like real", fs=13))
+    body.append(_text(650, 346, "plants. Dimension ≈ 1.74.", fs=13,
+                      weight="600"))
+    narration = [
+        {"speak": "The Barnsley fern shows how a lifelike natural shape can "
+                  "emerge from pure mathematics with almost no information."},
+        {"speak": "It uses four affine transformations, each one a rotate, "
+                  "scale, and shift of the plane, chosen at random with fixed "
+                  "probabilities."},
+        {"speak": "Start from a single point and repeatedly apply a randomly "
+                  "chosen map; the points quickly settle onto the fern."},
+        {"speak": "One map builds the stem, one the ever-shrinking main frond, "
+                  "and two place the left and right leaflets."},
+        {"speak": "Because each leaflet is a smaller copy of the whole fern, "
+                  "the figure is self-similar — the same principle nature uses "
+                  "to grow plants efficiently."},
+    ]
+    return _frame("".join(body)), narration
+
+
+# ── Cantor set ───────────────────────────────────────────────────────
+def render_cantor():
+    body = [_text(_W / 2, 40, "The Cantor Set", fs=21, anchor="middle",
+                  weight="700")]
+    segs = [(0.0, 1.0)]
+    x0, w, y = 90, 760, 110
+    for level in range(7):
+        for a, b in segs:
+            body.append(f'<rect x="{x0 + a * w:.1f}" y="{y}" '
+                        f'width="{(b - a) * w:.1f}" height="14" '
+                        f'fill="#1a3a63"/>')
+        body.append(_text(x0 + w + 14, y + 12, f"n = {level}", fs=12,
+                          fill="#5a6470"))
+        nxt = []
+        for a, b in segs:
+            t = (b - a) / 3
+            nxt.append((a, a + t))
+            nxt.append((b - t, b))
+        segs = nxt
+        y += 50
+    body.append(_text(_W / 2, y + 14,
+                      "Remove the open middle third of every segment, forever. "
+                      "Total length (2/3)ⁿ → 0, yet uncountably many points "
+                      "remain. Dimension = log2/log3 ≈ 0.631.",
+                      fs=13, anchor="middle", fill="#3a4250"))
+    narration = [
+        {"speak": "The Cantor set is the simplest fractal, built on a single "
+                  "line segment."},
+        {"speak": "Delete the open middle third, leaving two segments; then "
+                  "delete the middle third of each of those, and continue "
+                  "without end."},
+        {"speak": "The total length removed adds up to the whole, so what "
+                  "remains has length zero."},
+        {"speak": "Yet uncountably many points survive — every endpoint, and "
+                  "far more — so the set is large in number while tiny in "
+                  "length."},
+        {"speak": "Its fractal dimension, log two over log three, about 0.63, "
+                  "is between a point and a line, capturing this in-between "
+                  "nature."},
+    ]
+    return _frame("".join(body)), narration
+
+
+# ── Heighway dragon curve ────────────────────────────────────────────
+def render_dragon():
+    n = 13
+    seq = []
+    for i in range(1, 1 << n):
+        seq.append(1 if (((i & -i) << 1) & i) else 0)   # 1 = left, 0 = right
+    import math as _m
+    x, y, ang = 0.0, 0.0, 0.0
+    pts = [(x, y)]
+    for turn in [None] + seq:
+        if turn is not None:
+            ang += 90 if turn else -90
+        x += _m.cos(_m.radians(ang))
+        y += _m.sin(_m.radians(ang))
+        pts.append((x, y))
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+    sc = min(740 / (maxx - minx), 430 / (maxy - miny))
+    ox, oy = 100 - minx * sc, 110 - miny * sc
+    d = "M " + " L ".join(f"{ox + px * sc:.1f},{oy + py * sc:.1f}"
+                          for px, py in pts)
+    body = [_text(_W / 2, 40, "The Dragon Curve", fs=21, anchor="middle",
+                  weight="700"),
+            f'<path d="{d}" fill="none" stroke="#1a3a63" stroke-width="1.4"/>']
+    body.append(_text(_W / 2, 560,
+                      "Fold a strip of paper in half repeatedly, then unfold "
+                      "each crease to 90°: the edge traces this curve. It "
+                      "never crosses itself and tiles the plane. Dimension = 2.",
+                      fs=13, anchor="middle", fill="#3a4250"))
+    narration = [
+        {"speak": "The dragon curve has a charming origin: fold a long strip of "
+                  "paper in half, again and again, always the same way."},
+        {"speak": "Unfold it so every crease becomes a right angle, and the "
+                  "edge of the strip traces out this intricate dragon."},
+        {"speak": "Each extra fold doubles the curve by copying it and turning "
+                  "the copy ninety degrees, which is the rule drawn here."},
+        {"speak": "Remarkably, the path never crosses itself, and infinitely "
+                  "many dragons fit together to tile the whole plane."},
+        {"speak": "Although drawn with line segments, it wiggles so densely "
+                  "that its fractal dimension is two — it fills area like a "
+                  "region, not a curve."},
+    ]
+    return _frame("".join(body)), narration
+
+
+# ── Pythagoras tree ──────────────────────────────────────────────────
+def render_pythagoras_tree():
+    import math as _m
+    out = []
+
+    def grow(x1, y1, x2, y2, depth):
+        if depth == 0:
+            return
+        dx, dy = x2 - x1, y2 - y1
+        # perpendicular pointing "up" the tree (screen y is down): n = (dy, -dx)
+        p3 = (x2 + dy, y2 - dx)
+        p4 = (x1 + dy, y1 - dx)
+        shade = 30 + depth * 16
+        out.append(f'<path d="M {x1:.1f},{y1:.1f} L {x2:.1f},{y2:.1f} '
+                   f'L {p3[0]:.1f},{p3[1]:.1f} L {p4[0]:.1f},{p4[1]:.1f} Z" '
+                   f'fill="rgb({shade//2},{min(160,shade+70)},{shade//2})" '
+                   f'stroke="#234a23" stroke-width="0.4"/>')
+        # apex of the 45-45-90 cap on the top edge (p4 -> p3, direction (dx,dy))
+        mx, my = (p4[0] + p3[0]) / 2, (p4[1] + p3[1]) / 2
+        ax, ay = mx + dy / 2, my - dx / 2
+        grow(p4[0], p4[1], ax, ay, depth - 1)
+        grow(ax, ay, p3[0], p3[1], depth - 1)
+
+    grow(430, 560, 510, 560, 11)
+    body = [_text(_W / 2, 40, "The Pythagoras Tree", fs=21, anchor="middle",
+                  weight="700")] + out
+    body.append(_text(_W / 2, 575,
+                      "On each square, build two smaller squares meeting at a "
+                      "right angle (a 45° split) and repeat. The squares on "
+                      "the two children always sum to the parent — the "
+                      "Pythagorean theorem.",
+                      fs=12.5, anchor="middle", fill="#3a4250"))
+    narration = [
+        {"speak": "The Pythagoras tree turns the most famous theorem in "
+                  "geometry into a growing fractal."},
+        {"speak": "Start from a square. On its top edge, erect a right "
+                  "triangle, and build a smaller square on each of the "
+                  "triangle's two short sides."},
+        {"speak": "By the Pythagorean theorem the areas of the two child "
+                  "squares always add up to the area of the parent square."},
+        {"speak": "Apply the same construction to every new square, and the "
+                  "squares branch out like the canopy of a tree."},
+        {"speak": "Each branch is a scaled, rotated copy of the whole tree, so "
+                  "the figure is self-similar, and with a forty-five degree "
+                  "split it neatly fills a finite region."},
+    ]
+    return _frame("".join(body)), narration
+
+
 # ── routing ──────────────────────────────────────────────────────────
 def which_fractal(prompt: str):
     p = (prompt or "").lower()
+    if "mandelbrot" in p:
+        return "mandelbrot"
+    if "julia" in p and "set" in p or "julia fractal" in p:
+        return "julia"
+    if "barnsley" in p or ("fern" in p and "fractal" in p) or \
+            ("fractal" in p and "fern" in p):
+        return "barnsley"
+    if "cantor" in p:
+        return "cantor"
+    if "dragon curve" in p or ("dragon" in p and "fractal" in p) or \
+            "heighway" in p:
+        return "dragon"
+    if "pythagoras tree" in p or "pythagorean tree" in p:
+        return "pythagoras"
     if "menger" in p:
         return "menger"
-    if "koch" in p or ("snowflake" in p and "fractal" not in p) or "snowflake" in p:
+    if "koch" in p or "snowflake" in p:
         return "koch"
     if "carpet" in p and ("sierpinski" in p or "sierpinsky" in p or "fractal" in p):
         return "sierpinski_carpet"
@@ -301,6 +624,12 @@ _RENDER = {
     "sierpinski_triangle": render_sierpinski_triangle,
     "sierpinski_carpet": render_sierpinski_carpet,
     "menger": render_menger,
+    "mandelbrot": render_mandelbrot,
+    "julia": render_julia,
+    "barnsley": render_barnsley_fern,
+    "cantor": render_cantor,
+    "dragon": render_dragon,
+    "pythagoras": render_pythagoras_tree,
 }
 
 

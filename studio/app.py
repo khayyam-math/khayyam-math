@@ -1153,8 +1153,20 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
             describe_language as _describe_lang,
         )
         _chat_lang = _detect_lang(req.user)
-        if _chat_lang and _chat_lang not in ("en", "und", ""):
+        # Pin the language of the CURRENT message — including English.
+        # Skipping English (the old behaviour) left the reply free to
+        # drift: a user with any earlier German context could get German
+        # answers to a plain-English prompt (field report 2026-06-13: an
+        # English fractal query answered in German).  Pinning the current
+        # prompt's language to every turn makes the output follow the
+        # message in hand, never the session history.
+        if _chat_lang and _chat_lang not in ("und", ""):
             _chat_lang_name = _describe_lang(_chat_lang)
+            _switch = ("never switch to English just because the codebase / "
+                       "system prompts are in English"
+                       if _chat_lang != "en"
+                       else "never switch to another language, even if an "
+                            "earlier message in this conversation used one")
             _sys = _sys + (
                 f"\n\n=== OUTPUT LANGUAGE (HARD CONSTRAINT) ===\n"
                 f"The user wrote in {_chat_lang_name}.  Every word "
@@ -1165,8 +1177,7 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
                 f"literal message; you do NOT decide and you do "
                 f"NOT switch.  Math notation (π, ∫, x², √) stays "
                 f"as symbols.  Quote the user's terminology when "
-                f"useful but never default to English just because "
-                f"the codebase / system prompts are in English."
+                f"useful but {_switch}."
             )
             print(
                 f"[chat-loop] chat language pinned: {_chat_lang!r}",

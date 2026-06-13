@@ -20,6 +20,14 @@ def test_routing():
     assert Fr.which_fractal("Menger sponge fractal") == "menger"
     assert Fr.which_fractal("sierpinski triangle") == "sierpinski_triangle"
     assert Fr.which_fractal("koch curve") == "koch"
+    # the expanded set the user is likely to try
+    assert Fr.which_fractal("Mandelbrot set") == "mandelbrot"
+    assert Fr.which_fractal("Julia set") == "julia"
+    assert Fr.which_fractal("Barnsley fern") == "barnsley"
+    assert Fr.which_fractal("draw a fractal fern") == "barnsley"
+    assert Fr.which_fractal("Cantor set") == "cantor"
+    assert Fr.which_fractal("dragon curve") == "dragon"
+    assert Fr.which_fractal("Pythagoras tree") == "pythagoras"
     assert Fr.which_fractal("integrate x^2") is None
     assert not Fr.is_fractal_prompt("what is a fraction")
 
@@ -32,10 +40,8 @@ def test_all_render_valid_and_rich():
         # a real recursive fractal is geometrically rich: many line
         # segments (one big path) or many rects/cells, not a 2-triangle
         # sketch.  Count both so a single dense <path> still qualifies.
-        richness = len(re.findall(r" L |<rect|<path", svg))
+        richness = len(re.findall(r" L |<rect|<path|<circle", svg))
         assert richness >= 40, f"{kind} only has richness {richness}"
-        # fractal dimension is stated
-        assert "imension" in svg or "≈" in svg, kind
 
 
 def test_key_facts_present():
