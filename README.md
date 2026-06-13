@@ -80,9 +80,10 @@ loop grows the taxonomy from unmatched prompts under operator review with
 a cross-category de-duplication guarantee. The `np_completeness` route
 above was the first **renderer-first** conversion of a formerly
 open-ended class; `reduction`, `bayes_tree`, `normal_distribution`,
-`confusion_matrix`, and `infinitude_primes` (Euclid's proof) followed the
-same pattern, each replacing a class the LLM drew unreliably with an
-arithmetic-checked deterministic renderer.
+`confusion_matrix`, `infinitude_primes` (Euclid's proof), and `ftc` (the
+Fundamental Theorem of Calculus proof) followed the same pattern, each
+replacing a class the LLM drew unreliably with a deterministic renderer
+that is correct by construction.
 See [docs/TEMPLATE_TAXONOMY_PLAN.md](docs/TEMPLATE_TAXONOMY_PLAN.md).
 
 When none of the fourteen match, the **LLM-SVG fallback** runs with a
