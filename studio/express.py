@@ -2905,6 +2905,38 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"ftc route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic fractal renderers ──────────────────────────
+    # Koch snowflake, Sierpinski triangle/carpet, Menger sponge.  These
+    # are defined by an exact recursion, so the LLM-SVG path (which sketches
+    # a couple of triangles) is strictly worse than computing the geometry.
+    if (not _refining
+            and os.environ.get("SEVIM_FRACTAL_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.fractals import (
+                generate_fractal_svg, is_fractal_prompt,
+            )
+            if is_fractal_prompt(routing_prompt):
+                frac = await generate_fractal_svg(routing_prompt)
+                if frac is not None:
+                    frsvg, frnarr = frac
+                    _log(f"fractal fast-path: svg={len(frsvg)} chars")
+                    if on_svg_chunk is not None:
+                        try:
+                            await on_svg_chunk(frsvg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return {
+                        "svg": frsvg,
+                        "narration": frnarr,
+                        "title": "",
+                        "review_history": [],
+                        "retries_used": 0,
+                        "repairs": [],
+                        "template": "fractal",
+                    }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"fractal route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic stats templates (normal dist + confusion matrix) ─
     # Two more classes the LLM drew unreliably (lopsided bell curves with
     # wrong percentages; confusion matrices with swapped FP/FN or wrong
