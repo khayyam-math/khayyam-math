@@ -2874,6 +2874,37 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"infinitude-primes route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic Fundamental Theorem of Calculus proof ──────
+    # "Prove / show the proof of the FTC" failed the 'proof' completeness
+    # rubric and the vision review on the LLM-SVG path.  The proof has one
+    # fixed structure; render it correct-by-construction with the
+    # area-under-the-curve strip the argument is about.
+    if (not _refining
+            and os.environ.get("SEVIM_FTC_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.ftc import (
+                generate_ftc_svg, is_ftc_prompt,
+            )
+            if is_ftc_prompt(routing_prompt):
+                fsvg, fnarr = await generate_ftc_svg(routing_prompt)
+                _log(f"ftc fast-path: svg={len(fsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(fsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": fsvg,
+                    "narration": fnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "ftc",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"ftc route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic stats templates (normal dist + confusion matrix) ─
     # Two more classes the LLM drew unreliably (lopsided bell curves with
     # wrong percentages; confusion matrices with swapped FP/FN or wrong
