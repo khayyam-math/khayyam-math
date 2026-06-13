@@ -117,6 +117,11 @@
   narration and a title $\to$ the canvas service writes them to disk and
   streams them via Server-Sent Events $\to$ the viewer renders the SVG and
   plays the narration \emph{in lock-step} with element highlights.
+  \vspace{1mm}\par
+  \footnotesize\color{kmgrey}
+  \emph{Telemetry} = an automatic log of each turn (the prompt, the figure
+  produced, which model and route, how long it took, its cost, and whether
+  it passed review) --- the data we use to monitor quality and to train.
 \end{frame}
 
 % ===================================================================
@@ -423,20 +428,26 @@
 
 % ===================================================================
 \begin{frame}{Closed loop: telemetry $\to$ fine-tuned open model}
+  \footnotesize
+  \textbf{Telemetry} is simply the saved record of every turn --- prompt,
+  figure, model, latency, cost, outcome. Every \emph{accepted} figure is a
+  ready-made training example, so the system improves an open model from
+  its own usage:
+  \vspace{2mm}
   \begin{center}
   \begin{tikzpicture}[node distance=8mm and 14mm]
-    \node[store] (db) {telemetry\\(accepted turns)};
-    \node[box,right=of db] (exp) {export JSONL};
+    \node[store] (db) {telemetry\\\scriptsize saved turns};
+    \node[box,right=of db] (exp) {export JSONL\\\scriptsize accepted figures};
     \node[box,right=of exp] (gpu) {LoRA train\\\scriptsize local GPU};
     \node[store,right=of gpu] (hf) {Hugging Face\\\scriptsize adapter};
     \draw[ar](db)--(exp);\draw[ar](exp)--(gpu);\draw[ar](gpu)--(hf);
     \draw[ar](hf.south)-- ++(0,-7mm) -| node[lab,below,pos=.25]{optional self-host} (db.south);
   \end{tikzpicture}
   \end{center}
-  \footnotesize
-  Every accepted figure is a training example. A LoRA adapter on
-  Qwen2.5-7B is distilled offline and published; the live service does not
-  depend on it (a side artefact toward an offline-capable tutor).
+  \vspace{1mm}
+  A LoRA adapter on Qwen2.5-7B is distilled offline and published; the live
+  service does not depend on it (a side artefact toward an offline-capable
+  tutor).
 \end{frame}
 
 % ===================================================================
