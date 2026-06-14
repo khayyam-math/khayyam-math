@@ -762,6 +762,110 @@ class SevimStack(Stack):
                 ),
             )
 
+        # ── 6d. Daily "Not quite right?" feedback digest ─────────────
+        # OFF by default.  When a user clicks "Not quite right?" on a
+        # figure we record the report in the telemetry `feedback` table
+        # with status='open' — but nobody is watching that queue.  This
+        # scheduled Fargate task runs `python -m studio.feedback_digest`
+        # once a day, e-mails the operator the still-open reports (prompt,
+        # the user's words, date, canvas id) and sends NOTHING when the
+        # queue is empty.  It only surfaces reports; it never edits a
+        # figure or resolves anything.  Unlike the probe there is no
+        # EndDate — user feedback is an ongoing concern.
+        #
+        # Like the probe, this whole block only materialises when
+        # SEVIM_FEEDBACK_DIGEST_ENABLED is truthy in the deploying
+        # machine's environment, and the recipient comes only from
+        # SEVIM_PROBE_ALERT_EMAIL there — never committed to source.  A
+        # clone that runs deploy.sh without the flag gets no digest task,
+        # no schedule, and no hard-coded address.
+        _digest_enabled = os.environ.get(
+            "SEVIM_FEEDBACK_DIGEST_ENABLED", "").strip().lower() in (
+                "1", "true", "on", "yes")
+        if _digest_enabled:
+            digest_task = ecs.FargateTaskDefinition(
+                self, "FeedbackDigestTask",
+                cpu=512,
+                memory_limit_mib=1024,  # a tiny SELECT + one e-mail
+            )
+            digest_task.add_container(
+                "digest",
+                image=ecs.ContainerImage.from_docker_image_asset(image_asset),
+                command=["python", "-m", "studio.feedback_digest"],
+                environment={
+                    **env_vars,
+                    **({"SEVIM_PROBE_ALERT_EMAIL": _probe_alert_email}
+                       if _probe_alert_email else {}),
+                },
+                secrets=secrets_map,
+                logging=ecs.LogDrivers.aws_logs(
+                    stream_prefix="digest", log_group=log_group,
+                ),
+            )
+            # SES so it can e-mail; RDS so it can read the feedback table.
+            digest_task.task_role.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["ses:SendEmail", "ses:SendRawEmail"],
+                    resources=["*"],
+                )
+            )
+            digest_sg = ec2.SecurityGroup(
+                self, "FeedbackDigestSg", vpc=vpc, allow_all_outbound=True,
+                description="Daily feedback-digest Fargate task",
+            )
+            db.connections.allow_default_port_from(digest_sg)
+
+            digest_sched_role = iam.Role(
+                self, "FeedbackDigestSchedulerRole",
+                assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+            )
+            digest_sched_role.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["ecs:RunTask"],
+                    resources=[digest_task.task_definition_arn,
+                               f"{digest_task.task_definition_arn}:*"],
+                )
+            )
+            digest_sched_role.add_to_principal_policy(
+                iam.PolicyStatement(
+                    actions=["iam:PassRole"],
+                    resources=[
+                        digest_task.task_role.role_arn,
+                        digest_task.execution_role.role_arn,  # type: ignore[union-attr]
+                    ],
+                    conditions={
+                        "StringLike": {
+                            "iam:PassedToService": "ecs-tasks.amazonaws.com"},
+                    },
+                )
+            )
+
+            scheduler.CfnSchedule(
+                self, "FeedbackDigestSchedule",
+                flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(
+                    mode="OFF",
+                ),
+                # 07:00 UTC every day — a morning summary, no EndDate.
+                schedule_expression="cron(0 7 * * ? *)",
+                state="ENABLED",
+                target=scheduler.CfnSchedule.TargetProperty(
+                    arn=cluster.cluster_arn,
+                    role_arn=digest_sched_role.role_arn,
+                    ecs_parameters=scheduler.CfnSchedule.EcsParametersProperty(
+                        task_definition_arn=digest_task.task_definition_arn,
+                        launch_type="FARGATE",
+                        task_count=1,
+                        network_configuration=scheduler.CfnSchedule.NetworkConfigurationProperty(
+                            awsvpc_configuration=scheduler.CfnSchedule.AwsVpcConfigurationProperty(
+                                subnets=[s.subnet_id for s in vpc.private_subnets],
+                                security_groups=[digest_sg.security_group_id],
+                                assign_public_ip="DISABLED",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
         # ── 7. Outputs ───────────────────────────────────────────────
         url = f"https://{domain}" if domain else f"http://{service.load_balancer.load_balancer_dns_name}"
         CfnOutput(self, "ServiceUrl", value=url)
