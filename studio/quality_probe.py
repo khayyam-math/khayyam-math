@@ -415,6 +415,16 @@ def main() -> int:
     if _today() > END_DATE:
         print(f"[probe] past end date {END_DATE}; no-op", flush=True)
         return 0
+    # Run as `python -m studio.quality_probe` we bypass studio/__main__.py,
+    # so hydrate SEVIM_TELEMETRY_DB from the RDS secret here — otherwise the
+    # answer-cache/taxonomy reads hit an empty ephemeral SQLite instead of
+    # the shared production DB.
+    sys.path.insert(0, os.getcwd())
+    try:
+        from service.secrets import bootstrap as _bootstrap_secrets
+        _bootstrap_secrets()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[probe] secret bootstrap skipped: {exc}", flush=True)
     try:
         prompt, result = asyncio.run(_run())
     except Exception:  # noqa: BLE001

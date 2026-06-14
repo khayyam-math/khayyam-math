@@ -83,6 +83,16 @@ def _send(subject: str, body: str) -> None:
 
 def main() -> int:
     sys.path.insert(0, os.getcwd())
+    # Hydrate SEVIM_TELEMETRY_DB from the RDS secret BEFORE touching
+    # telemetry.  Run as `python -m studio.feedback_digest` we bypass
+    # studio/__main__.py (which normally bootstraps), so without this the
+    # telemetry layer falls back to an ephemeral per-container SQLite and
+    # never sees the production feedback table.
+    try:
+        from service.secrets import bootstrap as _bootstrap_secrets
+        _bootstrap_secrets()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[digest] secret bootstrap skipped: {exc}", flush=True)
     try:
         from sevim.telemetry import get_telemetry
         tel = get_telemetry()
