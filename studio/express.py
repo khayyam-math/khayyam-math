@@ -2905,6 +2905,36 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"ftc route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic spectral-theorem renderer ──────────────────
+    # "Explain the spectral theorem with an example" failed vision review
+    # with a TRUNCATED Q^T matrix on the LLM-SVG path.  A = Q Λ Q^T has one
+    # fixed structure and the matrices are exact, so compute + assert them.
+    if (not _refining
+            and os.environ.get("SEVIM_SPECTRAL_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.spectral import (
+                generate_spectral_svg, is_spectral_prompt,
+            )
+            if is_spectral_prompt(routing_prompt):
+                ssvg, snarr = await generate_spectral_svg(routing_prompt)
+                _log(f"spectral fast-path: svg={len(ssvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(ssvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": ssvg,
+                    "narration": snarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "spectral",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"spectral route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic fractal renderers ──────────────────────────
     # Koch snowflake, Sierpinski triangle/carpet, Menger sponge.  These
     # are defined by an exact recursion, so the LLM-SVG path (which sketches
