@@ -2905,6 +2905,70 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"ftc route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic Newton's-method intro (vague prompts) ──────
+    # A user reported the LLM-SVG figure's "tangents" were not tangent.
+    # The correct deterministic newton_method renderer only fires when the
+    # prompt pins a concrete f/x₀; a vague "explain Newton's method" fell
+    # through to LLM-SVG and drew non-tangent lines.  Route those vague
+    # prompts to the canonical √2 example through the SAME exact renderer.
+    # Prompts that DO pin a function are left to the template router.
+    if (not _refining
+            and os.environ.get("SEVIM_NEWTON_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.newton_intro import (
+                generate_newton_intro_svg, is_newton_intro_prompt,
+            )
+            if is_newton_intro_prompt(routing_prompt):
+                nsvg, nnarr = await generate_newton_intro_svg(routing_prompt)
+                _log(f"newton-intro fast-path: svg={len(nsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(nsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": nsvg,
+                    "narration": nnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "newton_intro",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"newton-intro route errored: {type(exc).__name__}: {exc}")
+
+    # ── Deterministic Taylor-series-of-sin(x) renderer ───────────
+    # A user reported the LLM-SVG figure named curves/legends in narration
+    # without highlighting them.  Render sin(x) and its degree-1/3/5/7
+    # Taylor polynomials with stable curve+legend ids, and narration that
+    # highlights each curve together with its legend entry as it is named.
+    if (not _refining
+            and os.environ.get("SEVIM_TAYLOR_SIN_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.taylor_sin import (
+                generate_taylor_sin_svg, is_taylor_sin_prompt,
+            )
+            if is_taylor_sin_prompt(routing_prompt):
+                tsvg, tnarr = await generate_taylor_sin_svg(routing_prompt)
+                _log(f"taylor-sin fast-path: svg={len(tsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(tsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": tsvg,
+                    "narration": tnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "taylor_sin",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"taylor-sin route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic spectral-theorem renderer ──────────────────
     # "Explain the spectral theorem with an example" failed vision review
     # with a TRUNCATED Q^T matrix on the LLM-SVG path.  A = Q Λ Q^T has one

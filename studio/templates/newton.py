@@ -451,7 +451,11 @@ def newton_method(
                 f"and follow it down to where it crosses the x-axis. "
                 f"That crossing is x_{i+1} equals {xn:.4g}."
             ),
-            "highlight": [f"tangent_{i}", f"xn_{i+1}_label"],
+            # Highlight the iterate DOT (always drawn) rather than its
+            # label: labels for clustered iterates are suppressed by the
+            # 60-px de-collision rule, which would otherwise leave the
+            # narration pointing at an element that isn't in the SVG.
+            "highlight": [f"tangent_{i}", f"xn_{i+1}"],
         })
     narration.append({
         "speak": (
