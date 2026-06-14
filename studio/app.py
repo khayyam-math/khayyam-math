@@ -139,7 +139,8 @@ def model_catalog() -> list[dict[str, Any]]:
 
       id            persisted in telemetry.model_id; never user-facing
       label         shown in the admin page
-      default       true for the entry pre-selected when nothing is set
+      default       the production-served backend, pre-selected when no
+                    admin override and no force-flag are set
       available     false if the backend cannot serve traffic right now
       reason        human-readable reason when available=false
       experimental  display a small "experimental" badge in the UI
@@ -159,24 +160,20 @@ def model_catalog() -> list[dict[str, Any]]:
          else "vLLM endpoint not responding (bootstrap / outage)")
     )
     return [
-        # Order matters: ``get_active_model()`` picks the first
-        # available entry as a hard fallback when the admin setting
-        # and the marked default are both unreachable.  The in-house
-        # Qwen LoRA is the preferred backend once it's wired up; if
-        # the GPU isn't running we cleanly fall back to OpenAI.
-        {
-            "id": "qwen_lora_v4",
-            "label": "Qwen 2.5-7B + Khayyam Math v4 (in-house LoRA)",
-            "default": True,
-            "available": qwen_reachable,
-            "reason": qwen_reason,
-            "experimental": True,
-            "cost_tier": "in-house",
-        },
+        # Order matters: ``get_active_model()`` picks the marked default
+        # (rule 2) and, failing that, the first available entry (rule 3).
+        # GPT-4o is the backend ACTUALLY SERVED in production, so it is the
+        # default and listed first.  The in-house Qwen LoRA is an
+        # EXPERIMENTAL, offline-trained adapter (a side artefact of the
+        # distillation loop): it serves live traffic only if an operator
+        # both stands up its vLLM endpoint AND selects it on the admin
+        # page.  It is never in the live path by default, and the
+        # production deploy additionally forces gpt-4o via
+        # SEVIM_FORCE_ACTIVE_MODEL, which beats this catalog entirely.
         {
             "id": "gpt-4o",
-            "label": "GPT-4o (OpenAI)",
-            "default": False,
+            "label": "GPT-4o (OpenAI) — production default",
+            "default": True,
             "available": openai_ready,
             "reason": "" if openai_ready else "OPENAI_API_KEY is not configured",
             "experimental": False,
@@ -192,12 +189,22 @@ def model_catalog() -> list[dict[str, Any]]:
             "cost_tier": "cheap",
         },
         {
-            "id": "qwen_base",
-            "label": "Qwen 2.5-7B (base, no LoRA)",
+            "id": "qwen_lora_v4",
+            "label": "Qwen 2.5-7B + Khayyam Math v4 LoRA "
+                     "(experimental · offline-trained · opt-in self-host)",
             "default": False,
             "available": qwen_reachable,
             "reason": qwen_reason,
-            "experimental": False,
+            "experimental": True,
+            "cost_tier": "in-house",
+        },
+        {
+            "id": "qwen_base",
+            "label": "Qwen 2.5-7B (base, no LoRA · experimental)",
+            "default": False,
+            "available": qwen_reachable,
+            "reason": qwen_reason,
+            "experimental": True,
             "cost_tier": "in-house",
         },
     ]

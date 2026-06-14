@@ -87,15 +87,15 @@ def test_get_active_model_falls_back_when_setting_missing(monkeypatch):
     from studio import app as app_mod
     importlib.reload(app_mod)
     chosen = app_mod.get_active_model()
-    # Catalog has qwen_lora_v4 marked default; nothing is available
-    # in this test env, so we fall through to step 4 and return the
-    # marked default string for deterministic logging.
-    assert chosen == "qwen_lora_v4"
+    # gpt-4o is the marked default (the production-served backend), so
+    # even when nothing is available we fall through to step 4 and return
+    # it for deterministic logging.
+    assert chosen == "gpt-4o"
 
 
-def test_get_active_model_prefers_first_available_when_default_offline(monkeypatch):
-    """Qwen is the *marked* default but unavailable in dev → should
-    return the first available backend (gpt-4o) without crashing."""
+def test_get_active_model_defaults_to_gpt4o(monkeypatch):
+    """With an OpenAI key and no admin override / force flag, the marked
+    default (gpt-4o) serves — Qwen is NOT auto-selected."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
     monkeypatch.delenv("SEVIM_QWEN_VLLM_URL", raising=False)
     from studio import app as app_mod
@@ -103,16 +103,31 @@ def test_get_active_model_prefers_first_available_when_default_offline(monkeypat
     assert app_mod.get_active_model() == "gpt-4o"
 
 
-def test_get_active_model_picks_qwen_when_available(monkeypatch):
-    """Once Qwen vLLM is wired up AND the reachability probe passes,
-    the marked default takes over.  We stub the probe — the previous
-    test version only set the URL env, which is no longer sufficient
-    because catalog availability now also requires an HTTP probe."""
+def test_get_active_model_serves_gpt4o_even_when_qwen_reachable(monkeypatch):
+    """Qwen is now opt-in, not the default.  Even when its vLLM endpoint
+    is up, traffic stays on gpt-4o unless an operator explicitly selects
+    Qwen on the admin page."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
     monkeypatch.setenv("SEVIM_QWEN_VLLM_URL", "http://10.0.0.1:8000/v1")
     from studio import app as app_mod
     importlib.reload(app_mod)
     monkeypatch.setattr(app_mod, "_qwen_lora_vllm_reachable", lambda: True)
+    assert app_mod.get_active_model() == "gpt-4o"
+
+
+def test_get_active_model_picks_qwen_when_admin_selects_it(monkeypatch):
+    """An operator can still opt into Qwen by selecting it on the admin
+    page (the active_model setting); it serves only when also reachable."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+    monkeypatch.setenv("SEVIM_QWEN_VLLM_URL", "http://10.0.0.1:8000/v1")
+    from studio import app as app_mod
+    importlib.reload(app_mod)
+    monkeypatch.setattr(app_mod, "_qwen_lora_vllm_reachable", lambda: True)
+
+    class _Tel:
+        def get_setting(self, k):
+            return "qwen_lora_v4" if k == "active_model" else None
+    monkeypatch.setattr("sevim.telemetry.get_telemetry", lambda: _Tel())
     assert app_mod.get_active_model() == "qwen_lora_v4"
 
 
