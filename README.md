@@ -68,7 +68,7 @@ shapes it handles.
 | 10 | `graphviz` (`dot`, `circo`, `fdp`) | DFA / Turing / DAG / tree / Hasse / Cayley | LLM emits DOT; Graphviz renders |
 | 11 | `matplotlib` | Function plots, regression, decision boundaries, 3-D surfaces | LLM emits closed-vocabulary plot spec; matplotlib renders |
 | 12 | `template_router` | Matrix mul / transpose / det / inverse, Pythagoras, Newton, sphere/cone volume, fraction, unit circle, Venn, etc. (19 named templates) | Per-template gpt-4o-mini classifier + pure-Python renderer |
-| 13 | `FDL` (Figure Description Language) | Function-graphable prompts that aren't a named template — "explain Newton's method visually" | LLM emits a `Scene` of ten composable primitives; SymPy backs every tangent slope and intersection |
+| 13 | `FDL` (Figure Description Language) | Function-graphable prompts that aren't a named template — "sketch the tangent to f at x = 3" | LLM emits a `Scene` of ten composable primitives; SymPy backs every tangent slope and intersection |
 | 14 | `sequential` (fallback) | Generic "step by step" prompts | Decomposes into ordered sub-prompts, recurses per step |
 
 On top of the fixed cascade sits an optional **category→template
@@ -80,10 +80,15 @@ loop grows the taxonomy from unmatched prompts under operator review with
 a cross-category de-duplication guarantee. The `np_completeness` route
 above was the first **renderer-first** conversion of a formerly
 open-ended class; `reduction`, `bayes_tree`, `normal_distribution`,
-`confusion_matrix`, `infinitude_primes` (Euclid's proof), and `ftc` (the
-Fundamental Theorem of Calculus proof) followed the same pattern, each
-replacing a class the LLM drew unreliably with a deterministic renderer
-that is correct by construction.
+`confusion_matrix`, `infinitude_primes` (Euclid's proof), `ftc` (the
+Fundamental Theorem of Calculus proof), `spectral` (the spectral theorem
+with an asserted `A = QΛQᵀ`), `newton_intro` (a vague "explain Newton's
+method" prompt → the canonical √2 example, drawn through the same exact
+tangent renderer the named-function path uses), and `taylor_sin` (sin x
+with its degree-1/3/5/7 Taylor polynomials, each curve bound to its legend
+entry for narration highlighting) followed the same pattern, each replacing
+a class the LLM drew unreliably with a deterministic renderer that is
+correct by construction.
 See [docs/TEMPLATE_TAXONOMY_PLAN.md](docs/TEMPLATE_TAXONOMY_PLAN.md).
 
 When none of the fourteen match, the **LLM-SVG fallback** runs with a
