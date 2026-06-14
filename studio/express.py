@@ -2999,6 +2999,38 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"spectral route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic singular value decomposition renderer ──────
+    # "Show the SVD of a 2x2 matrix" failed on the LLM-SVG path: route=None,
+    # text outside the viewBox, overlap, and a vision review that the figure
+    # lacked orthonormal columns for U and V.  A = U Σ Vᵀ has one fixed
+    # structure and the matrices are exact, so compute + assert them (and
+    # the orthonormality), and draw the unit-circle→ellipse geometry.
+    if (not _refining
+            and os.environ.get("SEVIM_SVD_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.svd import (
+                generate_svd_svg, is_svd_prompt,
+            )
+            if is_svd_prompt(routing_prompt):
+                dsvg, dnarr = await generate_svd_svg(routing_prompt)
+                _log(f"svd fast-path: svg={len(dsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(dsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": dsvg,
+                    "narration": dnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "svd",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"svd route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic fractal renderers ──────────────────────────
     # Koch snowflake, Sierpinski triangle/carpet, Menger sponge.  These
     # are defined by an exact recursion, so the LLM-SVG path (which sketches
