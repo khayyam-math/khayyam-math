@@ -82,7 +82,9 @@ above was the first **renderer-first** conversion of a formerly
 open-ended class; `reduction`, `bayes_tree`, `normal_distribution`,
 `confusion_matrix`, `infinitude_primes` (Euclid's proof), `ftc` (the
 Fundamental Theorem of Calculus proof), `spectral` (the spectral theorem
-with an asserted `A = QΛQᵀ`), `newton_intro` (a vague "explain Newton's
+with an asserted `A = QΛQᵀ`), `svd` (the singular value decomposition with
+an asserted `A = UΣVᵀ`, orthonormal `U`/`V`, and the unit-circle→ellipse
+geometry), `newton_intro` (a vague "explain Newton's
 method" prompt → the canonical √2 example, drawn through the same exact
 tangent renderer the named-function path uses), and `taylor_sin` (sin x
 with its degree-1/3/5/7 Taylor polynomials, each curve bound to its legend
