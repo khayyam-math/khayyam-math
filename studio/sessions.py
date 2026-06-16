@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -234,7 +235,16 @@ def check_cost_guard(session_id: str) -> str | None:
     tel = get_telemetry()
     if tel is None:
         return None
-    spent = tel.session_cost(session_id, since_s=86400.0)
+    try:
+        spent = tel.session_cost(session_id, since_s=86400.0)
+    except Exception as exc:  # noqa: BLE001
+        # The cost guard is a soft protection; a transient telemetry/DB
+        # hiccup must never 500 the chat endpoint.  Fail OPEN (allow the
+        # request) rather than crash — the backend also reconnects, so this
+        # only bites on a hard outage.
+        print(f"[cost-guard] telemetry read failed, allowing request: "
+              f"{type(exc).__name__}: {exc}", flush=True, file=sys.stderr)
+        return None
     cap = _cost_daily_max_usd()
     if spent >= cap:
         return (f"This session has hit the $/day cost cap "

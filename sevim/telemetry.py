@@ -475,16 +475,54 @@ class _PostgresBackend:
         # autocommit=False so we control transactions; we commit() after
         # each unit of work the way the SQLite backend does.
         self._psycopg = psycopg
+        self._db_url = db_url
         self._conn = psycopg.connect(db_url, autocommit=False)
+
+    def _reconnect(self) -> None:
+        """Drop the (likely dead) connection and open a fresh one.
+
+        RDS closes idle connections and a failover or network blip can sever
+        the single long-lived connection we hold.  When that happens psycopg
+        raises OperationalError/InterfaceError ("the connection is closed")
+        on the NEXT cursor; we recover by reconnecting instead of letting the
+        error bubble up as a 500.
+        """
+        try:
+            self._conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._conn = self._psycopg.connect(self._db_url, autocommit=False)
 
     def execute(self, sql: str, params: tuple = ()) -> Any:
         # psycopg uses %s placeholders; our SQL is written with ?.  Translate.
         # Our schema/queries never embed '?' inside string literals, so a
         # straight replace is safe; the day that changes, switch to a
         # quote-aware tokeniser.
-        cur = self._conn.cursor()
-        cur.execute(sql.replace("?", "%s"), params)
-        return cur
+        q = sql.replace("?", "%s")
+        if getattr(self._conn, "closed", 0):
+            self._reconnect()
+        try:
+            cur = self._conn.cursor()
+            cur.execute(q, params)
+            return cur
+        except (self._psycopg.OperationalError,
+                self._psycopg.InterfaceError):
+            # Connection-level failure (closed / server went away): reconnect
+            # once and retry.  A genuine SQL error is a different exception
+            # class (ProgrammingError/IntegrityError/…) and is handled below.
+            self._reconnect()
+            cur = self._conn.cursor()
+            cur.execute(q, params)
+            return cur
+        except Exception:
+            # A real query error leaves the shared connection in an aborted
+            # transaction under autocommit=False, which would poison every
+            # subsequent caller until rollback.  Clear it, then re-raise.
+            try:
+                self._conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            raise
 
     def executescript(self, sql: str) -> None:
         # psycopg has no executescript; we split on `;` ourselves.
@@ -508,7 +546,14 @@ class _PostgresBackend:
         cur.close()
 
     def commit(self) -> None:
-        self._conn.commit()
+        try:
+            self._conn.commit()
+        except (self._psycopg.OperationalError,
+                self._psycopg.InterfaceError):
+            # The connection died before the commit landed; restore it so the
+            # next operation works.  (The uncommitted write is lost, which the
+            # silent-write path already tolerates.)
+            self._reconnect()
 
     def close(self) -> None:
         try:
