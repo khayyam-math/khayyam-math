@@ -2782,6 +2782,40 @@ async def express_figure(
     # The canonical Subset Sum ≤p Partition pair is drawn fully
     # deterministically from an arithmetic-checked example; any other
     # recognised pair gets a number-free schematic.  Needs no api_key.
+    # ── Clique ≤ₚ Vertex-Cover, drawn as TWO REAL GRAPHS ─────────
+    # A user repeatedly asked to "reduce clique to vertex cover ... on a
+    # graph ... I need nodes!" and got the generic number-free reduction
+    # schematic (boxes + arrow) instead of actual node-link graphs.  This
+    # draws G with a clique and its complement Ḡ with the vertex cover, with
+    # the correspondence asserted.  Runs BEFORE the generic reduction route
+    # so it wins for this specific, concrete pair.
+    if (not _refining
+            and os.environ.get("SEVIM_CLIQUE_VC_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.clique_vertex_cover import (
+                generate_clique_vertex_cover_svg, is_clique_vertex_cover_prompt,
+            )
+            if is_clique_vertex_cover_prompt(routing_prompt):
+                cvsvg, cvnarr = await generate_clique_vertex_cover_svg(
+                    routing_prompt)
+                _log(f"clique-vc fast-path: svg={len(cvsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(cvsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": cvsvg,
+                    "narration": cvnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "clique_vertex_cover",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"clique-vc route errored: {type(exc).__name__}: {exc}")
+
     if (not _refining
             and os.environ.get("SEVIM_REDUCTION_ROUTE", "on").lower()
             != "off"):
