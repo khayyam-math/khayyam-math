@@ -571,6 +571,42 @@ async def _execute_tool(
             target_lang=_detected_lang,
         )
 
+    # ── Self-aware refinement (Layer 2: repeat-failure circuit breaker) ──
+    # The subject is the prior figure's genesis prompt when refining, else
+    # this turn's prompt — a stable key across several correction turns.
+    # When the learner has complained about the SAME subject repeatedly we
+    # inject a directive telling the model to CHANGE APPROACH instead of
+    # redrawing the same defect.  All best-effort; never blocks generation.
+    _escalation_note: str | None = None
+    _refine_subject = prompt
+    _is_complaint = False
+    try:
+        from studio.refinement import (
+            extract_prior_topic, is_dissatisfaction, get_tracker,
+            escalation_directive,
+        )
+        if os.environ.get("SEVIM_REFINE_CIRCUIT_BREAKER",
+                          "on").strip().lower() != "off":
+            _prior_topic = extract_prior_topic(context_canvases)
+            _refine_subject = _prior_topic or original_user_prompt or prompt
+            _is_complaint = bool(context_canvases) and is_dissatisfaction(
+                original_user_prompt or prompt)
+            if _is_complaint and session_id:
+                _trk = get_tracker()
+                _consec = _trk.consecutive_complaints(
+                    session_id, _refine_subject) + 1
+                _prior_route = _trk.last_route(session_id, _refine_subject)
+                _det_avail = _prior_route not in ("", "llm_svg", "llm-svg")
+                from studio.refinement import _ESCALATE_AFTER  # threshold
+                if _consec >= _ESCALATE_AFTER:
+                    _escalation_note = escalation_directive(
+                        _consec, _prior_route, _det_avail)
+                    print(f"[refine] escalating: {_consec} consecutive "
+                          f"complaints on subject={_refine_subject[:60]!r}",
+                          flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[refine] circuit-breaker skipped: {exc}", flush=True)
+
     primer_task = asyncio.create_task(_run_primer())
     figure_task = asyncio.create_task(express_figure(
         user_prompt=prompt,
@@ -580,12 +616,28 @@ async def _execute_tool(
         context_canvases=context_canvases,
         on_svg_chunk=on_svg_chunk,
         original_user_prompt=original_user_prompt or None,
+        escalation_note=_escalation_note,
     ))
     # Await figure first because the rest of _execute_tool unpacks its
     # result.  The primer task runs to completion alongside; we collect
     # the assembled string for telemetry / canvas prelude after.
     result = await figure_task
     primer_text = await primer_task
+    # Self-aware refinement (Layers 2 & 3): record this turn's outcome —
+    # which subject, which route handled it, and whether the learner was
+    # complaining — into the live circuit-breaker tracker and (best-effort)
+    # telemetry, so a recurring (subject, failed-route) pattern can be
+    # surfaced for admin-gated routing hints.  Never raises.
+    try:
+        from studio.refinement import record_outcome
+        record_outcome(
+            session_id or "",
+            _refine_subject,
+            (result.get("template") or "llm_svg"),
+            complaint=_is_complaint,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[refine] outcome record skipped: {exc}", flush=True)
     # Localise narration to the user's language.  Deterministic
     # templates (newton_method, volume_of_sphere, …) hard-code
     # English narration; LLM-driven routes (FDL, LLM-SVG) usually

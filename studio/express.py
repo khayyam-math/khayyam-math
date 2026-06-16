@@ -2432,6 +2432,12 @@ async def express_figure(
     # not supplied (so internal callers — recursive express calls from
     # the sequential / panels routes — keep working unchanged).
     original_user_prompt: str | None = None,
+    # Layer 2 (self-aware refinement): a blunt "you've been corrected N
+    # times on this subject — change approach, don't repeat" directive,
+    # injected into the refinement LLM context by the chat loop once the
+    # learner has complained repeatedly.  None on a normal turn.  See
+    # studio/refinement.py.
+    escalation_note: str | None = None,
 ) -> dict[str, Any]:
     """Run the SVG-direct + vision-review loop.
 
@@ -2463,6 +2469,15 @@ async def express_figure(
     if context_canvases and original_user_prompt:
         figure_prompt = original_user_prompt
     user_content = _build_user_content(figure_prompt, context_canvases or [])
+    # Layer 2: on a repeated correction, append the escalation directive so
+    # the model is explicitly told its prior attempts were rejected and must
+    # change approach (rather than redrawing the same defect).  Only ever
+    # set when prior context exists, so user_content is already a list.
+    if escalation_note:
+        if isinstance(user_content, list):
+            user_content.append({"type": "text", "text": escalation_note})
+        else:
+            user_content = f"{user_content}\n{escalation_note}"
 
     # Text-only backends (Qwen2.5-7B-Instruct, base Qwen, etc.) reject
     # multimodal image_url blocks with a 500.  The refinement intent is
@@ -2623,12 +2638,28 @@ async def express_figure(
     # generic figure.  On Case B / C use the chat LLM's enriched
     # prompt so the newton_method template / FDL extractor see the
     # topic.
-    if (context_canvases
-            and not is_narrow_targeted_edit(
-                original_user_prompt or user_prompt or "")):
+    _is_narrow = is_narrow_targeted_edit(
+        original_user_prompt or user_prompt or "")
+    if context_canvases and not _is_narrow:
         routing_prompt = (user_prompt or original_user_prompt or "").strip()
     else:
         routing_prompt = (original_user_prompt or user_prompt or "").strip()
+    # Layer 1 (self-aware refinement): on a Case B/C correction, fold the
+    # PRIOR figure's subject into the routing string so a topic-less
+    # complaint ("I need nodes! two graphs with nodes!") still resolves to
+    # the original subject's deterministic renderer instead of falling to a
+    # fresh LLM-SVG redraw that repeats the same defect.  See
+    # studio/refinement.py.  No-op on narrow edits and fresh requests.
+    try:
+        from studio.refinement import carry_topic as _carry_topic
+        _carried = _carry_topic(routing_prompt, context_canvases,
+                                is_narrow_edit=_is_narrow)
+        if _carried != routing_prompt:
+            _log(f"refinement topic carry-forward: routing now "
+                 f"{_carried[:90]!r}")
+            routing_prompt = _carried
+    except Exception as exc:  # noqa: BLE001
+        _log(f"topic carry-forward skipped: {type(exc).__name__}: {exc}")
     if original_user_prompt and original_user_prompt != user_prompt:
         _log(f"routing prompt differs from tool prompt: "
              f"routing={routing_prompt[:80]!r}")

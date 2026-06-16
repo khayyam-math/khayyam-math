@@ -127,6 +127,17 @@ CREATE TABLE IF NOT EXISTS feedback (
     resolution_note    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS refinement_outcomes (
+    outcome_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp          REAL NOT NULL,
+    session_id         TEXT,
+    subject            TEXT NOT NULL,
+    route              TEXT,
+    complaint          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_refine_subject
+    ON refinement_outcomes (subject, timestamp DESC);
+
 CREATE TABLE IF NOT EXISTS repairs (
     repair_id          INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id            INTEGER,
@@ -308,6 +319,17 @@ CREATE INDEX IF NOT EXISTS idx_feedback_status_ts
     ON feedback (status, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_canvas
     ON feedback (canvas_id);
+
+CREATE TABLE IF NOT EXISTS refinement_outcomes (
+    outcome_id         BIGSERIAL PRIMARY KEY,
+    timestamp          DOUBLE PRECISION NOT NULL,
+    session_id         TEXT,
+    subject            TEXT NOT NULL,
+    route              TEXT,
+    complaint          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_refine_subject
+    ON refinement_outcomes (subject, timestamp DESC);
 
 CREATE TABLE IF NOT EXISTS repairs (
     repair_id          BIGSERIAL PRIMARY KEY,
@@ -841,6 +863,47 @@ class Telemetry:
             """,
             (time.time(), session_id, user_email, canvas_id,
              original_prompt, user_description, git_sha, model_id),
+        )
+
+    def record_refinement_outcome(
+        self,
+        *,
+        session_id: str | None,
+        subject: str,
+        route: str,
+        complaint: bool,
+    ) -> None:
+        """Durable record of a refinement turn (subject, route, was the
+        learner complaining) for the self-constructive loop.  An offline
+        curation pass mines `recurring_refinement_failures` to surface
+        recurring (subject, failed-route) pairs for admin-gated routing
+        hints; the live request path never mutates routing on its own."""
+        self._exec(
+            """
+            INSERT INTO refinement_outcomes
+                (timestamp, session_id, subject, route, complaint)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (time.time(), session_id, subject, route, 1 if complaint else 0),
+        )
+
+    def recurring_refinement_failures(
+        self, *, min_count: int = 3, since_s: float = 30 * 86400.0,
+    ) -> list[tuple]:
+        """(subject, route, complaint_count) pairs that drew repeated
+        complaints — the candidates an operator reviews before promoting a
+        routing hint.  Admin-facing; not consulted on the request path."""
+        cutoff = time.time() - float(since_s)
+        return self.query(
+            """
+            SELECT subject, route, COUNT(*) AS n
+              FROM refinement_outcomes
+             WHERE complaint = 1 AND timestamp >= ?
+             GROUP BY subject, route
+            HAVING COUNT(*) >= ?
+             ORDER BY n DESC
+            """,
+            (cutoff, int(min_count)),
         )
 
     def record_canvas(
