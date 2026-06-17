@@ -179,6 +179,9 @@ Supported templates:
     disk slice, the Pythagorean triangle that gives the disk's
     radius √(r²−y²), and the full integral derivation.  Numbers are
     not required from the prompt; the figure uses generic r.
+    ROUTE HERE ONLY FOR VOLUME.  If the prompt asks for the SURFACE
+    AREA or AREA of a sphere (A = 4πr²) — a DIFFERENT quantity — return
+    null; do NOT substitute the volume figure.
 
   volume_of_cone — "prove the volume of a cone", "derive
     V = (1/3) π r^2 h", "show why a cone is one third pi r
@@ -236,6 +239,7 @@ Rules:
 2. **Invent concrete entries when the prompt doesn't supply them.**  "Show how to find the inverse of a 5x5 matrix" → make up a simple invertible 5x5 (small integers, non-zero diagonal, det != 0).  "Multiply two 2x2 matrices" → use [[1,2],[3,4]] and [[5,6],[7,8]].  Always pick textbook-friendly numbers (1-9, mostly integers).
 3. System-of-equations: parse linear equations into coeffs (each row = one equation's coefficients in variable order, missing variable = 0) and rhs.  Variables on the LHS, constants on the RHS.
 4. **Only return null** when the prompt has NO connection to these template families — e.g. "explain partial derivatives", "draw a Venn diagram", "graph y = sin(x)".  Those need the LLM-SVG path.
+5. **Match on MEANING, not shared keywords.**  A prompt that is syntactically similar to a template but asks for a DIFFERENT quantity must NOT be routed to that template.  In particular these are distinct quantities and never interchangeable: AREA / SURFACE AREA vs VOLUME; PERIMETER / CIRCUMFERENCE vs AREA; DERIVATIVE vs INTEGRAL.  "Area of a sphere", "surface area of a sphere" → NOT volume_of_sphere (return null).  "Perimeter of …" → NOT an area template.  Only route when the requested quantity is EXACTLY the one the template computes.
 
 Respond with ONLY a JSON object in one of these shapes (no prose, no markdown):
   {"template": "matrix_multiplication", "args": {"a": [[1,2],[3,4]], "b": [[5,6],[7,8]]}}

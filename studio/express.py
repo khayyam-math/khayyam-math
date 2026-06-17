@@ -3521,6 +3521,41 @@ async def express_figure(
     # so the LLM-SVG's secant-as-tangent failure mode cannot recur.
     # The template router still runs FIRST so explicit
     # Newton's-method prompts pin to the bespoke newton template.
+    # ── Sphere SURFACE AREA (semantic guard before the volume template) ──
+    # A user asked for "the area of a sphere" and got the VOLUME figure: the
+    # template router matched the token "sphere" and never distinguished
+    # area (4πr²) from volume (4/3 πr³).  This deterministic route runs
+    # BEFORE the template router so a sphere-area prompt gets the correct
+    # surface-area figure; the router system prompt is also hardened so
+    # area/surface-area is never matched to a volume template.
+    if (not _refining
+            and os.environ.get("SEVIM_SPHERE_AREA_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.sphere_area import (
+                generate_sphere_surface_area_svg,
+                is_sphere_surface_area_prompt,
+            )
+            if is_sphere_surface_area_prompt(routing_prompt):
+                sasvg, sanarr = await generate_sphere_surface_area_svg(
+                    routing_prompt)
+                _log(f"sphere-surface-area fast-path: svg={len(sasvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(sasvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": sasvg,
+                    "narration": sanarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "sphere_surface_area",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"sphere-area route errored: {type(exc).__name__}: {exc}")
+
     if (api_key and not _refining
             and os.environ.get("SEVIM_TEMPLATE_ROUTER", "on").lower() != "off"):
         try:
