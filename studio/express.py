@@ -3170,6 +3170,40 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"stats route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic conditional-probability (Venn) route ────────
+    # "Explain conditional probability with a Venn diagram" failed the
+    # structural rubric on the LLM-SVG path (no explicit definition
+    # statement).  P(A|B) = P(A∩B)/P(B) has one fixed structure; render the
+    # definition + a two-set Venn with arithmetic-checked region counts.
+    if (not _refining
+            and os.environ.get("SEVIM_CONDPROB_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.conditional_probability import (
+                generate_conditional_probability_svg,
+                is_conditional_probability_prompt,
+            )
+            if is_conditional_probability_prompt(routing_prompt):
+                cpsvg, cpnarr = await generate_conditional_probability_svg(
+                    routing_prompt)
+                _log(f"conditional-probability fast-path: svg={len(cpsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(cpsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": cpsvg,
+                    "narration": cpnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "conditional_probability",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"conditional-probability route errored: "
+                 f"{type(exc).__name__}: {exc}")
+
     # ── Deterministic algorithm-trace route ───────────────────────
     # "Show <sorting / search / Gaussian elimination / determinant>
     # step by step" — compute every intermediate state in Python and
