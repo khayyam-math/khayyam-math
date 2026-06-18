@@ -52,3 +52,67 @@ def test_does_not_mutate_input():
     p = {"model": "gpt-5.5", "max_tokens": 1200, "temperature": 0.0}
     _ = adapt(p)
     assert p["max_tokens"] == 1200 and p["temperature"] == 0.0
+
+
+def test_httpx_interceptor_normalises_gpt5_payloads():
+    """The process-wide shim must rewrite a GPT-5 payload on the way out,
+    so a route file that forgot to call adapt_payload can't 500."""
+    import asyncio
+    import httpx
+    from studio import model_compat
+    model_compat.install()
+
+    captured = {}
+
+    class _FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "{}"}}]}
+
+    async def _fake_send(self, request, **kw):  # low-level, unpatched
+        import json as _j
+        captured.update(_j.loads(request.content))
+        return httpx.Response(200, json=_FakeResp().json(), request=request)
+
+    async def go():
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(
+                200, json={"choices": [{"message": {"content": "{}"}}]}))
+        async with httpx.AsyncClient(transport=transport) as c:
+            # a GPT-5 payload as a route file would build it
+            await c.post("https://api.openai.com/v1/chat/completions",
+                         json={"model": "gpt-5.3-chat-latest",
+                               "max_tokens": 700, "temperature": 0.2,
+                               "messages": []})
+        # the request that actually went out should be normalised
+    asyncio.run(go())
+    # Re-run capturing the outbound body via a transport that records it.
+    seen = {}
+
+    def _record(req):
+        import json as _j
+        seen.update(_j.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    async def go2():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_record)) as c:
+            await c.post("https://api.openai.com/v1/chat/completions",
+                         json={"model": "gpt-5.3-chat-latest",
+                               "max_tokens": 700, "temperature": 0.2,
+                               "messages": []})
+    asyncio.run(go2())
+    assert "max_tokens" not in seen
+    assert seen.get("max_completion_tokens") == 700
+    assert "temperature" not in seen
+
+    # gpt-4o payload must pass through untouched
+    seen.clear()
+
+    async def go3():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_record)) as c:
+            await c.post("https://api.openai.com/v1/chat/completions",
+                         json={"model": "gpt-4o", "max_tokens": 700,
+                               "temperature": 0.2, "messages": []})
+    asyncio.run(go3())
+    assert seen.get("max_tokens") == 700 and seen.get("temperature") == 0.2

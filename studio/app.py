@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
+# Import for side effect: installs the process-wide httpx shim that
+# normalises every GPT-5/o-series chat payload (max_tokens →
+# max_completion_tokens, drop temperature, bound reasoning).  Must load
+# before any OpenAI request — including the main chat-loop call below, which
+# runs on the active GPT-5 model every turn.
+import studio.model_compat  # noqa: F401
 from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
