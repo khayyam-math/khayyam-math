@@ -4444,6 +4444,10 @@ async def express_figure(
             solution=result.get("solution"),
             math_claims=result.get("math_claims"),
             figure_ground_truth=figure_ground_truth,
+            # On the FINAL attempt, escalate to the smart reasoning auditor
+            # (SEVIM_REVIEW_ESCALATE_MODEL) for the hardest cases; earlier
+            # attempts use the fast reviewer so typical turns stay quick.
+            escalate=(attempt >= max_retries),
         )
 
         # Snapshot pre-merge state so the best-attempt accumulator
@@ -4756,18 +4760,27 @@ async def express_figure(
 # without any code changes.
 # ---------------------------------------------------------------------
 
-def _review_config() -> tuple[str, str, str, str | None]:
+def _review_config(escalate: bool = False) -> tuple[str, str, str, str | None]:
     """Return (mode, model, base_url, api_key) for the reviewer.
 
-    Mode is one of 'text', 'vision', 'off'.  Default is now vision-on-
-    gpt-4o: the reviewer rasterises the SVG to PNG and inspects the
-    pixels, which is the only way to catch real text-overlap.  Text
-    mode (cheaper, no vision needed) remains available via env.
+    Mode is one of 'text', 'vision', 'off'.  Default is vision: the
+    reviewer rasterises the SVG to PNG and inspects the pixels, which is
+    the only way to catch real text-overlap.  Text mode (cheaper, no
+    vision needed) remains available via env.
+
+    When ``escalate`` is True (the FINAL retry of a still-failing figure)
+    and ``SEVIM_REVIEW_ESCALATE_MODEL`` is set, the smarter/slower
+    reasoning auditor is used instead of the fast per-attempt reviewer.
+    Running the reasoning model on every attempt pushed long-tail turns
+    past the ALB idle timeout and figures stopped reaching the browser;
+    reserving it for the last attempt keeps typical turns fast.
     """
     mode = (os.environ.get("SEVIM_REVIEW_MODE") or "vision").lower().strip()
     if mode not in ("text", "vision", "off"):
         mode = "vision"
     model = os.environ.get("SEVIM_REVIEW_MODEL") or "gpt-4o"
+    if escalate:
+        model = os.environ.get("SEVIM_REVIEW_ESCALATE_MODEL") or model
     base_url = (os.environ.get("SEVIM_REVIEW_URL")
                 or os.environ.get("SEVIM_VLLM_URL")
                 or "https://api.openai.com/v1").rstrip("/")
@@ -4786,6 +4799,7 @@ async def _vision_review(
     solution: str | None = None,
     math_claims: list | None = None,
     figure_ground_truth: Any = None,
+    escalate: bool = False,
 ) -> str | None:
     """Ask the reviewer LLM to audit the (svg, narration) pair via the
     structured REVIEW_SCHEMA.  Returns ``None`` on PASS (or if the
@@ -4804,7 +4818,7 @@ async def _vision_review(
     def _log(msg: str) -> None:
         print(f"[express:review] {msg}", flush=True, file=_sys.stderr)
 
-    review_mode, review_model, review_url, review_key = _review_config()
+    review_mode, review_model, review_url, review_key = _review_config(escalate)
     if review_mode == "off":
         _log("mode=off -- skipping review")
         return None

@@ -239,15 +239,20 @@ class SevimStack(Stack):
             # any /studio/admin drift.  Unset (remove + redeploy) to release.
             "SEVIM_FORCE_ACTIVE_MODEL": "gpt-5.3-chat-latest",
             # Figure-review backend (math-correctness + layout inspector).
-            # Vision-mode on the gpt-5.5 REASONING model: it rasterises the
-            # SVG to PNG and inspects the pixels, catching wrong-topic /
-            # overlap / directional errors the chat model misses.  Review
-            # runs only on the LLM-SVG long tail (deterministic routes skip
-            # it), so its reasoning latency does not touch the bulk of
-            # traffic; reasoning_effort is pinned low (see below) to bound it.
+            # Vision-mode on gpt-5.3-chat-latest: vision-capable and FAST
+            # (~7 s).  We trialled the gpt-5.5 REASONING model here, but it
+            # ran on EVERY retry attempt and pushed long-tail turns to
+            # ~100-115 s — the resulting no-output gaps tripped the ALB 60 s
+            # idle timeout, so figures never reached the browser ("no
+            # visuals").  The smarter reasoning auditor is better applied
+            # only on the final retry of the hardest cases (handled in code,
+            # SEVIM_REVIEW_ESCALATE_MODEL), not on every attempt.
             "SEVIM_REVIEW_MODE": "vision",
-            "SEVIM_REVIEW_MODEL": "gpt-5.5",
-            # Bound GPT-5 reasoning latency on the review/audit path.
+            "SEVIM_REVIEW_MODEL": "gpt-5.3-chat-latest",
+            # Smart reasoning auditor, used ONLY on the final retry of a
+            # still-failing figure (bounded latency; most turns never hit it).
+            "SEVIM_REVIEW_ESCALATE_MODEL": "gpt-5.5",
+            # Bound GPT-5 reasoning latency wherever a reasoning model runs.
             "SEVIM_GPT5_REASONING_EFFORT": "low",
             # TTS: tts-1 is ~3x faster than tts-1-hd at virtually
             # identical audibility for short narration phrases.  At
