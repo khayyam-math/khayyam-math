@@ -1878,6 +1878,37 @@ def _review_user_prompt(
     )
 
 
+# ── Model-aware payload adapter ───────────────────────────────────────────
+# GPT-5 / o-series models differ from gpt-4o at the API boundary:
+#   • they reject `max_tokens` (require `max_completion_tokens`),
+#   • they reject any `temperature` other than the default 1, and
+#   • the reasoning variants (everything except the `*-chat-latest` chat
+#     tunes) bill hidden reasoning tokens against the completion budget, so
+#     a small budget can starve the visible output to empty.
+# We run a HYBRID: fast chat-tuned generation (gpt-5.3-chat-latest) plus a
+# slower, smarter reasoning model (gpt-5.5) for the vision-audit pass.  This
+# adapter lets the same payloads target either family unchanged; it is a
+# no-op for gpt-4o / gpt-4o-mini (the classifier, primer, narration).
+
+def _adapt_payload_for_model(payload: dict[str, Any]) -> dict[str, Any]:
+    model = (payload.get("model") or "").lower()
+    if not model.startswith(("gpt-5", "o1", "o3", "o4")):
+        return payload                       # gpt-4o family: unchanged
+    p = dict(payload)
+    if "max_tokens" in p:
+        p["max_completion_tokens"] = p.pop("max_tokens")
+    p.pop("temperature", None)               # only default (1) is allowed
+    # Reasoning models (not the chat tunes): bound reasoning latency and keep
+    # output headroom so reasoning tokens can't starve the visible answer.
+    if "chat-latest" not in model:
+        p.setdefault("reasoning_effort",
+                     os.environ.get("SEVIM_GPT5_REASONING_EFFORT", "low"))
+        mct = p.get("max_completion_tokens")
+        if isinstance(mct, int) and mct < 4096:
+            p["max_completion_tokens"] = 4096
+    return p
+
+
 # ── Streaming chat-completion helper ──────────────────────────────────────
 
 async def _stream_chat_completion(
@@ -2125,6 +2156,7 @@ async def localise_narration(
             {"role": "user", "content": user_msg},
         ],
     }
+    payload = _adapt_payload_for_model(payload)
     headers = {"content-type": "application/json",
                "Authorization": f"Bearer {api_key}"}
     try:
@@ -2313,6 +2345,7 @@ async def generate_theory_primer(
             {"role": "user",   "content": user_prompt},
         ],
     }
+    payload = _adapt_payload_for_model(payload)
 
     import sys as _sys
     def _log(msg: str) -> None:
@@ -3818,6 +3851,7 @@ async def express_figure(
             },
             "messages": messages,
         }
+        payload = _adapt_payload_for_model(payload)
         # Streaming variant lights up only on the first attempt of a
         # turn — retries already have an SVG on the canvas, so a
         # partial-SVG replay there would briefly wipe a finished
@@ -4851,6 +4885,7 @@ async def _vision_review(
         },
         "messages": messages,
     }
+    payload = _adapt_payload_for_model(payload)
     # The caller used to supply base_url, but the reviewer now takes
     # its config from _review_config() exclusively.  Rebind for the
     # request below.

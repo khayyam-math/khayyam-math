@@ -225,24 +225,30 @@ class SevimStack(Stack):
             # people in telemetry.
             "SEVIM_AUTH_REQUIRED": "1",
             "SEVIM_VLLM_URL": "https://api.openai.com/v1",
-            "SEVIM_VLLM_MODEL": "gpt-4o",
-            # Deploy-time override of the admin's active-model choice.
-            # Without this, resolve_backend() respects whatever was set
-            # via /studio/admin (which had drifted to gpt-4o-mini and
-            # produced text-only figures with bad arithmetic).  Setting
-            # it here forces every Fargate task to use gpt-4o until
-            # this line is removed.  Unset (next cdk deploy with the
-            # line removed) to release the override.
-            "SEVIM_FORCE_ACTIVE_MODEL": "gpt-4o",
-            # Figure-review backend (math-correctness inspector).
-            # Vision-mode on gpt-4o so the reviewer rasterises the
-            # SVG to PNG and inspects the pixels — only way to catch
-            # text overlap and wrong-topic figures.  Text-mode review
-            # missed real overlap bugs because SVG XML doesn't render.
-            # Adds ~10-20 s per turn to the worst-case retry path but
-            # the figures that actually pass are dramatically better.
+            # HYBRID GPT-5 upgrade (2026-06).  Live figure generation runs on
+            # the newest CHAT-tuned GPT-5 (gpt-5.3-chat-latest): vision-
+            # capable, no reasoning overhead, ~7 s/figure — keeps the tutor
+            # interactive.  The flagship reasoning model (gpt-5.5) was
+            # measured at 30–69 s/figure on generation, far too slow for the
+            # live path, so it is reserved for the vision-audit pass below.
+            # All GPT-5 models reject `max_tokens`/`temperature≠1`; the
+            # _adapt_payload_for_model() shim in express.py normalises this.
+            "SEVIM_VLLM_MODEL": "gpt-5.3-chat-latest",
+            # Deploy-time override of the admin's active-model choice; forces
+            # every Fargate task to the generation model above regardless of
+            # any /studio/admin drift.  Unset (remove + redeploy) to release.
+            "SEVIM_FORCE_ACTIVE_MODEL": "gpt-5.3-chat-latest",
+            # Figure-review backend (math-correctness + layout inspector).
+            # Vision-mode on the gpt-5.5 REASONING model: it rasterises the
+            # SVG to PNG and inspects the pixels, catching wrong-topic /
+            # overlap / directional errors the chat model misses.  Review
+            # runs only on the LLM-SVG long tail (deterministic routes skip
+            # it), so its reasoning latency does not touch the bulk of
+            # traffic; reasoning_effort is pinned low (see below) to bound it.
             "SEVIM_REVIEW_MODE": "vision",
-            "SEVIM_REVIEW_MODEL": "gpt-4o",
+            "SEVIM_REVIEW_MODEL": "gpt-5.5",
+            # Bound GPT-5 reasoning latency on the review/audit path.
+            "SEVIM_GPT5_REASONING_EFFORT": "low",
             # TTS: tts-1 is ~3x faster than tts-1-hd at virtually
             # identical audibility for short narration phrases.  At
             # 15-30 phrases per figure, hd was adding 20-40s of
