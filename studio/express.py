@@ -2860,6 +2860,39 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"clique-vc route errored: {type(exc).__name__}: {exc}")
 
+    # ── 3SAT ≤ₚ Vertex-Cover, drawn as the actual gadget GRAPH ───
+    # A user asked to "reduce 3SAT to vertex cover ... show all steps on the
+    # vertices of a graph" and got the generic number-free reduction
+    # schematic.  Draw the real construction: variable-gadget edges, clause
+    # triangles, connecting edges, and an asserted size-k vertex cover.
+    # Runs BEFORE the generic reduction route so it wins for this pair.
+    if (not _refining
+            and os.environ.get("SEVIM_SAT_VC_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.sat_vertex_cover import (
+                generate_sat_vertex_cover_svg, is_sat_vertex_cover_prompt,
+            )
+            if is_sat_vertex_cover_prompt(routing_prompt):
+                svsvg, svnarr = await generate_sat_vertex_cover_svg(
+                    routing_prompt)
+                _log(f"sat-vc fast-path: svg={len(svsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(svsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": svsvg,
+                    "narration": svnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "sat_vertex_cover",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"sat-vc route errored: {type(exc).__name__}: {exc}")
+
     if (not _refining
             and os.environ.get("SEVIM_REDUCTION_ROUTE", "on").lower()
             != "off"):
