@@ -38,18 +38,32 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     overscroll-behavior: none;
   }
-  body { height: 100dvh; }
+  body {
+    height: 100dvh;
+    /* Flex column: the header (with the Play button) is a fixed-size row
+       pinned at the top, and <main> takes the rest.  This is robust to
+       the header wrapping to two lines on a narrow phone.  `overflow:
+       hidden` keeps the WINDOW from ever scrolling — only <main> scrolls
+       internally.  Previously the header was `position: sticky` and
+       <main> had a hardcoded `height: 100dvh - 50px`; when the header
+       wrapped, or iOS Safari's dynamic toolbar resized the viewport, the
+       header + main exceeded 100dvh, the whole page became scrollable,
+       and after panning the figure the Play button ended up clipped
+       behind the browser toolbar.  Pin the safe-area top inset so the
+       header also clears the notch / status bar. */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top);
+  }
   header {
     display: flex; align-items: center; gap: 1em;
     padding: 0.5em 1em;
     border-bottom: 1px solid var(--border);
     font-size: 0.85em;
     flex-wrap: wrap;
-    /* Pin the header (and the Play-narration button it carries) so it
-       stays visible regardless of how the figure or the host page
-       scrolls. */
-    position: sticky;
-    top: 0;
+    /* Fixed-size top row; never shrinks, always fully visible. */
+    flex: 0 0 auto;
     z-index: 20;
     background: var(--bg);
   }
@@ -91,9 +105,14 @@
   header button.play-btn.hidden { display: none; }
   main {
     display: flex; align-items: center; justify-content: center;
-    /* 100dvh accounts for iOS Safari's collapsing URL bar; falls back
-       to 100vh on browsers that don't support dvh. */
-    height: calc(100dvh - 50px);
+    /* Fill the space left by the header (flex child of the body column).
+       min-height:0 lets it actually shrink so its own overflow:auto
+       produces a scrollbar instead of pushing the page taller than the
+       viewport.  No hardcoded 100dvh-minus-header math, so a wrapped
+       header can't push the figure off-screen. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
     padding: 1em;
     padding-bottom: max(1em, env(safe-area-inset-bottom));
   }
@@ -102,7 +121,8 @@
     header button.play-btn { padding: 0.35em 0.75em; font-size: 0.85em; }
     main {
       padding: 0.5em;
-      height: calc(100dvh - 44px);
+      /* Height comes from the body flex column (flex:1 + min-height:0),
+         not a hardcoded header offset — robust to a wrapped header. */
       /* The canvas must be SLIDABLE on mobile — user asked four times.
          The SVG keeps its native 900×650 viewBox so text stays
          readable; <main> scrolls inside the iframe to pan over the
@@ -1025,6 +1045,58 @@
       // learner's eye lands on the same symbol no matter where it
       // lives in the figure.
       highlightAllSubstringMatches(id);
+    }
+    // Auto-follow: bring the element(s) under narration attention into
+    // view so the learner doesn't have to scroll manually to keep up
+    // with a multi-step / multi-panel figure.
+    scrollHighlightIntoView();
+  }
+
+  // Scroll <main> the minimum amount needed so the currently-highlighted
+  // element(s) sit comfortably inside the visible viewport.  Uses the
+  // UNION bounding box of every highlighted element (so a whole panel,
+  // not just one label, is framed) and only scrolls when something is
+  // actually out of view — no jitter when the panel is already visible.
+  function scrollHighlightIntoView() {
+    const main = document.querySelector('main');
+    if (!main) return;
+    const els = stage.querySelectorAll('.sevim-highlight');
+    if (!els.length) return;
+    const mr = main.getBoundingClientRect();
+    let top = Infinity, bottom = -Infinity, left = Infinity, right = -Infinity;
+    els.forEach(el => {
+      // getBoundingClientRect resolves SVG transforms/scale for us.
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) return;       // skip zero-size matches
+      top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom);
+      left = Math.min(left, r.left); right = Math.max(right, r.right);
+    });
+    if (!isFinite(top)) return;
+    const M = 28;                              // breathing room from the edges
+    let dy = 0, dx = 0;
+    const viewH = bottom - top, viewW = right - left;
+    // Vertical: if the highlight is taller than the viewport, align its
+    // top; otherwise nudge just enough to bring it fully inside.
+    if (viewH > mr.height - 2 * M) {
+      dy = top - (mr.top + M);
+    } else if (top < mr.top + M) {
+      dy = top - (mr.top + M);
+    } else if (bottom > mr.bottom - M) {
+      dy = bottom - (mr.bottom - M);
+    }
+    // Horizontal: same logic (multi-panel figures pan sideways too).
+    if (viewW > mr.width - 2 * M) {
+      dx = left - (mr.left + M);
+    } else if (left < mr.left + M) {
+      dx = left - (mr.left + M);
+    } else if (right > mr.right - M) {
+      dx = right - (mr.right - M);
+    }
+    if (Math.abs(dy) < 2 && Math.abs(dx) < 2) return;   // already in view
+    try {
+      main.scrollBy({ top: dy, left: dx, behavior: 'smooth' });
+    } catch (_) {
+      main.scrollTop += dy; main.scrollLeft += dx;       // older browsers
     }
   }
 
