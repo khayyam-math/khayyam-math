@@ -20,7 +20,7 @@ from __future__ import annotations
 import html as _html
 from typing import Any
 
-_W, _H = 1020, 700
+_W, _H = 960, 520
 
 _SUB = "₀₁₂₃₄₅₆₇₈₉"
 
@@ -84,15 +84,15 @@ def render_sat_to_vertex_cover() -> tuple[str, list[dict]]:
 
     # ── positions ────────────────────────────────────────────────────
     pos: dict = {}
-    gx = {1: 170, 2: 400, 3: 630, 4: 860}
+    gx = {1: 160, 2: 370, 3: 580, 4: 790}
     for v in range(1, n_vars + 1):
-        pos[("v", v, False)] = (gx[v] - 30, 132)
-        pos[("v", v, True)] = (gx[v] + 30, 132)
-    tri = {0: (300, 470), 1: (720, 470)}
+        pos[("v", v, False)] = (gx[v] - 28, 108)
+        pos[("v", v, True)] = (gx[v] + 28, 108)
+    tri = {0: (285, 315), 1: (660, 315)}
     for ci, (tx, ty) in tri.items():
         pos[("c", ci, 0)] = (tx, ty)            # apex
-        pos[("c", ci, 1)] = (tx - 64, ty + 110)
-        pos[("c", ci, 2)] = (tx + 64, ty + 110)
+        pos[("c", ci, 1)] = (tx - 60, ty + 96)
+        pos[("c", ci, 2)] = (tx + 60, ty + 96)
 
     def label(vid) -> str:
         if vid[0] == "v":
@@ -101,9 +101,9 @@ def render_sat_to_vertex_cover() -> tuple[str, list[dict]]:
         return _lit(var, neg)
 
     P: list[str] = []
-    P.append(_text(_W / 2, 30, "Reducing 3SAT to Vertex Cover", fs=21,
+    P.append(_text(_W / 2, 24, "Reducing 3SAT to Vertex Cover", fs=20,
                    anchor="middle", weight="700"))
-    P.append(_text(_W / 2, 56,
+    P.append(_text(_W / 2, 46,
                    "F = (x₁ ∨ ¬x₂ ∨ x₃) ∧ (¬x₁ ∨ x₂ ∨ x₄)        "
                    "k = n + 2m = 4 + 4 = 8", fs=14, anchor="middle",
                    weight="600", fill="#1657b8", el_id="statement"))
@@ -125,11 +125,11 @@ def render_sat_to_vertex_cover() -> tuple[str, list[dict]]:
     P.append('<g id="gadgets">' + "".join(gad) + '</g>')
 
     # group labels
-    P.append(_text(_W / 2, 100, "Variable gadgets (one edge per variable)",
+    P.append(_text(_W / 2, 78, "Variable gadgets (one edge per variable)",
                    fs=12.5, anchor="middle", weight="600", fill="#5a6472"))
-    P.append(_text(300, 445, "clause C₁", fs=12, anchor="middle",
+    P.append(_text(285, 292, "clause C₁", fs=12, anchor="middle",
                    weight="600", fill="#5a6472"))
-    P.append(_text(720, 445, "clause C₂", fs=12, anchor="middle",
+    P.append(_text(660, 292, "clause C₂", fs=12, anchor="middle",
                    weight="600", fill="#5a6472"))
 
     node_svg = []
@@ -144,19 +144,19 @@ def render_sat_to_vertex_cover() -> tuple[str, list[dict]]:
     P.append('<g id="cover">' + "".join(node_svg) + '</g>')
 
     # ── recipe / legend band ─────────────────────────────────────────
-    P.append('<rect x="40" y="612" width="940" height="76" rx="6" '
+    P.append('<rect x="40" y="438" width="880" height="70" rx="6" '
              'fill="#f4f7fb" stroke="#c9d4e2"/>')
-    P.append(_text(56, 636,
+    P.append(_text(56, 462,
                    "Construction: each variable xᵢ → one edge (xᵢ, ¬xᵢ); each "
                    "clause → a triangle on its 3 literals; connect every "
                    "clause-literal to its matching variable vertex.",
                    fs=12.5, fill="#23282f"))
-    P.append(_text(56, 658,
+    P.append(_text(56, 482,
                    "F is satisfiable  ⇔  the graph has a vertex cover of size "
                    "k = n + 2m = 8.  Green = the cover for x₁=x₂=x₃=x₄=true: "
                    "the true literal in each gadget,",
                    fs=12.5, fill="#23282f"))
-    P.append(_text(56, 678,
+    P.append(_text(56, 502,
                    "and the two non-satisfying vertices of each clause "
                    "triangle.  Those 8 vertices touch every one of the "
                    f"{len(edges)} edges.",
