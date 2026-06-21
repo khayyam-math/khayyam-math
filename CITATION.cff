@@ -4,8 +4,8 @@ title: "Khayyam Math: Live Diagram Generation for Educational Mathematics via Hy
 authors:
   - family-names: "Kermani Kolankeh"
     given-names: "Arash"
-    affiliation: "Independent Researcher, Germany"
-    email: arash_kermani@yahoo.com
+    affiliation: "School of Engineering, Applied Science and Technology, Canadian University Dubai, United Arab Emirates"
+    email: arash.kolankeh@cud.ac.ae
 version: "0.1.0"
 repository-code: "https://github.com/khayyam-math/khayyam-math"
 license: MIT
