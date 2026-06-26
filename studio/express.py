@@ -3080,6 +3080,38 @@ async def express_figure(
         except Exception as exc:  # noqa: BLE001
             _log(f"taylor-sin route errored: {type(exc).__name__}: {exc}")
 
+    # ── Deterministic eigenvalue/eigenvector geometry renderer ───
+    # "Explain eigenvalues and eigenvectors geometrically" passed vision but
+    # the LLM-written NARRATION claimed eigenvectors "do not rotate" — wrong
+    # for negative eigenvalues (which flip the eigenvector).  Render the
+    # fixed geometry with A·v = λv asserted and precise narration.  Runs
+    # BEFORE spectral; is_eigen_geometry_prompt excludes "spectral".
+    if (not _refining
+            and os.environ.get("SEVIM_EIGEN_GEOM_ROUTE", "on").lower() != "off"):
+        try:
+            from studio.templates.eigen_geometry import (
+                generate_eigen_geometry_svg, is_eigen_geometry_prompt,
+            )
+            if is_eigen_geometry_prompt(routing_prompt):
+                egsvg, egnarr = await generate_eigen_geometry_svg(routing_prompt)
+                _log(f"eigen-geometry fast-path: svg={len(egsvg)} chars")
+                if on_svg_chunk is not None:
+                    try:
+                        await on_svg_chunk(egsvg)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {
+                    "svg": egsvg,
+                    "narration": egnarr,
+                    "title": "",
+                    "review_history": [],
+                    "retries_used": 0,
+                    "repairs": [],
+                    "template": "eigen_geometry",
+                }
+        except Exception as exc:  # noqa: BLE001
+            _log(f"eigen-geometry route errored: {type(exc).__name__}: {exc}")
+
     # ── Deterministic spectral-theorem renderer ──────────────────
     # "Explain the spectral theorem with an example" failed vision review
     # with a TRUNCATED Q^T matrix on the LLM-SVG path.  A = Q Λ Q^T has one
