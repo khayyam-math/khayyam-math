@@ -293,3 +293,39 @@ def test_describe_language_known() -> None:
 def test_describe_language_unknown() -> None:
     # Unknown codes round-trip uppercased for prompt readability.
     assert describe_language("xx") == "XX"
+
+
+# ---------------------------------------------------------------------------
+# Regression: terse / imperfect-English math prompts must NOT misdetect as a
+# non-English language because of a lone math variable.  Field report (user
+# "Ahmed"): a "Graph, ..." prompt was answered entirely in Spanish because
+# the variable "y" is the Spanish stopword for "and", and the detected
+# language is hard-pinned into the chat prompt.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("prompt", [
+    "Graph, y = x^2",
+    "Graph, y as a function of x",
+    "Graph, no negative values",
+    "Graph, plot y over x",
+    "Graph, o draw the circle",
+    "Graph, a parabola y=x^2 son the roots",
+    "plot y vs x",
+    "draw the line y = 2x + 1",
+])
+def test_terse_english_math_not_misdetected(prompt: str) -> None:
+    assert detect_language(prompt) == "en", prompt
+
+
+def test_single_letter_variables_carry_no_language_signal() -> None:
+    # Bare variables must not vote for a language.
+    assert detect_language("x y z") == "en"
+    assert detect_language("o y a") == "en"
+
+
+def test_legitimate_non_english_still_detected() -> None:
+    # The fix must not over-correct: real non-English prompts still detect.
+    assert detect_language("Dibujar y explicar la función seno") == "es"
+    assert detect_language("¿Qué es la derivada?") == "es"
+    assert detect_language("Zeichne ein Dreieck und erkläre den Satz") == "de"
+    assert detect_language("Explique la fonction sinus avec un exemple") == "fr"

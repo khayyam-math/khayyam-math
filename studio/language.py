@@ -110,6 +110,13 @@ _STOPWORDS_EN: Final[frozenset[str]] = frozenset((
     "should", "will", "shall", "can", "must", "about", "between",
     "after", "before", "above", "below", "during", "through",
     "show", "draw", "plot", "prove", "find",
+    # Common English words a terse / imperfect-English prompt leans on.
+    # "no" was previously ONLY a Spanish stopword (English listed "not"
+    # but not "no"), so "Graph, no negative values" misdetected as
+    # Spanish.  "graph" is a strong English signal for exactly the
+    # failure class that motivated this (a "Graph, ..." prompt).
+    "no", "graph", "function", "value", "values", "axis", "point",
+    "line", "curve", "give", "make", "want", "need",
 ))
 _STOPWORDS_DE: Final[frozenset[str]] = frozenset((
     "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer",
@@ -283,7 +290,18 @@ def detect_language(text: str) -> str:
     # Latin-script branch.  Disambiguate via stopwords.
     # Tokenise lowercased, letters-only words (incl. common Latin
     # diacritics).
-    words = re.findall(r"[a-zA-ZÀ-ſ]+", t.lower())
+    #
+    # DROP single-character tokens before stopword matching: in a math
+    # prompt "y", "o", "a", "x", "i", "n" are VARIABLES, not function
+    # words — but several are also non-English stopwords ("y"=Spanish
+    # "and", "o"=Spanish "or").  A terse / imperfect-English prompt like
+    # "Graph, y = x^2" has no English stopwords, so a lone variable "y"
+    # used to flip the whole answer to Spanish (field report: user
+    # "Ahmed", a "Graph, ..." prompt answered entirely in Spanish, and —
+    # because the detected language is hard-pinned into the chat prompt —
+    # the figure was derailed into a Spanish text reply too).  One-letter
+    # tokens carry no reliable language signal, so we ignore them here.
+    words = [w for w in re.findall(r"[a-zA-ZÀ-ſ]+", t.lower()) if len(w) > 1]
     hits: dict[str, int] = {}
     for lang, sws in _STOPWORDS.items():
         hits[lang] = sum(1 for w in words if w in sws)
