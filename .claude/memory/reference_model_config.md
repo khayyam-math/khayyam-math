@@ -1,0 +1,23 @@
+---
+name: reference_model_config
+description: Production figure model = hybrid GPT-5 (gpt-5.3-chat-latest generation + gpt-5.5 vision review); GPT-5 API gotchas
+metadata: 
+  node_type: memory
+  type: reference
+  originSessionId: 99d729af-e760-4960-a041-8a1eccc50fb2
+---
+
+2026-06-18: upgraded the figure model from gpt-4o to a **hybrid GPT-5** config (user picked "hybrid" after measuring latency). Set in `infra/sevim_stack.py` env_vars:
+- `SEVIM_VLLM_MODEL` = `SEVIM_FORCE_ACTIVE_MODEL` = **`gpt-5.3-chat-latest`** — live figure GENERATION. Newest CHAT-tuned GPT-5 (NOT a reasoning model): ~7 s/figure, vision-capable, strong. `get_active_model()` returns the forced string verbatim (app.py:244), so any model id works.
+- `SEVIM_REVIEW_MODEL` = **`gpt-5.3-chat-latest`** — fast per-attempt vision review.
+- `SEVIM_REVIEW_ESCALATE_MODEL` = **`gpt-5.5`** — smart reasoning auditor used ONLY on the FINAL retry of a still-failing figure (`_review_config(escalate=attempt>=max_retries)`). Most turns never hit it.
+- `SEVIM_GPT5_REASONING_EFFORT` = `low` (bounds reasoning latency).
+
+**"NO VISUALS" incident (2026-06-18, commit `3b3e037`):** after setting `SEVIM_REVIEW_MODEL=gpt-5.5`, production showed no figures. Generation was FINE (logs: tool_call emitted + `svg_emitted`); the problem was LATENCY — gpt-5.5 reasoning review ran on EVERY attempt, pushing long-tail proof turns to ~100-115 s (measured hexagon 115 s), longer than a user waits and against the 120 s turn cap (`_OUTER_TOTAL_TIMEOUT_S`), so the figure effectively never appeared even though the 20 s SSE heartbeat kept the ALB connection alive. Fix = move per-attempt review to the fast gpt-5.3-chat-latest and reserve gpt-5.5 for the final retry only (hexagon 115→89 s; deterministic prompts ~8 s, unaffected). LESSON: a slow reasoning model on a per-attempt loop multiplies turn latency (calls/attempt × retries); keep it off the hot path.
+- Unchanged: template-router classifier + theory primer still `gpt-4o-mini`; TTS `tts-1`; `SEVIM_REVIEW_MODE` `vision`.
+
+**Measured (live API, June 2026) — why hybrid, not pure gpt-5.5:** detailed Pythagoras SVG generation latency — gpt-4o 4.7 s, gpt-5.3-chat-latest 7.2 s, **gpt-5.5 low-reasoning 29.7 s, gpt-5.5 default 68.7 s**. The flagship reasoning model is far too slow for the interactive generation path. Hardest 2-retry long-tail turns with gpt-5.5 review measured ~82–88 s (under the 125 s perf cap; deterministic routes — the bulk — unaffected).
+
+**GPT-5 / o-series API gotchas (REUSABLE):** they reject `max_tokens` (require `max_completion_tokens`) AND reject `temperature` ≠ default 1 — true even for `gpt-5.3-chat-latest`. Reasoning variants bill hidden reasoning tokens against the completion budget, so a small `max_completion_tokens` can return EMPTY visible output. `reasoning_effort` does NOT accept `minimal` on gpt-5.4/5.5 (use low/medium/high). The `*-chat-latest` variants are the non-reasoning chat tunes (fast, no reasoning_effort). Top chat-latest available is gpt-5.3 (no gpt-5.5-chat-latest); flagship line goes gpt-5.4/5.5 + `-pro` (slowest). `response_format` json_object/json_schema-strict + vision (image_url) all work on GPT-5.
+
+**Shim:** `studio/model_compat.py::adapt_payload(payload)` normalises every outbound payload — for `gpt-5*`/`o1/o3/o4`: max_tokens→max_completion_tokens, drop temperature; for reasoning (not chat-latest) set reasoning_effort=low (env-overridable) and floor max_completion_tokens to 4096. No-op for gpt-4o/4o-mini. **CRITICAL (commit `b311231`):** the first attempt only adapted 4 sites in express.py, but the codebase builds chat payloads in ~15 places — EVERY template route (fdl/graphviz/matplotlib/symbolic/process/panels/sequential/algorithm_trace/graph_homomorphism/figure_ground_truth/router) AND the main agentic CHAT-LOOP call in app.py (~line 1306, runs every turn). The unadapted chat-loop 500'd on `max_tokens` for ALL prompts post-upgrade (surfaced by "prove the area of a hexagon"). Fix: `model_compat.install()` monkeypatches `httpx.AsyncClient.post`/`.stream` process-wide to adapt any GPT-5-bound payload regardless of which module built it (guarded: only mutates JSON whose `model` is gpt-5/o-series; gpt-4o + non-OpenAI httpx untouched). Imported for side effect at top of app.py. So: DON'T rely on per-site payload patches for model-API differences — the httpx shim is the coverage guarantee. `tests/test_model_payload_adapter.py` (incl. interceptor test). Commits `2fc3e50` (hybrid) + `b311231` (shim). TODO/minor: app.py model_catalog still labels gpt-4o the "production default" (cosmetic; force flag dominates). See [[reference_runtime_paths]], [[reference_openai_key]].

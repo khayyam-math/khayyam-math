@@ -43,7 +43,9 @@ out.trace.json
 .DS_Store
 
 # Local Claude settings (project-specific, not for repo)
-.claude/
+.claude/*
+# ...but keep the assistant memory so it syncs across machines
+!.claude/memory/
 
 # Paper-related directories — the manuscript and archived earlier
 # versions live in the sevim-paper repository, NOT in the code
