@@ -87,12 +87,22 @@ fi
 echo "[redeploy] Building…"
 docker compose build app
 
+# Ensure Postgres is up and healthy FIRST.  This is idempotent: an
+# already-healthy db container is left alone, so a routine redeploy
+# still only restarts the app.
+#
+# Without this, `up -d --no-deps app` on a fresh host starts the app
+# with no database at all — and it reports HEALTHY, because /health
+# does not test the database.  Telemetry then writes nowhere while
+# everything looks green, which is worse than an outright failure.
+echo "[redeploy] Ensuring database is up…"
+docker compose up -d --wait db
+
 echo "[redeploy] Restarting app…"
 docker compose up -d --no-deps app
 
 # ── Post-deploy health watch ─────────────────────────────────────────
-PORT="$(grep -E '^APP_HOST_PORT=' .env | cut -d= -f2)"
-PORT="${PORT:-8080}"
+PORT="$(env_get APP_HOST_PORT)"; PORT="${PORT:-8080}"
 URL="http://127.0.0.1:${PORT}/health"
 echo "[redeploy] Probing $URL for 60 s…"
 consec_fail=0
@@ -124,5 +134,26 @@ if [ "$healthy" -ne 1 ]; then
     exit 4
 fi
 
+# /health deliberately does not test the database — it is the liveness
+# probe, and pulling a serving instance because of a transient DB blip
+# would turn a degradation into an outage.  So verify the DB link here
+# instead, where a false green is caught at deploy time rather than
+# discovered later as a hole in the telemetry.
+echo "[redeploy] Verifying the app can reach Postgres…"
+if docker compose exec -T db psql -qtA -U "$(env_get POSTGRES_USER)" \
+        -d "$(env_get POSTGRES_DB)" -c 'SELECT 1' >/dev/null 2>&1; then
+    tables=$(docker compose exec -T db psql -qtA -U "$(env_get POSTGRES_USER)" \
+        -d "$(env_get POSTGRES_DB)" \
+        -c "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>/dev/null | tr -d '[:space:]')
+    echo "[redeploy]   database reachable, ${tables:-0} tables"
+    if [ "${tables:-0}" -lt 5 ]; then
+        echo "[redeploy]   ⚠️  schema looks empty — the app creates tables on first"
+        echo "[redeploy]      write, so this is expected only on a brand-new host."
+    fi
+else
+    echo "[redeploy] ⚠️  Could not query Postgres. The app is serving but"
+    echo "[redeploy]     telemetry may be writing nowhere. Check: docker compose logs db" >&2
+fi
+
 echo "[redeploy] ✅ healthy at $SEVIM_GIT_SHA"
-echo "[redeploy] Public check: curl -sI https://$(grep -E '^SEVIM_DOMAIN=' .env | cut -d= -f2)/health"
+echo "[redeploy] Public check: curl -sI https://$(env_get SEVIM_DOMAIN)/health"
