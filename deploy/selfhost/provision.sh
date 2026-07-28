@@ -106,6 +106,41 @@ SystemMaxUse=2G
 CONF
 systemctl restart systemd-journald
 
+# ── 2b. Swap ─────────────────────────────────────────────────────────
+# Hetzner (and most cloud) images ship with NO swap at all.  On a
+# memory-tight host that turns every transient spike into a hard OOM
+# kill — which is precisely the failure that took the Fargate task down
+# on 2026-06-08.  Swap does not make the box faster; it buys the kernel
+# somewhere to put cold pages so a Chromium or TTS spike degrades into
+# a slow second instead of a dead container.
+TOTAL_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+log "Host RAM: ${TOTAL_MB} MB"
+if [ "$TOTAL_MB" -lt 7500 ]; then
+    echo "⚠️  Under 8 GB of RAM.  The app alone wants ~3 GB per worker."
+    echo "    Keep SEVIM_WORKERS=1 and watch for OOM kills."
+fi
+
+SWAPFILE=/swapfile
+# Half of RAM, capped at 4 GB — enough to absorb a spike, not so much
+# that a thrashing box stays 'up' but unusable.
+SWAP_MB=$(( TOTAL_MB / 2 )); [ "$SWAP_MB" -gt 4096 ] && SWAP_MB=4096
+if [ "$(swapon --show --noheadings | wc -l)" -eq 0 ]; then
+    log "Creating ${SWAP_MB} MB swapfile"
+    fallocate -l "${SWAP_MB}M" "$SWAPFILE" || \
+        dd if=/dev/zero of="$SWAPFILE" bs=1M count="$SWAP_MB" status=none
+    chmod 600 "$SWAPFILE"
+    mkswap "$SWAPFILE" >/dev/null
+    swapon "$SWAPFILE"
+    grep -q "^$SWAPFILE" /etc/fstab || \
+        echo "$SWAPFILE none swap sw 0 0" >> /etc/fstab
+    # Only reach for swap under real pressure; this is a safety net for
+    # spikes, not a substitute for RAM in the steady state.
+    sysctl -qw vm.swappiness=10
+    printf 'vm.swappiness=10\n' > /etc/sysctl.d/99-khayyam-swap.conf
+else
+    log "Swap already configured: $(swapon --show --noheadings | head -1)"
+fi
+
 # ── 3. Service account ───────────────────────────────────────────────
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
     log "Creating service account '$SERVICE_USER'"

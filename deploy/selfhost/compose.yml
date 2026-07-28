@@ -45,6 +45,12 @@ services:
       retries: 10
       start_period: 20s
     shm_size: 256mb
+    # Capped so a runaway query can't starve the app on a memory-tight
+    # host.  The dataset is small; see POSTGRES_MEM_LIMIT in env.example.
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEM_LIMIT:-1500m}
 
   # ── Application — the Fargate task replacement ──────────────────────
   app:
@@ -114,23 +120,24 @@ services:
     # without ever exposing the port to the LAN.
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-8080}:8080"
-    # Fargate ran 2 tasks × 3 GB after the 2026-06-08 OOM incident.  One
-    # container with two uvicorn workers is the equivalent: canvas state
-    # rehydrates from Postgres, so workers are interchangeable the same
-    # way tasks were.
+    # Fargate ran 2 tasks × 3 GB after the 2026-06-08 OOM incident.
+    # Workers here are the equivalent of tasks there: canvas state
+    # rehydrates from Postgres, so they are interchangeable.  How many
+    # you can afford is a function of host RAM — see SEVIM_WORKERS in
+    # env.example.  The default is 1, sized for an 8 GB host.
     command:
       - uvicorn
       - service.app:app
       - --host=0.0.0.0
       - --port=8080
-      - --workers=${SEVIM_WORKERS:-2}
+      - --workers=${SEVIM_WORKERS:-1}
       - --log-level=info
       - --access-log
       - --no-server-header
     deploy:
       resources:
         limits:
-          memory: ${SEVIM_MEM_LIMIT:-8g}
+          memory: ${SEVIM_MEM_LIMIT:-5g}
     logging:
       driver: json-file
       options:

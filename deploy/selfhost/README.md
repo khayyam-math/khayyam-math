@@ -289,18 +289,40 @@ restore it into RDS, and sync the `canvases` volume back to S3.
 ## 8. Provisioning a fresh server
 
 `provision.sh` turns a bare Debian/Ubuntu box into a host ready to run
-the stack. Written against a Hetzner Cloud **CX43** (8 vCPU, 16 GB RAM,
-160 GB NVMe, 20 TB traffic, ~€16/mo) but nothing in it is
+the stack. Written against Hetzner Cloud but nothing in it is
 Hetzner-specific.
 
-Pick **x86** — the CX line is Intel/AMD, so the existing image builds
-unchanged. The ARM CAX line works too but is slower to build and less
-tested here.
+### Picking a plan
 
-Sizing rationale: the app wants ~6 GB (two workers × 3 GB, after the
-2026-06 OOM) plus ~2 GB for Postgres, so 16 GB leaves real headroom for
-the Chromium rasteriser and piper TTS bursts. 8 vCPU covers those bursts
-without queueing.
+A worker needs a genuine **3 GB** — the headless Chromium the vision
+reviewer spawns and the piper TTS synth both live inside that budget.
+That was the lesson of the 2026-06-08 OOM, when a 2 GB Fargate task was
+killed. Postgres wants ~1 GB, the OS and Docker ~0.7 GB.
+
+| Plan | Specs | €/mo incl. VAT | Config |
+|---|---|---:|---|
+| CX43 / CAX31 | 8 · 16 GB | ~19 / ~25 | `WORKERS=2`, `MEM_LIMIT=8g` |
+| **CPX32** | 4 · 8 GB | ~42 | **`WORKERS=1`, `MEM_LIMIT=5g`** ← the defaults |
+| CPX42 | 8 · 16 GB | ~83 | `WORKERS=2`, `MEM_LIMIT=8g` |
+
+The Cost-Optimized line (CX/CAX) is the best value by a wide margin, but
+as of July 2026 it carries a **"Limited availability"** badge and was
+sold out in all three EU locations. Check it first anyway — stock
+returns, and you can rescale onto it later without rebuilding the disk.
+
+Prefer **x86** if you have the choice: the image builds unchanged. ARM
+(CAX) works — every dependency publishes aarch64 builds and it compiles
+natively on the box — but it is slower to build and less tested here.
+
+### On 8 GB, one worker is the honest limit
+
+Two workers plus Postgres does not fit. The trade-off versus Fargate is
+real: an OOM becomes ~15 s of downtime while Docker restarts the
+container, rather than a sibling task absorbing it. `restart:
+unless-stopped` plus the healthcheck make recovery automatic, and
+`provision.sh` adds swap so a spike degrades into a slow second instead
+of a kill — but it is less resilient than the two-task setup, and you
+should know that going in.
 
 ```bash
 ssh root@<server-ip>
