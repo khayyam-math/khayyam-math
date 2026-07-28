@@ -166,10 +166,18 @@ is the escape hatch if Brevo has a bad day and you still have AWS creds.
 ```bash
 cd deploy/selfhost
 cp env.example .env && chmod 600 .env && $EDITOR .env
-docker compose up -d --build
+./redeploy.sh                       # builds and starts
 docker compose logs -f app          # watch for "Application startup complete"
 curl -s localhost:8080/health
 ```
+
+Use `./redeploy.sh`, not a bare `docker compose build`. The GeoLite2
+database (66 MB) is gitignored — MaxMind's licence forbids
+redistribution — so a fresh clone doesn't have it and the Docker build
+fails at `COPY infra/geolite/GeoLite2-City.mmdb`. `redeploy.sh` fetches
+it first, exactly as `infra/deploy.sh` does for the AWS path. That needs
+`MAXMIND_ACCOUNT_ID` and `MAXMIND_LICENSE_KEY` in `.env`
+([free signup](https://www.maxmind.com/en/geolite2/signup)).
 
 Then install the timers and the boot unit:
 

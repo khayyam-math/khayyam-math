@@ -204,7 +204,8 @@ chmod 600 "$SELFHOST_DIR/.env"
 
 # ── Done ─────────────────────────────────────────────────────────────
 missing=()
-for key in CF_TUNNEL_TOKEN OPENAI_API_KEY SEVIM_SMTP_USER SEVIM_SMTP_PASSWORD; do
+for key in CF_TUNNEL_TOKEN OPENAI_API_KEY SEVIM_SMTP_USER SEVIM_SMTP_PASSWORD \
+           MAXMIND_ACCOUNT_ID MAXMIND_LICENSE_KEY; do
     grep -qE "^${key}=.+" "$SELFHOST_DIR/.env" || missing+=("$key")
 done
 
@@ -227,9 +228,12 @@ else
 fi
 cat <<EOF
 
-Then, as $SERVICE_USER:
+Then build and start.  Use redeploy.sh rather than a bare
+'docker compose build': it fetches the gitignored GeoLite2 database
+first, without which the Docker build fails at that COPY.
+
    cd $SELFHOST_DIR
-   docker compose up -d --build      # first build takes several minutes
+   sudo -u $SERVICE_USER ./redeploy.sh   # first build takes several minutes
    curl -s localhost:8080/health
 
 Copy the production data across (read-only against AWS):
