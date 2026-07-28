@@ -27,8 +27,9 @@ under `docs/`.
 9. [Auth (magic link)](#auth-magic-link)
 10. [Storage + rehydration](#storage--rehydration)
 11. [Deploy topology (AWS Fargate)](#deploy-topology-aws-fargate)
-12. [Where to find things (file-level map)](#where-to-find-things-file-level-map)
-13. [Non-goals](#non-goals)
+12. [Deploy topology (self-hosted)](#deploy-topology-self-hosted)
+13. [Where to find things (file-level map)](#where-to-find-things-file-level-map)
+14. [Non-goals](#non-goals)
 
 ---
 
@@ -614,6 +615,55 @@ flowchart TB
   (`SEVIM_DOMAIN`, `CDK_DEFAULT_*`, `AWS_PROFILE`) and runs the
   quality gate before invoking CDK.
 - Runbook: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+This topology is still fully supported. `infra/` is unmodified by the
+self-hosting work below, and the tag `aws-production-final` marks the
+commit the Fargate service was last running.
+
+---
+
+## Deploy topology (self-hosted)
+
+An alternative topology that runs the identical container on a single
+machine with no AWS bill. Both are supported by the same source tree;
+which one you get is decided entirely by environment variables.
+
+```mermaid
+flowchart TB
+    DNS[Cloudflare DNS<br/>khayyammath.com] --> EDGE[Cloudflare edge<br/>TLS termination]
+    EDGE -.outbound tunnel.-> CFD[cloudflared container]
+    CFD --> APP[app container<br/>2 uvicorn workers]
+    APP --> PG[(postgres:16 container<br/>pgdata volume)]
+    APP --> VOL[(canvases volume<br/>state.json + WAVs)]
+    APP --> SMTP[SMTP relay<br/>magic-link sender]
+    APP --> ENV[.env, mode 600<br/>OPENAI_API_KEY, auth secret, ...]
+
+    TIMERS[systemd timers] --> PROBE[quality_probe]
+    TIMERS --> DIGEST[feedback_digest]
+    TIMERS --> BAK[backup.sh -> pg_dump + tar]
+
+    DEV[Local redeploy.sh] --> QG2[quality_gate.py<br/>same 50 criteria]
+    QG2 -->|pass| BUILD[docker compose build] --> APP
+```
+
+The tunnel dials **out** to Cloudflare, so no inbound port is opened and
+a dynamic residential IP is irrelevant — that is what makes ALB + ACM +
+Route 53 redundant rather than merely replaced.
+
+Which topology the code takes is a function of four env vars:
+
+| Env var | AWS | Self-hosted |
+|---|---|---|
+| `AWS_REGION` | set → Secrets Manager | unset → `.env` |
+| `SEVIM_STORAGE_URL` | `s3://…` → `S3Storage` | unset → `FileStorage` |
+| `SEVIM_SMTP_HOST` | unset → SES backend | set → SMTP backend |
+| `SEVIM_TELEMETRY_DB` | RDS secret JSON | `postgresql://…@db` |
+
+No code branches on "am I on AWS" beyond these. Reverting is therefore
+a configuration change, not a migration.
+
+- Everything lives in `deploy/selfhost/`.
+- Runbook: [`deploy/selfhost/README.md`](deploy/selfhost/README.md).
 
 ---
 

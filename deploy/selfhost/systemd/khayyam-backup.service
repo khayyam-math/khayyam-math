@@ -1,0 +1,18 @@
+# Nightly database + canvas backup.
+#
+# There is no AWS counterpart to point at because this replaces two
+# things at once: RDS automated backups and S3 object durability.  Both
+# were free-by-default on AWS and are entirely our problem here.
+
+[Unit]
+Description=Khayyam Math nightly backup (database + canvas volume)
+Requires=khayyam-math.service
+After=khayyam-math.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ara/Documents/Programming/sevim_plugin/deploy/selfhost
+User=ara
+Group=ara
+ExecStart=/home/ara/Documents/Programming/sevim_plugin/deploy/selfhost/backup.sh
+TimeoutStartSec=3600

@@ -124,21 +124,17 @@ def _verify_challenge(token: str, user_answer: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# SES delivery
+# Delivery (SMTP or SES — see service/mailer.py)
 # ---------------------------------------------------------------------------
 
 def _send_email(name: str, from_email: str, message: str, ip_hash: str | None) -> bool:
-    """Send the contact-form payload via SES.  Best-effort — errors
-    log to stderr and the caller decides what to show the user."""
-    sender = os.environ.get("SEVIM_SES_FROM_ADDRESS")
+    """Send the contact-form payload.  Best-effort — errors log to
+    stderr and the caller decides what to show the user."""
+    from service.mailer import sender_address, send_email as _deliver
+
     recipient = os.environ.get("SEVIM_CONTACT_TO", _DEFAULT_RECIPIENT)
-    if not sender:
-        _log("SEVIM_SES_FROM_ADDRESS unset — skipping send")
-        return False
-    try:
-        import boto3
-    except ImportError:
-        _log("boto3 not installed — cannot send")
+    if not sender_address():
+        _log("no sender configured (SEVIM_MAIL_FROM) — skipping send")
         return False
     body_text = (
         f"New contact form submission from khayyammath.com\n\n"
@@ -161,24 +157,13 @@ def _send_email(name: str, from_email: str, message: str, ip_hash: str | None) -
         f"{html.escape(message)}</pre>"
     )
     subject = f"[Khayyam Math contact] {name[:60]}"
-    try:
-        ses = boto3.client("ses")
-        ses.send_email(
-            Source=sender,
-            Destination={"ToAddresses": [recipient]},
-            ReplyToAddresses=[from_email],
-            Message={
-                "Subject": {"Data": subject},
-                "Body": {
-                    "Text": {"Data": body_text},
-                    "Html": {"Data": body_html},
-                },
-            },
-        )
-        return True
-    except Exception as exc:  # noqa: BLE001
-        _log(f"SES send_email failed: {type(exc).__name__}: {exc}")
-        return False
+    return _deliver(
+        to=recipient,
+        subject=subject,
+        text=body_text,
+        html=body_html,
+        reply_to=from_email,
+    )
 
 
 # ---------------------------------------------------------------------------

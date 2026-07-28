@@ -2,14 +2,14 @@
 
 Why magic-link?  No password storage, no OAuth dance, no third-party
 identity provider — just an email round-trip.  Suitable for a small
-public launch where the cost of SES (≈$0.10 / 1000 emails) is the
-entire ops overhead and we want a real per-user identity in telemetry.
+public launch where a transactional mail relay is the entire ops
+overhead and we want a real per-user identity in telemetry.
 
 Flow:
 
   1. User submits an email on ``/studio/auth/login``.
   2. ``POST /studio/auth/request-link`` signs a short-lived (15 min)
-     token containing that email and asks SES to mail
+     token containing that email and mails
      ``https://<host>/studio/auth/verify?t=<token>``.
      The endpoint always returns 200 — never reveals whether an email
      is known to the system, so it can't be used as a directory probe.
@@ -27,10 +27,15 @@ Required env vars when enabled:
                                    and cookies.  Pulled from Secrets
                                    Manager in production (see
                                    ``service/secrets.py``).
-  * ``SEVIM_SES_FROM_ADDRESS``   — verified SES sender, e.g.
-                                   ``Sevim <noreply@sevim.example>``.
-                                   Domain must be SES-verified before
-                                   the first send (out of sandbox).
+  * ``SEVIM_MAIL_FROM``          — verified sender address, e.g.
+                                   ``noreply@sevim.example``.  The
+                                   domain must be verified (SPF+DKIM)
+                                   with the relay before the first
+                                   send.  ``SEVIM_SES_FROM_ADDRESS``
+                                   is still honoured as a fallback.
+                                   Relay selection and the rest of the
+                                   mail env vars live in
+                                   ``service/mailer.py``.
   * ``SEVIM_AUTH_DOMAIN``        — public hostname used to build the
                                    magic link.  e.g. ``sevim.example``.
                                    Falls back to the request's Host
@@ -109,10 +114,6 @@ def _idle_ttl_s() -> int:
     return int(os.environ.get("SEVIM_AUTH_IDLE_TTL_S", "86400"))
 
 
-def _ses_from() -> str:
-    return os.environ.get("SEVIM_SES_FROM_ADDRESS", "")
-
-
 def _public_domain(request: Request) -> str:
     return os.environ.get("SEVIM_AUTH_DOMAIN") or request.headers.get("host") or "localhost"
 
@@ -167,27 +168,18 @@ def unsign(token: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Magic-link delivery via SES
+# Magic-link delivery (SMTP or SES — see service/mailer.py)
 # ---------------------------------------------------------------------------
 
 def _send_magic_link(email: str, link: str) -> None:
-    """Best-effort SES send.  Failures log but don't raise — same
-    posture as the rest of Sevim's external-service calls.
+    """Best-effort send.  Failures log but don't raise — same posture as
+    the rest of Sevim's external-service calls.
     """
-    sender = _ses_from()
-    if not sender:
-        _log("SEVIM_SES_FROM_ADDRESS unset — skipping send (would have mailed link)")
+    from service.mailer import sender_address, send_email
+
+    if not sender_address():
+        _log("no sender configured — skipping send (would have mailed link)")
         _log(f"DEV-ONLY magic link for {email}: {link}")
-        return
-    # A friendly display name ("Khayyam Math <noreply@…>") reads as a real
-    # sender to both humans and spam filters; a bare address looks
-    # machine-generated.  Only wrap when the operator hasn't already set one.
-    if "<" not in sender:
-        sender = f"Khayyam Math <{sender}>"
-    try:
-        import boto3
-    except ImportError:
-        _log("boto3 not installed — skipping SES send")
         return
     # Deliverability note: spam filters penalise "bare URL + boilerplate"
     # bodies and reward a natural text-to-link ratio plus a clear reason the
@@ -231,21 +223,12 @@ def _send_magic_link(email: str, link: str) -> None:
         "khayyammath.com</a></p>"
         "</div>"
     )
-    try:
-        ses = boto3.client("ses")
-        ses.send_email(
-            Source=sender,
-            Destination={"ToAddresses": [email]},
-            Message={
-                "Subject": {"Data": "Your Khayyam Math sign-in link"},
-                "Body": {
-                    "Text": {"Data": body_text},
-                    "Html": {"Data": body_html},
-                },
-            },
-        )
-    except Exception as exc:  # noqa: BLE001
-        _log(f"SES send_email failed: {type(exc).__name__}: {exc}")
+    send_email(
+        to=email,
+        subject="Your Khayyam Math sign-in link",
+        text=body_text,
+        html=body_html,
+    )
 
 
 # ---------------------------------------------------------------------------

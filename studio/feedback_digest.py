@@ -66,19 +66,18 @@ def _send(subject: str, body: str) -> None:
         print(f"[digest] no SEVIM_PROBE_ALERT_EMAIL set; would have sent:\n"
               f"{subject}\n{body}", flush=True)
         return
-    s = os.environ.get("SEVIM_SES_FROM_ADDRESS") or "noreply@khayyammath.com"
-    src = s if "<" in s else f"Khayyam Math <{s}>"
-    try:
-        import boto3
-        boto3.client("ses").send_email(
-            Source=src,
-            Destination={"ToAddresses": [ALERT_EMAIL]},
-            Message={"Subject": {"Data": subject[:200]},
-                     "Body": {"Text": {"Data": body[:120000]}}},
-        )
+    from service.mailer import sender_address, send_email
+    src = sender_address() or "Khayyam Math <noreply@khayyammath.com>"
+    ok = send_email(
+        to=ALERT_EMAIL,
+        subject=subject[:200],
+        text=body[:120000],
+        sender=src,
+    )
+    if ok:
         print(f"[digest] e-mailed to {ALERT_EMAIL}", flush=True)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[digest] FAILED to send: {exc}", flush=True, file=sys.stderr)
+    else:
+        print("[digest] FAILED to send", flush=True, file=sys.stderr)
 
 
 def main() -> int:

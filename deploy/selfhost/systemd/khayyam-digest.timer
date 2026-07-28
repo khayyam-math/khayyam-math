@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Khayyam Math feedback digest daily
+
+[Timer]
+# 07:00 UTC, same as the EventBridge schedule it replaces.
+OnCalendar=*-*-* 07:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

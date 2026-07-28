@@ -1,0 +1,169 @@
+# Khayyam Math — self-hosted stack.
+#
+# Replaces the AWS deployment (infra/sevim_stack.py) service-for-service
+# on a single machine:
+#
+#   ECS Fargate task     → the `app` service below
+#   RDS PostgreSQL       → the `db` service (named volume, nightly dump)
+#   S3 canvas bucket     → the `canvases` volume (FileStorage backend)
+#   Secrets Manager      → the gitignored .env next to this file
+#   ALB + ACM + Route53  → the `tunnel` service (Cloudflare Tunnel)
+#   EventBridge Scheduler→ systemd timers (see systemd/)
+#
+# The AWS stack is NOT deleted by any of this.  infra/ still deploys,
+# and the mail layer keeps its SES backend, so reverting is a DNS
+# change plus `cd infra && ./deploy.sh`.  See README.md.
+#
+# Usage:
+#   cp env.example .env && $EDITOR .env      # fill in secrets
+#   docker compose --env-file .env up -d --build
+#   docker compose logs -f app
+
+name: khayyam-math
+
+services:
+  # ── PostgreSQL — the RDS replacement ────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sevim}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-sevim}
+      # Deterministic collation so index ordering matches the RDS dump.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Bound to loopback only: pg_dump / psql from the host work, but the
+    # database is never reachable from the LAN, let alone the internet.
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sevim} -d ${POSTGRES_DB:-sevim}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    shm_size: 256mb
+
+  # ── Application — the Fargate task replacement ──────────────────────
+  app:
+    build:
+      # Repo root: the Dockerfile expects sevim/, service/, studio/,
+      # mcp_server/ and infra/geolite/ in the build context.
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        SEVIM_GIT_SHA: ${SEVIM_GIT_SHA:-selfhost}
+    # Explicit tag so redeploy.sh can keep a :rollback alias of the
+    # previously-serving image and swap back without a rebuild — the
+    # self-host equivalent of ECS's previous-task-definition rollback.
+    image: khayyam-math-app:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # ── Storage ─────────────────────────────────────────────────────
+      # No SEVIM_STORAGE_URL → service/storage.py picks FileStorage and
+      # the canvases volume below is the system of record.  That is the
+      # whole S3 replacement; the S3 backend stays in the code for a
+      # revert.
+      SEVIM_DATA_DIR: /var/sevim/canvases
+      SEVIM_TELEMETRY_DB: postgresql://${POSTGRES_USER:-sevim}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sevim}
+
+      # ── Behaviour parity with the AWS task definition ──────────────
+      # Mirrors infra/sevim_stack.py env_vars.  Keep the two in sync so
+      # a revert to Fargate is behaviourally identical.
+      SEVIM_TELEMETRY: "1"
+      SEVIM_RATE_LIMIT: "1"
+      SEVIM_COST_GUARD: "1"
+      SEVIM_COST_DAILY_MAX_USD: "10.00"
+      SEVIM_CONTENT_FILTER: "1"
+      SEVIM_AUTH_REQUIRED: "1"
+      # Cloudflare Tunnel puts the real client IP in the leftmost
+      # X-Forwarded-For entry, exactly as the ALB did.
+      SEVIM_TRUST_PROXY: "1"
+      SEVIM_AUTH_DOMAIN: ${SEVIM_DOMAIN:-khayyammath.com}
+
+      # ── Model configuration (hybrid GPT-5, 2026-06) ────────────────
+      SEVIM_VLLM_URL: "https://api.openai.com/v1"
+      SEVIM_VLLM_MODEL: "gpt-5.3-chat-latest"
+      SEVIM_FORCE_ACTIVE_MODEL: "gpt-5.3-chat-latest"
+      SEVIM_REVIEW_MODE: "vision"
+      SEVIM_REVIEW_MODEL: "gpt-5.3-chat-latest"
+      SEVIM_REVIEW_ESCALATE_MODEL: "gpt-5.5"
+      SEVIM_GPT5_REASONING_EFFORT: "low"
+      SEVIM_TTS_MODEL: "tts-1"
+
+      # ── Taxonomy / answer cache ────────────────────────────────────
+      SEVIM_ANSWER_CACHE: "1"
+      SEVIM_ANSWER_CACHE_TAU: "0.93"
+      SEVIM_TAXONOMY: "1"
+
+      # AWS_REGION is deliberately ABSENT.  service/secrets.py treats it
+      # as the "pull from Secrets Manager" switch; unset, it sources the
+      # env file instead.  Setting it here would make every boot wait on
+      # AWS API calls that are no longer authorised.
+    volumes:
+      - canvases:/var/sevim/canvases
+    # Only the tunnel needs to reach the app.  Publishing to loopback as
+    # well makes local smoke tests and the systemd timers straightforward
+    # without ever exposing the port to the LAN.
+    ports:
+      - "127.0.0.1:${APP_HOST_PORT:-8080}:8080"
+    # Fargate ran 2 tasks × 3 GB after the 2026-06-08 OOM incident.  One
+    # container with two uvicorn workers is the equivalent: canvas state
+    # rehydrates from Postgres, so workers are interchangeable the same
+    # way tasks were.
+    command:
+      - uvicorn
+      - service.app:app
+      - --host=0.0.0.0
+      - --port=8080
+      - --workers=${SEVIM_WORKERS:-2}
+      - --log-level=info
+      - --access-log
+      - --no-server-header
+    deploy:
+      resources:
+        limits:
+          memory: ${SEVIM_MEM_LIMIT:-8g}
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ── Cloudflare Tunnel — the ALB + ACM + Route53 replacement ─────────
+  # Dials OUT to the Cloudflare edge, so no inbound port is opened on
+  # the router and a dynamic residential IP is irrelevant.  TLS is
+  # terminated at the edge with a Cloudflare-managed certificate.
+  #
+  # The public hostname → http://app:8080 route is configured once in
+  # the Cloudflare dashboard (or via `cloudflared tunnel route dns`);
+  # the token below is all the container needs.  See README.md §2.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - app
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
+    healthcheck:
+      test: ["CMD", "cloudflared", "--version"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  canvases:

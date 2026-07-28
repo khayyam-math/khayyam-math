@@ -1,0 +1,22 @@
+# 6-hourly figure-quality probe — replaces the EventBridge Scheduler
+# entry defined in infra/sevim_stack.py §6c.
+#
+# Runs the SAME entry point the scheduled ECS task ran
+# (`python -m studio.quality_probe`) in a throwaway container that
+# inherits the app service's environment, so probe behaviour is
+# identical to production.  The script no-ops past its hard end date
+# (2026-08-31), which is what bounded the EventBridge schedule too.
+
+[Unit]
+Description=Khayyam Math 6-hourly figure-quality probe
+Requires=khayyam-math.service
+After=khayyam-math.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ara/Documents/Programming/sevim_plugin/deploy/selfhost
+User=ara
+Group=ara
+ExecStart=/usr/bin/docker compose run --rm --no-deps app python -m studio.quality_probe
+# A probe run includes figure generation plus a possible auto-fix pass.
+TimeoutStartSec=1800

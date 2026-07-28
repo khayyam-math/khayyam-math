@@ -435,8 +435,9 @@ If you've just joined the project, read these in order:
 5. **[docs/COMPLETENESS.md](docs/COMPLETENESS.md)** — pedagogical-depth gate: the nine archetypes (proof, step_by_step, …), brief + critic pair, classifier + detector catalog.
 6. **[docs/MATH_CORRECTNESS.md](docs/MATH_CORRECTNESS.md)** — the five-tier verifier chain (SymPy → Z3 → Lean → per-domain → vision + Tier 5 ground truth).
 7. **[docs/DEPLOY.md](docs/DEPLOY.md)** — Fargate runbook: `infra/deploy.sh`, AWS account / profile, common failures + recovery.
-8. **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, code style, PR flow.
-9. **[docs/finetune.md](docs/finetune.md)** — local Qwen LoRA fine-tune procedure (smoke run, full run, HF push).
+8. **[deploy/selfhost/README.md](deploy/selfhost/README.md)** — self-hosting runbook: run the whole site on one machine with no AWS bill (Docker Compose + Postgres + Cloudflare Tunnel + SMTP), migrate the data, and revert to AWS.
+9. **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, code style, PR flow.
+10. **[docs/finetune.md](docs/finetune.md)** — local Qwen LoRA fine-tune procedure (smoke run, full run, HF push).
 
 ## Benchmarks
 

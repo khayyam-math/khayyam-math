@@ -83,30 +83,31 @@ def _which_problem() -> str:
 
 
 def _sender() -> str:
-    s = os.environ.get("SEVIM_SES_FROM_ADDRESS") or "noreply@khayyammath.com"
-    return s if "<" in s else f"Khayyam Math probe <{s}>"
+    from service.mailer import sender_address
+    return (sender_address(display_name="Khayyam Math probe")
+            or "Khayyam Math probe <noreply@khayyammath.com>")
 
 
 def send_alert(subject: str, body: str) -> None:
     if not ALERT_EMAIL:
         # No recipient configured (e.g. a clone without the env var):
         # surface the alert in the logs instead of crashing on an empty
-        # SES destination.
+        # destination.
         print(f"[probe] no SEVIM_PROBE_ALERT_EMAIL set; alert not e-mailed.\n"
               f"{subject}\n{body}", flush=True)
         return
-    try:
-        import boto3
-        boto3.client("ses").send_email(
-            Source=_sender(),
-            Destination={"ToAddresses": [ALERT_EMAIL]},
-            Message={"Subject": {"Data": subject[:200]},
-                     "Body": {"Text": {"Data": body[:60000]}}},
-        )
+    from service.mailer import send_email
+    ok = send_email(
+        to=ALERT_EMAIL,
+        subject=subject[:200],
+        text=body[:60000],
+        sender=_sender(),
+    )
+    if ok:
         print(f"[probe] alert e-mailed to {ALERT_EMAIL}", flush=True)
-    except Exception as exc:  # noqa: BLE001
+    else:
         # Last resort: at least surface it in the task logs.
-        print(f"[probe] FAILED to send alert: {exc}\n{subject}\n{body}",
+        print(f"[probe] FAILED to send alert\n{subject}\n{body}",
               flush=True, file=sys.stderr)
 
 

@@ -40,6 +40,11 @@ from urllib.parse import urlparse
 # Everything else stays portable (TEXT, INTEGER, REAL, ON CONFLICT, RETURNING).
 # ---------------------------------------------------------------------------
 
+# Advisory-lock key guarding concurrent schema creation on Postgres.  See
+# _PostgresBackend.executescript for why this is necessary.  Arbitrary but
+# fixed — every process must agree on it for the lock to mean anything.
+_SCHEMA_LOCK_KEY = 0x5EF1_3A11
+
 _SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id   TEXT PRIMARY KEY,
@@ -561,6 +566,21 @@ class _PostgresBackend:
             cleaned_lines.append(raw if idx < 0 else raw[:idx])
         cleaned = "\n".join(cleaned_lines)
         cur = self._conn.cursor()
+        # Serialise schema creation across processes.  Postgres'
+        # `CREATE TABLE IF NOT EXISTS` is NOT concurrency-safe: two
+        # sessions can both find the table absent, both attempt the
+        # create, and the loser gets
+        #   duplicate key value violates unique constraint
+        #   "pg_type_typname_nsp_index"
+        # This bites whenever more than one process opens the database
+        # at once against a fresh schema — several uvicorn workers
+        # booting together, or several app instances pointed at the
+        # same database.  The transaction-scoped advisory lock makes
+        # the whole DDL block mutually exclusive and is released by the
+        # commit() the caller issues immediately after.  The key is an
+        # arbitrary constant; it only has to be stable and unlikely to
+        # collide with another application's advisory locks.
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
         for stmt in cleaned.split(";"):
             s = stmt.strip()
             if s:
