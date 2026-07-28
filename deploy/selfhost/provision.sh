@@ -151,6 +151,11 @@ usermod -aG docker "$SERVICE_USER"
 log "Setting ownership of $REPO_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_DIR"
 
+# The checkout belongs to the service user, but maintenance (git pull,
+# redeploy) is usually done over an ssh root session.  Without this,
+# every git command as root aborts with "detected dubious ownership".
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+
 # ── 4. Firewall ──────────────────────────────────────────────────────
 # With Cloudflare Tunnel the origin needs NO inbound ports at all — the
 # tunnel dials out.  SSH is the only exception, and it is the only thing

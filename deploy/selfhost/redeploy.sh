@@ -23,10 +23,13 @@ SEVIM_GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD 2>/dev/null || ec
 export SEVIM_GIT_SHA
 echo "[redeploy] deploying $SEVIM_GIT_SHA"
 
-# Make .env available to the steps below (MaxMind credentials in
-# particular).  The app itself reads .env through compose's env_file;
-# this is only so the build-time helpers can see it.
-set -a; . ./.env; set +a
+# Read one KEY=value out of .env WITHOUT sourcing it.
+#
+# .env is a Docker Compose env_file, not a shell script.  Compose accepts
+# unquoted values containing spaces (SEVIM_MAIL_FROM_NAME=Khayyam Math);
+# `source` would execute that line and try to run `Math` as a command.
+# Anything reading .env from bash must parse, never source.
+env_get() { sed -n "s/^$1=//p" ./.env | head -1; }
 
 # ── GeoLite2 refresh ─────────────────────────────────────────────────
 # The mmdb is gitignored, so a fresh clone has no
@@ -34,6 +37,8 @@ set -a; . ./.env; set +a
 # COPY.  infra/deploy.sh refreshes it before every AWS build; do the
 # same here so the two paths cannot drift.
 echo "[redeploy] Refreshing GeoLite2 database…"
+export MAXMIND_ACCOUNT_ID="$(env_get MAXMIND_ACCOUNT_ID)"
+export MAXMIND_LICENSE_KEY="$(env_get MAXMIND_LICENSE_KEY)"
 if ! "$REPO_ROOT/infra/refresh_geolite.sh"; then
     if [ -s "$REPO_ROOT/infra/geolite/GeoLite2-City.mmdb" ]; then
         echo "[redeploy] ⚠️  refresh failed — building with the existing mmdb."

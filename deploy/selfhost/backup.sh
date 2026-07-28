@@ -32,7 +32,14 @@ if [ ! -f .env ]; then
     echo "[backup] no .env next to compose.yml — nothing to back up" >&2
     exit 1
 fi
-set -a; . ./.env; set +a
+# Parse .env, never source it.  It is a Docker Compose env_file, which
+# permits unquoted values containing spaces (SEVIM_MAIL_FROM_NAME=Khayyam
+# Math).  `source` would execute that line and try to run `Math`.
+env_get() { sed -n "s/^$1=//p" ./.env | head -1; }
+POSTGRES_USER="$(env_get POSTGRES_USER)";           POSTGRES_USER="${POSTGRES_USER:-sevim}"
+POSTGRES_DB="$(env_get POSTGRES_DB)";               POSTGRES_DB="${POSTGRES_DB:-sevim}"
+BACKUP_AGE_RECIPIENT="${BACKUP_AGE_RECIPIENT:-$(env_get BACKUP_AGE_RECIPIENT)}"
+BACKUP_REMOTE="${BACKUP_REMOTE:-$(env_get BACKUP_REMOTE)}"
 
 mkdir -p "$DEST"
 chmod 700 "$BACKUP_DIR" "$DEST"

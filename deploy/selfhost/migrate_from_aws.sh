@@ -108,7 +108,11 @@ fi
 
 # Everything below needs the local .env.
 [ -f .env ] || { echo "❌ no .env — run with --secrets first" >&2; exit 1; }
-set -a; . ./.env; set +a
+# Parse .env, never source it — see backup.sh for why (Compose env_file
+# permits unquoted spaces; sourcing would execute them as commands).
+env_get() { sed -n "s/^$1=//p" ./.env | head -1; }
+POSTGRES_USER="$(env_get POSTGRES_USER)"; POSTGRES_USER="${POSTGRES_USER:-sevim}"
+POSTGRES_DB="$(env_get POSTGRES_DB)";     POSTGRES_DB="${POSTGRES_DB:-sevim}"
 
 
 # ─────────────────────────────────────────────────────────────────────
