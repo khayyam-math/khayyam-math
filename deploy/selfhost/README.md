@@ -8,6 +8,11 @@ deploys, the SES and S3 code paths are still in the source, and the tag
 running. Going back is a DNS change plus one `deploy.sh` — see
 [§7 Reverting to AWS](#7-reverting-to-aws).
 
+**Starting from a bare cloud server?** Go to
+[§8 Provisioning a fresh server](#8-provisioning-a-fresh-server) first,
+then come back to §2. The numbered sections after that assume Docker is
+installed and the repo is checked out.
+
 ---
 
 ## What replaces what
@@ -34,24 +39,41 @@ contents, `aws s3 sync` them somewhere before teardown.
 
 ### What you give up
 
-Be clear-eyed about this before cutting over:
+Be clear-eyed about this before cutting over. The list depends on where
+you run it.
 
-- **Availability is now your problem.** This box is a desktop on a
-  residential connection. Power cuts, ISP outages, kernel updates, and
-  "I need to reboot" all become site downtime. Fargate across two AZs
-  did not have that failure mode.
+**On any single box:**
+
+- **No multi-AZ redundancy.** Fargate ran two tasks the ALB could fail
+  between. One host means kernel updates, a bad deploy, or a hardware
+  fault are all site downtime. `redeploy.sh` auto-rolls-back, which
+  covers the common case, but not the host dying.
 - **Durability is now your problem.** RDS snapshots and S3's eleven
-  nines are replaced by `backup.sh` writing to the same disk the data is
-  on. Set `BACKUP_REMOTE` to an off-box target or the backup protects
-  you from nothing but `DROP TABLE`.
-- **The GPU is shared.** The 5090 in this box is also your dev machine's
-  GPU. Nothing in the current request path uses it (generation is the
-  OpenAI API), but if you later move inference local, a training run and
-  a live request will fight.
+  nines are replaced by `backup.sh`. Set `BACKUP_REMOTE` to an off-box
+  target (a Hetzner Storage Box is ~€4/mo) or the backup lives on the
+  same disk as the data and protects you from nothing but `DROP TABLE`.
+
+**Additionally, on a workstation at home:**
+
+- **A residential line is the availability model.** Power cuts, ISP
+  outages, and "I need to reboot" all become downtime, and a consumer
+  uplink is not built for it.
+- **The GPU is shared.** Nothing in the current request path uses it
+  (generation is the OpenAI API), but if you later move inference local,
+  a training run and a live request will fight.
+
+A cheap cloud VPS removes the second group entirely and makes the first
+group's off-box backup trivial, which is why
+[§8](#8-provisioning-a-fresh-server) exists.
 
 ---
 
 ## 1. Prerequisites
+
+**Provisioning a server?** Skip this section — `provision.sh`
+([§8](#8-provisioning-a-fresh-server)) installs all of it for you.
+
+For a workstation checkout:
 
 ```bash
 # Docker with the compose v2 plugin
@@ -152,10 +174,20 @@ curl -s localhost:8080/health
 Then install the timers and the boot unit:
 
 ```bash
-sudo systemd/install.sh
+sudo systemd/install.sh                          # workstation checkout
+sudo SERVICE_USER=khayyam systemd/install.sh     # server (see §8)
 sudo systemctl start khayyam-math.service
 systemctl list-timers 'khayyam-*'
 ```
+
+The `.service` files in `systemd/` are templates carrying
+`@@WORKDIR@@` / `@@USER@@` placeholders; `install.sh` substitutes the
+real checkout path and owning account before writing to
+`/etc/systemd/system`. That is what lets the same repo drive a
+workstation checkout under `~/` and a server checkout under
+`/opt/khayyam-math` with no hand-editing. It refuses to install if the
+user is missing from the `docker` group or `.env` does not exist, since
+both produce units that fail only at 3 a.m.
 
 ---
 
@@ -251,6 +283,58 @@ The current code needs **no changes** to run on AWS again:
 
 The one thing to carry back is the data: dump the local Postgres and
 restore it into RDS, and sync the `canvases` volume back to S3.
+
+---
+
+## 8. Provisioning a fresh server
+
+`provision.sh` turns a bare Debian/Ubuntu box into a host ready to run
+the stack. Written against a Hetzner Cloud **CX43** (8 vCPU, 16 GB RAM,
+160 GB NVMe, 20 TB traffic, ~€16/mo) but nothing in it is
+Hetzner-specific.
+
+Pick **x86** — the CX line is Intel/AMD, so the existing image builds
+unchanged. The ARM CAX line works too but is slower to build and less
+tested here.
+
+Sizing rationale: the app wants ~6 GB (two workers × 3 GB, after the
+2026-06 OOM) plus ~2 GB for Postgres, so 16 GB leaves real headroom for
+the Chromium rasteriser and piper TTS bursts. 8 vCPU covers those bursts
+without queueing.
+
+```bash
+ssh root@<server-ip>
+apt-get update && apt-get install -y git
+git clone https://github.com/khayyam-math/khayyam-math.git /opt/khayyam-math
+/opt/khayyam-math/deploy/selfhost/provision.sh
+```
+
+It is idempotent — re-run it to apply changes. It installs base packages
+and unattended security upgrades, Docker CE with the compose plugin
+(from Docker's repo, because the distro's `docker.io` ships without
+compose v2), a `khayyam` service account in the `docker` group, bounded
+journal and container logs, a default-deny firewall, SSH key-only auth,
+and a `.env` skeleton with the database password and secrets generated.
+
+**The firewall opens nothing but SSH.** With Cloudflare Tunnel the
+origin needs no inbound ports at all — cloudflared dials out. That is a
+genuinely better posture than the ALB had, since there is no public
+listener to find. If you later drop the tunnel for Caddy + Let's Encrypt
+directly, open 80/443 then.
+
+SSH hardening is skipped when `/root/.ssh/authorized_keys` is empty, so
+a freshly-imaged box that still uses a root password can't lock you out.
+Install your key, then re-run.
+
+Then fill in `CF_TUNNEL_TOKEN`, `OPENAI_API_KEY`, and the SMTP
+credentials in `/opt/khayyam-math/deploy/selfhost/.env`, and follow
+[§4](#4-bring-it-up) onwards.
+
+> Run `migrate_from_aws.sh --secrets` **before** your first real
+> sign-in. It overwrites the generated `SEVIM_AUTH_SECRET` and
+> `SEVIM_IP_HASH_SALT` with the production values, which is what keeps
+> existing users signed in and telemetry IP hashes comparable across the
+> cutover.
 
 ---
 

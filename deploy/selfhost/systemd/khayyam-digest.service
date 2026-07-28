@@ -1,6 +1,8 @@
 # Daily "Not quite right?" feedback digest — replaces the EventBridge
 # Scheduler entry defined in infra/sevim_stack.py §6d.
 #
+# TEMPLATE — see khayyam-math.service.  Install via systemd/install.sh.
+#
 # Sends nothing when the open-report queue is empty, so a quiet day
 # produces no e-mail.
 
@@ -11,8 +13,8 @@ After=khayyam-math.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/ara/Documents/Programming/sevim_plugin/deploy/selfhost
-User=ara
-Group=ara
+WorkingDirectory=@@WORKDIR@@
+User=@@USER@@
+Group=@@USER@@
 ExecStart=/usr/bin/docker compose run --rm --no-deps app python -m studio.feedback_digest
 TimeoutStartSec=600
