@@ -95,6 +95,21 @@ docker compose build app
 # with no database at all — and it reports HEALTHY, because /health
 # does not test the database.  Telemetry then writes nowhere while
 # everything looks green, which is worse than an outright failure.
+# The tunnel needs a token AND its profile enabled.  Setting one without
+# the other is silent: either the site never becomes reachable, or
+# cloudflared crashloops on an empty token.  Catch both here.
+_tok="$(env_get CF_TUNNEL_TOKEN)"
+_prof="$(env_get COMPOSE_PROFILES)"
+if [ -n "$_tok" ] && [[ "$_prof" != *tunnel* ]]; then
+    echo "[redeploy] ⚠️  CF_TUNNEL_TOKEN is set but COMPOSE_PROFILES does not"
+    echo "[redeploy]     include 'tunnel' — the site will NOT be publicly reachable."
+elif [ -z "$_tok" ] && [[ "$_prof" == *tunnel* ]]; then
+    echo "[redeploy] ⚠️  COMPOSE_PROFILES includes 'tunnel' but CF_TUNNEL_TOKEN is"
+    echo "[redeploy]     empty — cloudflared will crashloop. Set the token or clear the profile."
+elif [ -z "$_tok" ]; then
+    echo "[redeploy] ℹ️  No tunnel configured — db+app only, reachable on localhost."
+fi
+
 echo "[redeploy] Ensuring database is up…"
 docker compose up -d --wait db
 

@@ -152,14 +152,26 @@ services:
   # The public hostname → http://app:8080 route is configured once in
   # the Cloudflare dashboard (or via `cloudflared tunnel route dns`);
   # the token below is all the container needs.  See README.md §2.
+  #
+  # Behind a compose PROFILE, and deliberately so.  This service used to
+  # declare ${CF_TUNNEL_TOKEN:?...}, which aborts *every* compose command
+  # when the token is unset — including `up`, `exec`, the systemd boot
+  # unit, and the nightly backup.  One optional edge component must not
+  # be able to take the database and the app down with it.
+  #
+  # Enable by setting BOTH in .env:
+  #     CF_TUNNEL_TOKEN=<token>
+  #     COMPOSE_PROFILES=tunnel
+  # redeploy.sh warns if you set one without the other.
   tunnel:
     image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
     restart: unless-stopped
     depends_on:
       - app
     command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run
     environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
     healthcheck:
       test: ["CMD", "cloudflared", "--version"]
       interval: 60s
