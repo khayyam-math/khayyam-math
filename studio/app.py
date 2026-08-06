@@ -1284,6 +1284,39 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
     _slog(f"start canvas_id={req.canvas_id} prior={req.prior_canvas_ids} "
           f"history_len={len(req.history)} user={req.user[:50]!r}")
 
+    # Force-visual pre-router.  The SYSTEM_PROMPT's DECISION RULE is
+    # advisory; under tool_choice='auto' the model can still answer an
+    # explicit "draw me X" in prose and leave the canvas empty (field
+    # report 2026-08-05).  When the user has explicitly asked to SEE
+    # something AND the subject is drawable, pin tool_choice to
+    # sevim_express so the figure stops being the model's decision.
+    # Everything else keeps 'auto' — genuine clarifying follow-ups
+    # must still be answerable in chat.
+    force_visual = False
+    try:
+        from studio.visual_intent import (
+            wants_visual as _wants_visual,
+            is_enabled as _force_visual_enabled,
+            FORCED_VISUAL_BRIEF as _forced_visual_brief,
+        )
+        if _force_visual_enabled():
+            force_visual, _fv_reason = _wants_visual(req.user)
+            _slog(f"visual intent: force={force_visual} ({_fv_reason})")
+            if force_visual:
+                messages[0]["content"] = (
+                    messages[0]["content"] + "\n\n" + _forced_visual_brief
+                )
+    except Exception as exc:  # noqa: BLE001
+        _slog(f"visual intent errored (non-fatal): "
+              f"{type(exc).__name__}: {exc}")
+
+    # Flipped once sevim_express has been called this turn, so the pin
+    # only ever applies until the figure exists.  Today the loop
+    # returns immediately after an express call, so this never fires —
+    # it is here so that a future change which lets the loop continue
+    # past the tool cannot turn the pin into an endless redraw.
+    drew_figure = False
+
     for _step in range(20):  # bumped from 8 to fit up to 3 audit retries
         _slog(f"step={_step} sending outer LLM call (messages={len(messages)})")
         # Force the model to call sevim_express on every turn.  Studio's
@@ -1306,8 +1339,14 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
             # clarify, acknowledge, and explain in chat before /
             # without drawing.  The SYSTEM_PROMPT's DECISION RULE
             # tells the model when to call the tool vs. reply in
-            # chat; we trust the model to follow it.
-            "tool_choice": "auto",
+            # chat; we trust the model to follow it — EXCEPT when the
+            # force-visual pre-router fired, in which case the figure
+            # is not negotiable for the first call of this turn.
+            "tool_choice": (
+                {"type": "function",
+                 "function": {"name": "sevim_express"}}
+                if (force_visual and not drew_figure) else "auto"
+            ),
             "parallel_tool_calls": False,
             "stream": True,
             "max_tokens": 4096,
@@ -1436,13 +1475,41 @@ async def _stream_vllm_chat(req: ChatReq, user: str):
         # IS present in the deltas.  Only the absence of tool_calls (or
         # an explicit 'length' truncation) means there's nothing to run.
         if not tool_calls:
-            if finish_reason == "length":
-                yield {"event": "text", "data": json.dumps({"text": (
-                    "\n\n[Studio: gpt-4o hit max_tokens before finishing.]"
-                )})}
-            yield {"event": "done",
-                   "data": json.dumps({"stop_reason": finish_reason})}
-            return
+            # Last-resort net for the force-visual path.  A pinned
+            # tool_choice should make this unreachable, but a provider
+            # that silently downgrades the pin (or truncates before
+            # emitting the call) would otherwise reproduce the exact
+            # bug we are fixing: user asked to see something, got
+            # prose.  Synthesise the call from their literal message.
+            if force_visual and not drew_figure:
+                _slog("forced visual: model returned no tool_call — "
+                      "synthesising sevim_express from user message")
+                tool_calls = {0: {
+                    "id": "call_forced_visual",
+                    "name": "sevim_express",
+                    "arguments": json.dumps({"prompt": req.user}),
+                }}
+                messages[-1]["tool_calls"] = [{
+                    "id": "call_forced_visual",
+                    "type": "function",
+                    "function": {
+                        "name": "sevim_express",
+                        "arguments": json.dumps({"prompt": req.user}),
+                    },
+                }]
+            else:
+                if finish_reason == "length":
+                    yield {"event": "text", "data": json.dumps({"text": (
+                        "\n\n[The answer was cut short. Ask again and "
+                        "I'll keep it tighter.]"
+                    )})}
+                yield {"event": "done",
+                       "data": json.dumps({"stop_reason": finish_reason})}
+                return
+
+        if any((tc.get("name") or "") == "sevim_express"
+               for tc in tool_calls.values()):
+            drew_figure = True
 
         # Execute each tool and append the OpenAI ``tool`` messages.
         for idx, tc in sorted(tool_calls.items()):
