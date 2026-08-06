@@ -23,8 +23,49 @@ def _text(x: float, y: float, s: str, *, fs: int = 14, anchor: str = "start",
             f'fill="{fill}">{_html.escape(s)}</text>')
 
 
+def _caption(y: float, s: str, *, fs: int = 13, x: float | None = None,
+             max_w: float = _W - 90, fill: str = "#3a4250",
+             line_h: float | None = None) -> str:
+    """A centred footer caption, wrapped so it cannot leave the canvas.
+
+    The renderers used to emit their closing sentence as one ``<text>``
+    anchored at the middle of a 940-wide viewBox.  At 13px a 200-char
+    sentence is roughly 1350px wide, so both ends were simply clipped
+    off — the Koch footer opened mid-word ("p replaces the middle
+    third…") and lost its dimension figure at the other end.  Wrapping
+    to ``max_w`` keeps the whole sentence readable.
+
+    Width is estimated at 0.52em per character, which is a slight
+    over-estimate for this sans stack — erring toward breaking early
+    is the safe direction, since a short line is fine and a clipped
+    one is not.
+    """
+    cx = _W / 2 if x is None else x
+    lh = fs + 6 if line_h is None else line_h
+    per_line = max(12, int(max_w / (fs * 0.52)))
+    words, lines, cur = s.split(), [], ""
+    for w in words:
+        trial = w if not cur else f"{cur} {w}"
+        if len(trial) > per_line and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    return "".join(
+        _text(cx, y + i * lh, line, fs=fs, anchor="middle", fill=fill)
+        for i, line in enumerate(lines)
+    )
+
+
 def _frame(svg_body: str) -> str:
+    # xlink is declared unconditionally: the escape-time renderers embed
+    # their field as an <image xlink:href="data:image/png…">, and an
+    # undeclared prefix makes the whole document invalid XML — which the
+    # pre-deploy quality gate rejects outright.
     return (f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'xmlns:xlink="http://www.w3.org/1999/xlink" '
             f'viewBox="0 0 {_W} {_H}" width="{_W}" height="{_H}">'
             + svg_body + "</svg>")
 
@@ -73,12 +114,11 @@ def render_koch():
         body.append(f'<path d="{dd}" fill="#eef4fb" stroke="#1f6fe0" '
                     f'stroke-width="1"/>')
         body.append(_text(790, sy + 4, f"iteration {n}", fs=12, fill="#5a6470"))
-    body.append(_text(_W / 2, 540,
-                      "Each step replaces the middle third of every edge with "
-                      "a bump: length ×4/3 each time, so the perimeter → ∞ "
-                      "while the area stays finite. Dimension = log4/log3 ≈ "
-                      "1.262.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+    body.append(_caption(536,
+                         "Each step replaces the middle third of every edge "
+                         "with a bump: length ×4/3 each time, so the "
+                         "perimeter → ∞ while the area stays finite. "
+                         "Dimension = log4/log3 ≈ 1.262."))
     narration = [
         {"speak": "The Koch snowflake is built from an equilateral triangle by "
                   "a single rule applied over and over."},
@@ -128,12 +168,12 @@ def render_sierpinski_triangle():
                         f'fill="#1f6fe0"/>')
         body.append(_text(800, 165 + k * 130, f"level {n}", fs=12,
                           fill="#5a6470"))
-    body.append(_text(_W / 2, 540,
+    body.append(_caption(540,
                       "Each triangle splits into 4 half-size copies and the "
                       "central one is removed, leaving 3. After n steps: 3ⁿ "
                       "triangles, area (3/4)ⁿ → 0. Dimension = log3/log2 ≈ "
                       "1.585.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+                         fs=13))
     narration = [
         {"speak": "The Sierpinski triangle starts from one filled triangle and "
                   "removes material by a fixed rule."},
@@ -179,12 +219,12 @@ def render_sierpinski_carpet():
                         f'height="{s:.2f}" fill="#1f6fe0"/>')
         body.append(_text(770, 150 + k * 135, f"level {n}", fs=12,
                           fill="#5a6470"))
-    body.append(_text(_W / 2, 545,
+    body.append(_caption(545,
                       "Divide each square into a 3×3 grid and remove the "
                       "centre; repeat on the 8 survivors. Area (8/9)ⁿ → 0. "
                       "Dimension = log8/log3 ≈ 1.893. Its 3-D analogue is the "
                       "Menger sponge.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+                         fs=13))
     narration = [
         {"speak": "The Sierpinski carpet is the square version of the same "
                   "remove-the-middle idea."},
@@ -210,62 +250,115 @@ def _iso(i, j, k, s, ox, oy):
     return sx, sy
 
 
-def render_menger():
-    body = [_text(_W / 2, 40, "The Menger Sponge", fs=21, anchor="middle",
-                  weight="700")]
-    s, ox, oy = 62, 300, 250
+def _bil(c00, c10, c11, c01, u, v):
+    """Bilinear point at (u, v) inside the parallelogram c00..c01."""
+    return ((1 - u) * (1 - v) * c00[0] + u * (1 - v) * c10[0]
+            + u * v * c11[0] + (1 - u) * v * c01[0],
+            (1 - u) * (1 - v) * c00[1] + u * (1 - v) * c10[1]
+            + u * v * c11[1] + (1 - u) * v * c01[1])
 
-    def _bil(c00, c10, c11, c01, u, v):
-        return ((1 - u) * (1 - v) * c00[0] + u * (1 - v) * c10[0]
-                + u * v * c11[0] + (1 - u) * v * c01[0],
-                (1 - u) * (1 - v) * c00[1] + u * (1 - v) * c10[1]
-                + u * v * c11[1] + (1 - u) * v * c01[1])
+
+def _carpet_hole(a: int, b: int, depth: int) -> bool:
+    """Is cell (a, b) of a 3^depth grid removed from a Sierpinski carpet?
+
+    Every face of the Menger sponge IS a Sierpinski carpet, so the
+    face at level n is exactly this test at ``depth = n``: a cell is
+    a hole when, at ANY level of the base-3 expansion of its
+    coordinates, both digits are the middle one.
+    """
+    for _ in range(depth):
+        if a % 3 == 1 and b % 3 == 1:
+            return True
+        a //= 3
+        b //= 3
+    return False
+
+
+def _sponge(s: float, ox: float, oy: float, depth: int) -> list[str]:
+    """The three visible faces of a level-``depth`` Menger sponge."""
+    n = 3 ** depth
+    sw = 0.7 if depth == 1 else 0.35
 
     def _cell(c00, c10, c11, c01, a, b, fill):
-        # sub-cell (a,b) of a 3x3 split of the parallelogram c00..c01
-        q = [_bil(c00, c10, c11, c01, a / 3, b / 3),
-             _bil(c00, c10, c11, c01, (a + 1) / 3, b / 3),
-             _bil(c00, c10, c11, c01, (a + 1) / 3, (b + 1) / 3),
-             _bil(c00, c10, c11, c01, a / 3, (b + 1) / 3)]
+        q = [_bil(c00, c10, c11, c01, a / n, b / n),
+             _bil(c00, c10, c11, c01, (a + 1) / n, b / n),
+             _bil(c00, c10, c11, c01, (a + 1) / n, (b + 1) / n),
+             _bil(c00, c10, c11, c01, a / n, (b + 1) / n)]
         return ('<path d="M ' + " L ".join(f"{x:.1f},{y:.1f}" for x, y in q)
-                + f' Z" fill="{fill}" stroke="#27425f" stroke-width="0.7"/>')
+                + f' Z" fill="{fill}" stroke="#27425f" '
+                  f'stroke-width="{sw}"/>')
 
-    # three visible faces of the outer cube (j=3 top, i=3 right, k=3 left);
-    # each a 3x3 grid whose centre cell is the bored-out hole.
     faces = [
         ([_iso(0, 3, 0, s, ox, oy), _iso(3, 3, 0, s, ox, oy),
-          _iso(3, 3, 3, s, ox, oy), _iso(0, 3, 3, s, ox, oy)], "#cfe0f5", "#3a567a"),  # top j=3
+          _iso(3, 3, 3, s, ox, oy), _iso(0, 3, 3, s, ox, oy)],
+         "#cfe0f5", "#3a567a"),                                # top   j=3
         ([_iso(3, 3, 0, s, ox, oy), _iso(3, 0, 0, s, ox, oy),
-          _iso(3, 0, 3, s, ox, oy), _iso(3, 3, 3, s, ox, oy)], "#6f93c4", "#2c4258"),  # right i=3
+          _iso(3, 0, 3, s, ox, oy), _iso(3, 3, 3, s, ox, oy)],
+         "#6f93c4", "#2c4258"),                                # right i=3
         ([_iso(0, 3, 3, s, ox, oy), _iso(0, 0, 3, s, ox, oy),
-          _iso(3, 0, 3, s, ox, oy), _iso(3, 3, 3, s, ox, oy)], "#9bb8de", "#34506f"),  # left k=3
+          _iso(3, 0, 3, s, ox, oy), _iso(3, 3, 3, s, ox, oy)],
+         "#9bb8de", "#34506f"),                                # left  k=3
     ]
+    out = []
     for corners, light, hole in faces:
-        for a in range(3):
-            for b in range(3):
-                body.append(_cell(*corners, a, b,
-                                  hole if (a == 1 and b == 1) else light))
+        for a in range(n):
+            for b in range(n):
+                out.append(_cell(*corners, a, b,
+                                 hole if _carpet_hole(a, b, depth) else light))
+    return out
+
+
+def render_menger():
+    """Two iterations side by side.
+
+    The original figure drew level 1 only, and the field report said so
+    ("50/50. More iterations would be even more informative.").  One
+    iteration of a recursive object shows the RULE but not the
+    recursion — level 2 beside it is what makes the self-similarity
+    visible, and it is also where the "every face is a Sierpinski
+    carpet" claim in the facts panel becomes something you can check
+    by eye rather than take on trust.
+    """
+    body = [_text(_W / 2, 40, "The Menger Sponge", fs=21, anchor="middle",
+                  weight="700")]
+    s = 34
+    for ox, depth, label in ((175, 1, "Level 1 — 20 cubes"),
+                             (430, 2, "Level 2 — 400 cubes")):
+        body.extend(_sponge(s, ox, 250, depth))
+        # The sponge spans oy ± 3s, so the label has to clear y = 352.
+        body.append(_text(ox, 382, label, fs=13, anchor="middle",
+                          weight="600", fill="#2c4258"))
+    body.append(_text(303, 250, "→", fs=26, anchor="middle", fill="#7a8794"))
     # facts panel
-    body.append(_text(640, 150, "Level 1: a 3×3×3 cube of 27 cells", fs=14,
+    body.append(_text(620, 150, "Level 1: a 3×3×3 cube of 27 cells", fs=14,
                       weight="600"))
-    body.append(_text(640, 174, "with the centre and the 6 face", fs=13))
-    body.append(_text(640, 194, "centres bored out → 20 cubes.", fs=13))
-    body.append(_text(640, 232, "Repeat inside each of the 20", fs=13))
-    body.append(_text(640, 252, "cubes: 20ⁿ cubes at level n.", fs=13))
-    body.append(_text(640, 290, "Volume (20/27)ⁿ → 0,", fs=13, fill="#b03a3a"))
-    body.append(_text(640, 310, "surface area → ∞.", fs=13, fill="#b03a3a"))
-    body.append(_text(640, 348, "Dimension = log20/log3 ≈ 2.727.", fs=13,
+    body.append(_text(620, 174, "with the centre and the 6 face", fs=13))
+    body.append(_text(620, 194, "centres bored out → 20 cubes.", fs=13))
+    body.append(_text(620, 232, "Repeat inside each of the 20", fs=13))
+    body.append(_text(620, 252, "cubes: 20ⁿ cubes at level n,", fs=13))
+    body.append(_text(620, 272, "so level 2 already has 400.", fs=13))
+    body.append(_text(620, 310, "Volume (20/27)ⁿ → 0,", fs=13, fill="#b03a3a"))
+    body.append(_text(620, 330, "surface area → ∞.", fs=13, fill="#b03a3a"))
+    body.append(_text(620, 368, "Dimension = log20/log3 ≈ 2.727.", fs=13,
                       weight="600"))
-    body.append(_text(640, 372, "Every face is a Sierpinski carpet.", fs=12,
+    body.append(_text(620, 392, "Every face is a Sierpinski carpet.", fs=12,
                       fill="#5a6470"))
+    body.append(_caption(438,
+                         "Each level applies the same drilling inside every "
+                         "surviving cube, so the level-2 faces are the "
+                         "level-1 carpet with the rule applied again inside "
+                         "each of its eight surviving squares.",
+                         fs=12.5))
     narration = [
         {"speak": "The Menger sponge is the three-dimensional cousin of the "
                   "Sierpinski carpet."},
         {"speak": "Take a cube, divide it into a three by three by three grid "
                   "of twenty-seven smaller cubes, and drill out the very "
                   "centre together with the centre of each of the six faces."},
-        {"speak": "That leaves twenty cubes. Now apply exactly the same "
-                  "drilling inside each of those twenty, without end."},
+        {"speak": "That leaves twenty cubes, the level one sponge on the left. "
+                  "Applying the identical drilling inside each of those twenty "
+                  "gives the level two sponge on the right, four hundred "
+                  "cubes."},
         {"speak": "At level n there are twenty to the n cubes, so the volume "
                   "is twenty over twenty-seven to the n, which collapses to "
                   "zero, while the surface area grows without bound."},
@@ -306,16 +399,67 @@ def _rle(rows, ox, oy, cell):
     return "".join(out)
 
 
-def _escape_field(wc, hc, xmin, xmax, ymin, ymax, step):
+def _escape_field(wc, hc, xmin, xmax, ymin, ymax, step, *, flip_y=False):
+    """Escape-iteration counts on a wc×hc grid.
+
+    ``flip_y=True`` walks the imaginary axis from ymax DOWN to ymin, so
+    row 0 is the top of the picture and the result is in standard
+    orientation (+i up).  That matters as soon as anything is labelled
+    on the plane: for a c with a non-zero imaginary part the set is not
+    symmetric about the real axis, so an unflipped field would put
+    marked points on the wrong side.
+    """
     rows = []
     for jy in range(hc):
-        cy = ymin + (ymax - ymin) * jy / (hc - 1)
+        t = jy / (hc - 1)
+        cy = (ymax - (ymax - ymin) * t) if flip_y else (ymin + (ymax - ymin) * t)
         row = []
         for ix in range(wc):
             cx = xmin + (xmax - xmin) * ix / (wc - 1)
             row.append(step(cx, cy))
         rows.append(row)
     return rows
+
+
+def _rgb(it, maxit):
+    if it >= maxit:
+        return (10, 17, 36)                       # interior
+    t = it / maxit
+    return (max(0, min(255, int(12 + 243 * t ** 0.6))),
+            max(0, min(255, int(28 + 180 * t ** 1.2))),
+            max(0, min(255, int(90 + 120 * (1 - t)))))
+
+
+def _field_image(rows, ox, oy, w, h, maxit):
+    """The escape field as ONE embedded PNG rather than thousands of rects.
+
+    Run-length rectangles cost roughly 3 KB per output pixel-row: the
+    168×130 Julia field alone was 280 KB of SVG, which capped the
+    resolution we could ship and made the fractal visibly blocky
+    (field report 2026-07-06: "Not detailed enough").  A base64 PNG of
+    the same field at 300×230 is an order of magnitude smaller, so
+    detail goes UP and payload goes DOWN at the same time.
+
+    Falls back to the rect encoding if Pillow is unavailable, so the
+    route degrades instead of failing.
+    """
+    try:
+        import base64
+        import io as _io
+        from PIL import Image
+    except Exception:  # noqa: BLE001 — Pillow missing; use the old path
+        cell = w / max(1, len(rows[0]))
+        return _rle(rows, ox, oy, cell)
+    hc, wc = len(rows), len(rows[0])
+    img = Image.new("RGB", (wc, hc))
+    img.putdata([_rgb(it, maxit) for row in rows for it in row])
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return (f'<image x="{ox:.1f}" y="{oy:.1f}" width="{w:.1f}" '
+            f'height="{h:.1f}" preserveAspectRatio="none" '
+            f'xlink:href="data:image/png;base64,{b64}" '
+            f'href="data:image/png;base64,{b64}"/>')
 
 
 def render_mandelbrot():
@@ -328,16 +472,19 @@ def render_mandelbrot():
             zi = 2 * zr * zi + cy
             zr = zr2 - zi2 + cx
         return _MAXIT
-    wc, hc, cell = 168, 138, 2.3
-    rows = _escape_field(wc, hc, -2.4, 0.8, -1.3, 1.3, step)
-    ox = (_W - wc * cell) / 2
+    # Same PNG-field trick as the Julia route: 2.3× the sampling
+    # density of the old run-length rectangles, in a fraction of the
+    # bytes, so the boundary reads as a fractal rather than as steps.
+    iw, ih = 386, 314
+    rows = _escape_field(390, 317, -2.4, 0.8, -1.3, 1.3, step, flip_y=True)
+    ox = (_W - iw) / 2
     body = [_text(_W / 2, 40, "The Mandelbrot Set", fs=21, anchor="middle",
-                  weight="700"), _rle(rows, ox, 90, cell)]
-    body.append(_text(_W / 2, 90 + hc * cell + 28,
+                  weight="700"), _field_image(rows, ox, 90, iw, ih, _MAXIT)]
+    body.append(_caption(90 + ih + 28,
                       "Points c for which z ↦ z² + c stays bounded from "
                       "z₀ = 0. The boundary is an infinitely intricate "
                       "fractal of dimension 2.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+                         fs=13))
     narration = [
         {"speak": "The Mandelbrot set is the most famous fractal in "
                   "mathematics, living in the plane of complex numbers."},
@@ -355,38 +502,141 @@ def render_mandelbrot():
     return _frame("".join(body)), narration
 
 
+_JULIA_MAXIT = 140
+
+
 def render_julia():
+    """The set, plus the iteration that defines it.
+
+    Field report 2026-07-06: "Not detailed enough".  The old figure was
+    a single 168×130 escape field — visibly blocky, and it showed only
+    the OUTCOME of the iteration while the bottom half of the canvas
+    sat empty.  The request had explicitly asked to see the iteration
+    itself: starting points, their orbits, bounded versus escaping,
+    and a zoom.
+
+    So this draws three things that reinforce each other: the set at
+    2.6× the old resolution, two worked orbits with the actual numbers
+    (one bounded, one escaping, both marked on the plane where they
+    start), and a zoom into the boundary showing the detail continues
+    below the pixel scale.
+    """
     cr, ci = -0.8, 0.156
+    xmin, xmax, ymin, ymax = -1.7, 1.7, -1.3, 1.3
 
     def step(zr, zi):
-        for it in range(_MAXIT):
+        for it in range(_JULIA_MAXIT):
             zr2, zi2 = zr * zr, zi * zi
             if zr2 + zi2 > 4.0:
                 return it
             zi = 2 * zr * zi + ci
             zr = zr2 - zi2 + cr
-        return _MAXIT
-    wc, hc, cell = 168, 130, 2.3
-    rows = _escape_field(wc, hc, -1.7, 1.7, -1.3, 1.3, step)
-    ox = (_W - wc * cell) / 2
+        return _JULIA_MAXIT
+
+    def orbit(z0r, z0i, n):
+        """First n+1 iterates of z ↦ z² + c, as (re, im, |z|)."""
+        pts, zr, zi = [], z0r, z0i
+        for _ in range(n + 1):
+            pts.append((zr, zi, math.hypot(zr, zi)))
+            zr, zi = zr * zr - zi * zi + cr, 2 * zr * zi + ci
+        return pts
+
+    # ── main field ────────────────────────────────────────────────
+    ox, oy, iw, ih = 40, 76, 470, 359
+    rows = _escape_field(300, 230, xmin, xmax, ymin, ymax, step, flip_y=True)
     body = [_text(_W / 2, 40, "A Julia Set", fs=21, anchor="middle",
-                  weight="700"), _rle(rows, ox, 90, cell)]
-    body.append(_text(_W / 2, 90 + hc * cell + 28,
-                      "Same rule z ↦ z² + c, but c = −0.8 + 0.156i is FIXED "
-                      "and the starting point z₀ varies. Each c gives a "
-                      "different Julia set.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+                  weight="700"),
+            _field_image(rows, ox, oy, iw, ih, _JULIA_MAXIT)]
+
+    def to_px(re, im):
+        return (ox + (re - xmin) / (xmax - xmin) * iw,
+                oy + (ymax - im) / (ymax - ymin) * ih)
+
+    # ── two worked orbits ─────────────────────────────────────────
+    # z0 = 0 sits in the interior for this c, so its orbit is bounded;
+    # a point out near the corner escapes fast.  Both are computed, not
+    # asserted, so the table can never drift from the picture.
+    samples = [
+        ((0.0, 0.0), "#7ef7c8", "bounded"),
+        ((0.95, 0.62), "#ffd166", "escapes"),
+    ]
+    for (z0r, z0i), colour, _kind in samples:
+        px, py = to_px(z0r, z0i)
+        body.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="5" '
+                    f'fill="none" stroke="{colour}" stroke-width="2.2"/>')
+        body.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="1.8" '
+                    f'fill="{colour}"/>')
+
+    # ── zoom inset on the boundary ────────────────────────────────
+    zx, zy, zw, zh = 548, 76, 230, 177
+    zc_r, zc_i, half = -0.62, 0.30, 0.16
+    zrows = _escape_field(190, 146, zc_r - half, zc_r + half,
+                          zc_i - half * 0.77, zc_i + half * 0.77,
+                          step, flip_y=True)
+    body.append(_field_image(zrows, zx, zy, zw, zh, _JULIA_MAXIT))
+    body.append(f'<rect x="{zx:.1f}" y="{zy:.1f}" width="{zw}" '
+                f'height="{zh}" fill="none" stroke="#5a6470" '
+                f'stroke-width="1"/>')
+    # the same window outlined on the main image, so the zoom is located
+    bx0, by0 = to_px(zc_r - half, zc_i + half * 0.77)
+    bx1, by1 = to_px(zc_r + half, zc_i - half * 0.77)
+    body.append(f'<rect x="{bx0:.1f}" y="{by0:.1f}" '
+                f'width="{bx1 - bx0:.1f}" height="{by1 - by0:.1f}" '
+                f'fill="none" stroke="#ffffff" stroke-width="1.2"/>')
+    body.append(_text(zx + zw / 2, zy + zh + 18,
+                      f"zoom ×{(xmax - xmin) / (2 * half):.0f} — the detail "
+                      f"never runs out", fs=11.5, anchor="middle",
+                      fill="#5a6470"))
+
+    # ── orbit table ───────────────────────────────────────────────
+    ty = 300
+    body.append(_text(548, ty, "Same rule, two starting points:", fs=13.5,
+                      weight="600"))
+    body.append(_text(548, ty + 20, "zₙ₊₁ = zₙ² + c,  "
+                                    "c = −0.8 + 0.156i", fs=12.5,
+                      fill="#3a4250"))
+    row_y = ty + 46
+    for (z0r, z0i), colour, kind in samples:
+        pts = orbit(z0r, z0i, 4)
+        body.append(f'<circle cx="554" cy="{row_y - 4:.0f}" r="4.5" '
+                    f'fill="{colour}" stroke="#3a4250" stroke-width="0.8"/>')
+        body.append(_text(568, row_y,
+                          f"z₀ = {z0r:.2f} {'+' if z0i >= 0 else '−'} "
+                          f"{abs(z0i):.2f}i", fs=12.5, weight="600"))
+        mags = ",  ".join(f"{m:.2f}" for _r, _i, m in pts[1:])
+        body.append(_text(568, row_y + 19, f"|z₁…z₄| = {mags}", fs=12,
+                          fill="#3a4250"))
+        verdict = ("stays below 2 forever → in the set"
+                   if kind == "bounded"
+                   else "passes 2 and runs away → outside")
+        body.append(_text(568, row_y + 37, verdict, fs=12,
+                          fill="#2f7d5a" if kind == "bounded" else "#b03a3a"))
+        row_y += 66
+
+    body.append(_caption(500,
+                         "The rule z ↦ z² + c is the same one that builds the "
+                         "Mandelbrot set, but here c is FIXED and the "
+                         "STARTING point varies. Points whose orbit stays "
+                         "bounded form the dark filled set; the colours "
+                         "outside record how fast the orbit escapes.",
+                         fs=12.5, x=_W / 2, max_w=860))
     narration = [
         {"speak": "A Julia set uses the same rule as the Mandelbrot set, z "
                   "becomes z squared plus c, but with the roles swapped."},
-        {"speak": "Here the constant c is fixed, and we instead vary the "
-                  "starting point and ask whether its orbit stays bounded."},
-        {"speak": "The points whose orbits remain bounded form this filled "
-                  "shape; the colours again measure escape speed outside it."},
-        {"speak": "Every value of c produces its own Julia set, ranging from "
-                  "connected blobs to scattered dust."},
-        {"speak": "In fact c belongs to the Mandelbrot set exactly when its "
-                  "Julia set is connected, tying the two fractals together."},
+        {"speak": "Here the constant c is fixed at minus zero point eight plus "
+                  "zero point one five six i, and we instead vary the starting "
+                  "point and ask whether its orbit stays bounded."},
+        {"speak": "Start at zero and the successive magnitudes stay below two "
+                  "for ever, so that point belongs to the set; start out near "
+                  "one plus zero point six i and the magnitude passes two "
+                  "within a few steps and then runs away."},
+        {"speak": "Every point of the plane gets that test, and the ones that "
+                  "stay bounded form the dark filled shape, while the colours "
+                  "outside record how quickly each orbit escaped."},
+        {"speak": "Magnifying the boundary shows the structure repeating at "
+                  "every scale, and in fact c lies in the Mandelbrot set "
+                  "exactly when its Julia set is connected, tying the two "
+                  "fractals together."},
     ]
     return _frame("".join(body)), narration
 
@@ -467,11 +717,11 @@ def render_cantor():
             nxt.append((b - t, b))
         segs = nxt
         y += 50
-    body.append(_text(_W / 2, y + 14,
+    body.append(_caption(y + 14,
                       "Remove the open middle third of every segment, forever. "
                       "Total length (2/3)ⁿ → 0, yet uncountably many points "
                       "remain. Dimension = log2/log3 ≈ 0.631.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+                         fs=13))
     narration = [
         {"speak": "The Cantor set is the simplest fractal, built on a single "
                   "line segment."},
@@ -515,11 +765,11 @@ def render_dragon():
     body = [_text(_W / 2, 40, "The Dragon Curve", fs=21, anchor="middle",
                   weight="700"),
             f'<path d="{d}" fill="none" stroke="#1a3a63" stroke-width="1.4"/>']
-    body.append(_text(_W / 2, 560,
+    body.append(_caption(560,
                       "Fold a strip of paper in half repeatedly, then unfold "
                       "each crease to 90°: the edge traces this curve. It "
                       "never crosses itself and tiles the plane. Dimension = 2.",
-                      fs=13, anchor="middle", fill="#3a4250"))
+                         fs=13))
     narration = [
         {"speak": "The dragon curve has a charming origin: fold a long strip of "
                   "paper in half, again and again, always the same way."},
@@ -559,15 +809,18 @@ def render_pythagoras_tree():
         grow(p4[0], p4[1], ax, ay, depth - 1)
         grow(ax, ay, p3[0], p3[1], depth - 1)
 
-    grow(430, 560, 510, 560, 11)
+    # Trunk sits high enough that the canopy (which grows ~2.6× the
+    # trunk width upward) uses the empty band under the title instead
+    # of hugging the bottom edge, and leaves two caption lines clear.
+    grow(430, 512, 510, 512, 11)
     body = [_text(_W / 2, 40, "The Pythagoras Tree", fs=21, anchor="middle",
                   weight="700")] + out
-    body.append(_text(_W / 2, 575,
-                      "On each square, build two smaller squares meeting at a "
-                      "right angle (a 45° split) and repeat. The squares on "
-                      "the two children always sum to the parent — the "
-                      "Pythagorean theorem.",
-                      fs=12.5, anchor="middle", fill="#3a4250"))
+    body.append(_caption(552,
+                         "On each square, build two smaller squares meeting "
+                         "at a right angle (a 45° split) and repeat. The "
+                         "squares on the two children always sum to the "
+                         "parent — the Pythagorean theorem.",
+                         fs=12.5))
     narration = [
         {"speak": "The Pythagoras tree turns the most famous theorem in "
                   "geometry into a growing fractal."},

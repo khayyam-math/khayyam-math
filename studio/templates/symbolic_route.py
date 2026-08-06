@@ -28,9 +28,50 @@ _KEYWORDS = (
 )
 
 
+# Geometric-solid veto.
+#
+# Field report 2026-07-09: "Prove the formula for the volume of a
+# sphere … Show the integral setup V = ∫_{-R}^{R} π(R²-x²) dx" was
+# claimed here purely because the word "integral" appears, and the
+# user got a correct but sphere-less equation card.  Their complaint
+# was exactly "The sphere is not drawn".
+#
+# When the subject of the prompt is a NAMED solid and the quantity
+# asked for is its volume or surface area, the deliverable is a
+# picture of the solid with the slicing argument on it — which
+# volume_of_sphere / volume_of_cone / sphere_area already draw.  An
+# equation card alone cannot satisfy that request no matter how
+# correct the algebra is, so decline and let the prompt fall through
+# to the geometry templates.
+#
+# Deliberately keyed on NAMED solids only.  A generic solid-of-
+# revolution prompt ("volume of the solid formed by rotating y = x²")
+# has no geometric template to fall through to, so the exact symbolic
+# answer really is the best available output and must keep it.
+_SOLID_RE = re.compile(
+    r"\b(sphere|ball|hemisphere|cone|cylinder|pyramid|torus|prism|"
+    r"cube|tetrahedron)\b",
+    re.IGNORECASE,
+)
+_SOLID_QUANTITY_RE = re.compile(
+    r"\b(volume|surface\s+area|area)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_named_solid_geometry(prompt: str) -> bool:
+    """True when the prompt asks for the volume / area of a named solid."""
+    p = prompt or ""
+    return bool(_SOLID_RE.search(p) and _SOLID_QUANTITY_RE.search(p))
+
+
 def is_symbolic_prompt(prompt: str) -> bool:
     p = (prompt or "").lower()
-    return any(kw in p for kw in _KEYWORDS)
+    if not any(kw in p for kw in _KEYWORDS):
+        return False
+    if _is_named_solid_geometry(prompt):
+        return False
+    return True
 
 
 SYMBOLIC_SPEC_SYSTEM = """\

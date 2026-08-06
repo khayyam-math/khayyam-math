@@ -3184,8 +3184,27 @@ async def express_figure(
             from studio.templates.fractals import (
                 generate_fractal_svg, is_fractal_prompt,
             )
+            # Try the user's literal words first, then the chat-LLM's
+            # expanded tool prompt.  ``routing_prompt`` is the literal
+            # message, which is right for classification — but in a
+            # conversation the literal often drops the fractal's name
+            # ("now the tree one", "and the next fractal?") while the
+            # tool prompt spells it out.  Without the second attempt
+            # the request falls all the way through to LLM-SVG, which
+            # sketches the fractal by hand and gets the recursion
+            # wrong (field report 2026-07-06: a hand-drawn Pythagoras
+            # tree with detached, overlapping squares — "Not
+            # correct").  Checking the tool prompt too can only add
+            # deterministic coverage, never remove it.
+            _frac_prompt = None
             if is_fractal_prompt(routing_prompt):
-                frac = await generate_fractal_svg(routing_prompt)
+                _frac_prompt = routing_prompt
+            elif user_prompt and is_fractal_prompt(user_prompt):
+                _frac_prompt = user_prompt
+                _log("fractal route: literal prompt did not name a "
+                     "fractal — matched on the tool prompt instead")
+            if _frac_prompt:
+                frac = await generate_fractal_svg(_frac_prompt)
                 if frac is not None:
                     frsvg, frnarr = frac
                     _log(f"fractal fast-path: svg={len(frsvg)} chars")
