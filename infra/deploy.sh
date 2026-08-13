@@ -96,6 +96,22 @@ case "$cmd" in
             echo "[deploy.sh] ⚠️  refresh_geolite.sh failed — continuing with existing mmdb (if any)."
         }
 
+        # ── Model reachability preflight ────────────────────────
+        # OpenAI retires models on its own schedule and nothing in our
+        # source tree changes when it happens: on 2026-08-10 the whole
+        # *-chat-latest line started 404-ing and production served no
+        # figures for days.  Ask the API whether the models this deploy
+        # pins are still callable, before shipping them.
+        echo "[deploy.sh] Checking the configured models are still live…"
+        if ! (cd .. && uv run python infra/check_models.py); then
+            echo
+            echo "[deploy.sh] ❌ A configured model is no longer usable — deploy blocked."
+            echo "[deploy.sh] Update infra/sevim_stack.py + deploy/selfhost/compose.yml"
+            echo "[deploy.sh] with live replacements and re-run."
+            exit 2
+        fi
+        echo
+
         # ── Pre-deploy verifier ─────────────────────────────────
         # Runs the actual prod container against a REAL Postgres
         # locally, hits every critical endpoint, catches container-

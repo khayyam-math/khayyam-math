@@ -225,35 +225,49 @@ class SevimStack(Stack):
             # people in telemetry.
             "SEVIM_AUTH_REQUIRED": "1",
             "SEVIM_VLLM_URL": "https://api.openai.com/v1",
-            # HYBRID GPT-5 upgrade (2026-06).  Live figure generation runs on
-            # the newest CHAT-tuned GPT-5 (gpt-5.3-chat-latest): vision-
-            # capable, no reasoning overhead, ~7 s/figure — keeps the tutor
-            # interactive.  The flagship reasoning model (gpt-5.5) was
-            # measured at 30–69 s/figure on generation, far too slow for the
-            # live path, so it is reserved for the vision-audit pass below.
+            # HYBRID GPT-5 (2026-06, remodelled 2026-08).  Live figure
+            # generation needs a vision-capable model that answers in ~7 s;
+            # the flagship reasoning models measured 30–69 s/figure, far too
+            # slow for the live path, so they stay on the audit pass below.
+            #
+            # We used to get "fast" from the CHAT-tuned gpt-5.3-chat-latest,
+            # but OpenAI shut the entire *-chat-latest line down on
+            # 2026-08-10 and it now 404s ("has been deprecated"), which took
+            # every LLM call in production with it.  The replacement for the
+            # role is the fast tier of GPT-5.6 run with reasoning switched
+            # off — measured on the same Pythagoras SVG prompt: gpt-5.6-luna
+            # 5.7 s at reasoning_effort=none vs 13.5 s at low.  model_compat
+            # applies `none` to the models listed in
+            # SEVIM_GPT5_NO_REASONING_MODELS (default gpt-5.6-luna).
+            #
             # All GPT-5 models reject `max_tokens`/`temperature≠1`; the
-            # _adapt_payload_for_model() shim in express.py normalises this.
-            "SEVIM_VLLM_MODEL": "gpt-5.3-chat-latest",
+            # model_compat.py httpx shim normalises this process-wide.
+            "SEVIM_VLLM_MODEL": "gpt-5.6-luna",
             # Deploy-time override of the admin's active-model choice; forces
             # every Fargate task to the generation model above regardless of
             # any /studio/admin drift.  Unset (remove + redeploy) to release.
-            "SEVIM_FORCE_ACTIVE_MODEL": "gpt-5.3-chat-latest",
+            "SEVIM_FORCE_ACTIVE_MODEL": "gpt-5.6-luna",
             # Figure-review backend (math-correctness + layout inspector).
-            # Vision-mode on gpt-5.3-chat-latest: vision-capable and FAST
-            # (~7 s).  We trialled the gpt-5.5 REASONING model here, but it
-            # ran on EVERY retry attempt and pushed long-tail turns to
-            # ~100-115 s — the resulting no-output gaps tripped the ALB 60 s
-            # idle timeout, so figures never reached the browser ("no
-            # visuals").  The smarter reasoning auditor is better applied
-            # only on the final retry of the hardest cases (handled in code,
-            # SEVIM_REVIEW_ESCALATE_MODEL), not on every attempt.
+            # Vision-mode on the same fast model.  We trialled a REASONING
+            # model here, but it ran on EVERY retry attempt and pushed
+            # long-tail turns to ~100-115 s — the resulting no-output gaps
+            # tripped the ALB 60 s idle timeout, so figures never reached the
+            # browser ("no visuals").  The smarter reasoning auditor is
+            # better applied only on the final retry of the hardest cases
+            # (handled in code, SEVIM_REVIEW_ESCALATE_MODEL).
             "SEVIM_REVIEW_MODE": "vision",
-            "SEVIM_REVIEW_MODEL": "gpt-5.3-chat-latest",
+            "SEVIM_REVIEW_MODEL": "gpt-5.6-luna",
             # Smart reasoning auditor, used ONLY on the final retry of a
-            # still-failing figure (bounded latency; most turns never hit it).
+            # still-failing figure (bounded latency; most turns never hit
+            # it).  gpt-5.5 is the measured-known quantity from the June
+            # tuning and is not deprecated; gpt-5.6-sol is the newer flagship
+            # if this pass ever needs to be faster or stronger.
             "SEVIM_REVIEW_ESCALATE_MODEL": "gpt-5.5",
-            # Bound GPT-5 reasoning latency wherever a reasoning model runs.
+            # Bound GPT-5 reasoning latency wherever reasoning is left on.
             "SEVIM_GPT5_REASONING_EFFORT": "low",
+            # Models pinned to reasoning_effort=none because they sit on the
+            # interactive path (see model_compat.reasoning_effort_for).
+            "SEVIM_GPT5_NO_REASONING_MODELS": "gpt-5.6-luna",
             # TTS: tts-1 is ~3x faster than tts-1-hd at virtually
             # identical audibility for short narration phrases.  At
             # 15-30 phrases per figure, hd was adding 20-40s of
