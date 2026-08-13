@@ -25,7 +25,7 @@ installed and the repo is checked out.
 | S3 canvas bucket | `canvases` volume (`FileStorage`) | `compose.yml` |
 | S3 training / LoRA buckets | not replaced — offline-only, see note below | — |
 | Secrets Manager (5 secrets) | `.env`, mode 600 | `env.example` |
-| ALB + ACM + Route 53 | Cloudflare Tunnel + Cloudflare DNS | `tunnel` service |
+| ALB + ACM + Route 53 | Caddy (Let's Encrypt) + an A record | `caddy` service |
 | SES | any SMTP relay (Brevo by default) | `service/mailer.py` |
 | EventBridge Scheduler ×2 | systemd timers | `systemd/` |
 | CloudWatch Logs | `docker compose logs` (json-file, rotated) | `compose.yml` |
@@ -92,35 +92,57 @@ Chromium, so the first build takes several minutes.
 
 ---
 
-## 2. Cloudflare Tunnel
+## 2. TLS and DNS (Caddy)
 
-The tunnel dials **out** to Cloudflare's edge, so no router port is
-forwarded, no inbound firewall rule is opened, and a dynamic residential
-IP never matters. Cloudflare terminates TLS with a managed certificate,
-which is what makes ACM redundant.
+Caddy terminates TLS on this box with a Let's Encrypt certificate it
+obtains on first start and renews unattended, which is what makes ACM
+and the ALB redundant. There is **no edge credential to obtain** — the
+whole configuration is two DNS records and two open ports.
 
-1. Create a free Cloudflare account and **add the site** `khayyammath.com`.
-2. Cloudflare shows you two nameservers. Change them at your **registrar**
-   (where the domain is registered — not in Route 53). Propagation is
-   usually under an hour.
-   - Copy your existing Route 53 records into Cloudflare first if you
-     have any beyond the site itself (MX, TXT, verification records).
-     Cloudflare's import scans the zone but is not exhaustive.
-3. Zero Trust → **Networks → Tunnels → Create a tunnel** → *Cloudflared* →
-   name it `khayyam-math`. Choose **Docker** on the install screen and
-   copy the long token out of the `docker run` command it shows.
-4. Put that token in `.env` as `CF_TUNNEL_TOKEN`.
-5. On the tunnel's **Public Hostnames** tab, add two entries:
+1. Point **A records** at this host's public IP, at whatever DNS provider
+   holds the zone:
 
-   | Subdomain | Domain | Service |
+   | Name | Type | Value |
    |---|---|---|
-   | *(blank)* | khayyammath.com | `http://app:8080` |
-   | `www` | khayyammath.com | `http://app:8080` |
+   | `@` | A | *this host's public IP* |
+   | `www` | A | *this host's public IP* |
 
-   `app` resolves because cloudflared shares the compose network with it.
+   Both, because both currently resolve to the AWS load balancer and
+   `Caddyfile` requests a certificate for both. A missing `www` record
+   makes issuance fail for the whole site block, not just for `www`.
 
-Do **not** create the DNS records by hand — the tunnel creates the
-correct proxied CNAMEs itself.
+2. Confirm ports 80 and 443 are open (`provision.sh` does this; verify
+   with `sudo ufw status`). **Port 80 is not optional.** The ACME
+   HTTP-01 challenge runs over it, so closing it appears to work and then
+   silently breaks renewal about 60 days later.
+
+3. Set `SEVIM_DOMAIN` in `.env`. Caddy reads it for the certificate
+   names, and the app reads it to build magic-link URLs.
+
+4. `docker compose up -d` and watch the first issuance:
+
+   ```bash
+   docker compose logs -f caddy       # "certificate obtained successfully"
+   ```
+
+Do this **after** the data migration (§5), not before: issuance needs the
+A record already pointing here, and that is the cut-over itself.
+
+### Why not the Cloudflare Tunnel
+
+Earlier versions of this stack used one, and it is still the right answer
+if you run the site from a machine that cannot accept inbound connections
+— behind CGNAT, or on a home router you do not control. On a cloud VPS
+with a static public IP it buys nothing and costs three things: an
+always-on daemon whose failure mode is "site unreachable", a token you
+must obtain from a third party before the site can serve at all, and two
+coupled switches that fail silently when only one is set.
+
+What you give up by dropping it is Cloudflare's DDoS absorption and
+origin-IP hiding. If you want those back, put Cloudflare in front as
+**proxied DNS** pointing at this IP and restrict `ufw` to Cloudflare's
+published ranges. Caddy stays exactly as it is; nothing in this repo
+changes.
 
 ---
 
@@ -132,7 +154,7 @@ Treat this as a hard dependency, not a nice-to-have.
 1. Create a Brevo account (free tier: 300 emails/day).
 2. Brevo → **Senders, Domains & Dedicated IPs → Domains** → add
    `khayyammath.com`. It gives you DKIM and DMARC records.
-3. Add those records **in Cloudflare** (DNS → Records), and set SPF:
+3. Add those records at whatever DNS provider holds the zone, and set SPF:
 
    ```
    TXT   @   v=spf1 include:spf.brevo.com ~all
@@ -225,9 +247,10 @@ Copying `sevim/auth_secret` and `sevim/ip_hash_salt` across is what keeps
 signed-in users signed in and keeps telemetry IP hashes comparable to the
 historical rows. Generating fresh ones silently breaks both.
 
-**Cutover** is then just the tunnel's DNS records taking over — which
-happens the moment your nameservers point at Cloudflare and the tunnel is
-running. Verify before you trust it:
+**Cutover** is repointing the `@` and `www` A records at this host. The
+moment they resolve here, Caddy answers the ACME challenge, obtains the
+certificate and starts serving; first issuance takes a few seconds.
+Verify before you trust it:
 
 ```bash
 curl -sI https://khayyammath.com/health          # 200, and no AWS ALB headers
@@ -257,7 +280,7 @@ Before you do:
 - `aws s3 sync` the training and LoRA buckets somewhere if you want the
   distillation corpus history.
 - Note the values of every `sevim/*` secret — they are gone afterwards.
-- The Route 53 hosted zone can be deleted once Cloudflare is
+- The Route 53 hosted zone can be deleted once another provider is
   authoritative and you have re-created every record there. Check MX and
   TXT records specifically; losing an MX record silently kills inbound
   mail for the domain.
@@ -276,8 +299,9 @@ git checkout aws-production-final     # or: keep current code, it still works
 cd infra && AWS_PROFILE=<profile> ./deploy.sh
 ```
 
-Then in Cloudflare, either delete the tunnel's public hostname and point
-the record at the ALB, or move the nameservers back to Route 53.
+Then point the `@` and `www` records back at the ALB (or move the
+nameservers back to Route 53). Caddy simply stops being reached; there is
+no edge registration to unwind.
 
 The current code needs **no changes** to run on AWS again:
 
@@ -346,17 +370,17 @@ compose v2), a `khayyam` service account in the `docker` group, bounded
 journal and container logs, a default-deny firewall, SSH key-only auth,
 and a `.env` skeleton with the database password and secrets generated.
 
-**The firewall opens nothing but SSH.** With Cloudflare Tunnel the
-origin needs no inbound ports at all — cloudflared dials out. That is a
-genuinely better posture than the ALB had, since there is no public
-listener to find. If you later drop the tunnel for Caddy + Let's Encrypt
-directly, open 80/443 then.
+**The firewall opens SSH, 80 and 443, and nothing else.** Caddy
+terminates TLS here, so those two ports are the site. Port 80 must stay
+open for ACME renewal, not just for the redirect to HTTPS. Everything
+else, the database included, is bound to loopback and unreachable from
+off the box.
 
 SSH hardening is skipped when `/root/.ssh/authorized_keys` is empty, so
 a freshly-imaged box that still uses a root password can't lock you out.
 Install your key, then re-run.
 
-Then fill in `CF_TUNNEL_TOKEN`, `OPENAI_API_KEY`, and the SMTP
+Then fill in `OPENAI_API_KEY`, `SEVIM_DOMAIN`, and the SMTP
 credentials in `/opt/khayyam-math/deploy/selfhost/.env`, and follow
 [§4](#4-bring-it-up) onwards.
 
@@ -376,7 +400,7 @@ credentials in `/opt/khayyam-math/deploy/selfhost/.env`, and follow
 
 # Logs
 docker compose logs -f app
-docker compose logs -f tunnel
+docker compose logs -f caddy
 
 # Database shell
 docker compose exec db psql -U sevim -d sevim
@@ -399,7 +423,7 @@ docker compose down          # add -v to also delete the data volumes
 ### Health checklist after any change
 
 1. `curl -s localhost:8080/health` → 200
-2. `curl -sI https://khayyammath.com/health` → 200 through the tunnel
+2. `curl -sI https://khayyammath.com/health` → 200 through Caddy
 3. Sign-in email arrives (and not in spam)
 4. One figure generates end to end, with audio
 5. `docker compose exec db psql -U sevim -d sevim -c 'select count(*) from turns'`

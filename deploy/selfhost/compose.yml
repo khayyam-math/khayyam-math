@@ -7,7 +7,7 @@
 #   RDS PostgreSQL       → the `db` service (named volume, nightly dump)
 #   S3 canvas bucket     → the `canvases` volume (FileStorage backend)
 #   Secrets Manager      → the gitignored .env next to this file
-#   ALB + ACM + Route53  → the `tunnel` service (Cloudflare Tunnel)
+#   ALB + ACM + Route53  → the `caddy` service (Let's Encrypt + DNS A record)
 #   EventBridge Scheduler→ systemd timers (see systemd/)
 #
 # The AWS stack is NOT deleted by any of this.  infra/ still deploys,
@@ -89,8 +89,9 @@ services:
       SEVIM_COST_DAILY_MAX_USD: "10.00"
       SEVIM_CONTENT_FILTER: "1"
       SEVIM_AUTH_REQUIRED: "1"
-      # Cloudflare Tunnel puts the real client IP in the leftmost
-      # X-Forwarded-For entry, exactly as the ALB did.
+      # Caddy puts the real client IP in the leftmost X-Forwarded-For
+      # entry, exactly as the ALB and the Cloudflare Tunnel both did, so
+      # studio/sessions.py:_client_ip() needs no change.
       SEVIM_TRUST_PROXY: "1"
       SEVIM_AUTH_DOMAIN: ${SEVIM_DOMAIN:-khayyammath.com}
 
@@ -121,9 +122,10 @@ services:
       # AWS API calls that are no longer authorised.
     volumes:
       - canvases:/var/sevim/canvases
-    # Only the tunnel needs to reach the app.  Publishing to loopback as
-    # well makes local smoke tests and the systemd timers straightforward
-    # without ever exposing the port to the LAN.
+    # Caddy reaches the app over the compose network, so this publish is
+    # only for local smoke tests, redeploy.sh's health probe and the
+    # systemd timers.  Loopback-bound: never exposed to the LAN, let
+    # alone the internet.
     ports:
       - "127.0.0.1:${APP_HOST_PORT:-8080}:8080"
     # Fargate ran 2 tasks × 3 GB after the 2026-06-08 OOM incident.
@@ -150,36 +152,48 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  # ── Cloudflare Tunnel — the ALB + ACM + Route53 replacement ─────────
-  # Dials OUT to the Cloudflare edge, so no inbound port is opened on
-  # the router and a dynamic residential IP is irrelevant.  TLS is
-  # terminated at the edge with a Cloudflare-managed certificate.
+  # ── Caddy — the ALB + ACM + Route 53 replacement ────────────────────
+  # Terminates TLS on this box with a Let's Encrypt certificate it
+  # obtains and renews by itself, and reverse-proxies to the app.  Point
+  # an A record at the host and that is the whole edge.  See README.md §2.
   #
-  # The public hostname → http://app:8080 route is configured once in
-  # the Cloudflare dashboard (or via `cloudflared tunnel route dns`);
-  # the token below is all the container needs.  See README.md §2.
+  # This replaced a Cloudflare Tunnel (2026-08-13).  The tunnel's real
+  # value is reaching a host that CANNOT accept inbound connections —
+  # behind CGNAT or a home router — which is not this host's situation:
+  # it is a cloud VPS with a static public IP.  What the tunnel did cost
+  # was an always-on daemon whose failure mode is "site unreachable", a
+  # token that has to be obtained from a third party before the site can
+  # serve at all, and two coupled switches (token + compose profile) that
+  # redeploy.sh had to police because half-configuring them fails
+  # silently.  Caddy needs no credential from anyone.
   #
-  # Behind a compose PROFILE, and deliberately so.  This service used to
-  # declare ${CF_TUNNEL_TOKEN:?...}, which aborts *every* compose command
-  # when the token is unset — including `up`, `exec`, the systemd boot
-  # unit, and the nightly backup.  One optional edge component must not
-  # be able to take the database and the app down with it.
-  #
-  # Enable by setting BOTH in .env:
-  #     CF_TUNNEL_TOKEN=<token>
-  #     COMPOSE_PROFILES=tunnel
-  # redeploy.sh warns if you set one without the other.
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    profiles: ["tunnel"]
+  # What you give up: Cloudflare was absorbing DDoS and hiding the origin
+  # IP.  If you want that back without the daemon, put Cloudflare in
+  # front as PROXIED DNS pointing at this IP and restrict ufw to
+  # Cloudflare's ranges — Caddy stays exactly as it is.
+  caddy:
+    image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       - app
-    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run
+    # The only ports open to the internet on this host, besides SSH.
+    # 443/udp carries HTTP/3; harmless to publish if unused.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
     environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+      SEVIM_DOMAIN: ${SEVIM_DOMAIN:-khayyammath.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys live here.  This volume is NOT
+      # optional: lose it and every restart re-issues from scratch, which
+      # walks straight into Let's Encrypt's rate limit (5 duplicate certs
+      # per week) and leaves the site without TLS until it resets.
+      - caddy_data:/data
+      - caddy_config:/config
     healthcheck:
-      test: ["CMD", "cloudflared", "--version"]
+      test: ["CMD", "caddy", "version"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -192,3 +206,5 @@ services:
 volumes:
   pgdata:
   canvases:
+  caddy_data:
+  caddy_config:

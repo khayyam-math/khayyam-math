@@ -95,19 +95,21 @@ docker compose build app
 # with no database at all — and it reports HEALTHY, because /health
 # does not test the database.  Telemetry then writes nowhere while
 # everything looks green, which is worse than an outright failure.
-# The tunnel needs a token AND its profile enabled.  Setting one without
-# the other is silent: either the site never becomes reachable, or
-# cloudflared crashloops on an empty token.  Catch both here.
-_tok="$(env_get CF_TUNNEL_TOKEN)"
-_prof="$(env_get COMPOSE_PROFILES)"
-if [ -n "$_tok" ] && [[ "$_prof" != *tunnel* ]]; then
-    echo "[redeploy] ⚠️  CF_TUNNEL_TOKEN is set but COMPOSE_PROFILES does not"
-    echo "[redeploy]     include 'tunnel' — the site will NOT be publicly reachable."
-elif [ -z "$_tok" ] && [[ "$_prof" == *tunnel* ]]; then
-    echo "[redeploy] ⚠️  COMPOSE_PROFILES includes 'tunnel' but CF_TUNNEL_TOKEN is"
-    echo "[redeploy]     empty — cloudflared will crashloop. Set the token or clear the profile."
-elif [ -z "$_tok" ]; then
-    echo "[redeploy] ℹ️  No tunnel configured — db+app only, reachable on localhost."
+# Caddy needs no credential, but it does need DNS and open ports, and
+# both fail in ways that look like "the app is broken" from the outside.
+# Warn early rather than let the operator discover it from a browser.
+_domain="$(env_get SEVIM_DOMAIN)"
+if [ -z "$_domain" ]; then
+    echo "[redeploy] ℹ️  SEVIM_DOMAIN unset — Caddy will fall back to the"
+    echo "[redeploy]     compose default. Fine locally; set it before going public."
+else
+    _resolved="$(getent hosts "$_domain" 2>/dev/null | awk '{print $1}' | head -1)"
+    _mine="$(curl -s -4 -m 5 https://ifconfig.me 2>/dev/null || echo "")"
+    if [ -n "$_resolved" ] && [ -n "$_mine" ] && [ "$_resolved" != "$_mine" ]; then
+        echo "[redeploy] ⚠️  $_domain resolves to $_resolved but this host is $_mine."
+        echo "[redeploy]     Caddy's ACME challenge will fail until the A record points here."
+        echo "[redeploy]     (Expected while AWS still serves the domain — ignore until cut-over.)"
+    fi
 fi
 
 echo "[redeploy] Ensuring database is up…"

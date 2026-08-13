@@ -18,7 +18,7 @@
 #   1. System packages + unattended security updates
 #   2. Docker CE + compose plugin from Docker's own repo
 #   3. A dedicated unprivileged `khayyam` user in the docker group
-#   4. A default-deny firewall: SSH in, everything else out only
+#   4. A default-deny firewall: SSH + 80/443 in, everything out
 #   5. SSH hardening (key-only, no root password login)
 #   6. Repo ownership + a .env skeleton to fill in
 #
@@ -157,15 +157,19 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$REPO_DIR"
 git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 
 # ── 4. Firewall ──────────────────────────────────────────────────────
-# With Cloudflare Tunnel the origin needs NO inbound ports at all — the
-# tunnel dials out.  SSH is the only exception, and it is the only thing
-# an attacker can reach.  If you later drop the tunnel for Caddy +
-# Let's Encrypt, open 80/443 here.
-log "Configuring firewall (default deny inbound, SSH only)"
+# Caddy terminates TLS on this box, so 80 and 443 are the only inbound
+# ports besides SSH.  Port 80 is not optional and must not be closed
+# "because everything redirects to HTTPS anyway": Let's Encrypt's HTTP-01
+# challenge runs over it, so closing it works fine until the certificate
+# comes up for renewal ~60 days later and then fails quietly.
+log "Configuring firewall (default deny inbound; SSH + HTTP + HTTPS)"
 ufw --force reset >/dev/null
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow "$SSH_PORT"/tcp comment 'SSH'
+ufw allow 80/tcp comment 'HTTP — ACME challenge + redirect to HTTPS'
+ufw allow 443/tcp comment 'HTTPS'
+ufw allow 443/udp comment 'HTTP/3'
 ufw --force enable
 ufw status verbose
 
@@ -209,7 +213,7 @@ chmod 600 "$SELFHOST_DIR/.env"
 
 # ── Done ─────────────────────────────────────────────────────────────
 missing=()
-for key in CF_TUNNEL_TOKEN OPENAI_API_KEY SEVIM_SMTP_USER SEVIM_SMTP_PASSWORD \
+for key in OPENAI_API_KEY SEVIM_SMTP_USER SEVIM_SMTP_PASSWORD \
            MAXMIND_ACCOUNT_ID MAXMIND_LICENSE_KEY; do
     grep -qE "^${key}=.+" "$SELFHOST_DIR/.env" || missing+=("$key")
 done
@@ -221,7 +225,7 @@ cat <<EOF
 
    repo      $REPO_DIR
    user      $SERVICE_USER  (in docker group)
-   firewall  inbound: SSH only — the tunnel needs no open ports
+   firewall  inbound: SSH + 80/443 (Caddy terminates TLS here)
    config    $SELFHOST_DIR/.env  (mode 600)
 
 Still to fill in by hand:

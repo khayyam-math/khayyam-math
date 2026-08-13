@@ -100,8 +100,9 @@ PY
     set_env SEVIM_MAIL_FROM     "$ses_from"
 
     echo "[migrate] ✅ secrets copied into .env"
-    echo "[migrate] Still to fill in by hand: CF_TUNNEL_TOKEN,"
-    echo "[migrate] POSTGRES_PASSWORD, SEVIM_SMTP_USER, SEVIM_SMTP_PASSWORD."
+    echo "[migrate] Still to fill in by hand: POSTGRES_PASSWORD,"
+    echo "[migrate] SEVIM_SMTP_USER, SEVIM_SMTP_PASSWORD."
+    echo "[migrate] (No edge credential needed — Caddy gets its own cert.)"
     echo
 fi
 
