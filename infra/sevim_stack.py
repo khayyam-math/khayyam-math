@@ -2,7 +2,9 @@
 
 Provisions, in dependency order:
 
-  1. **VPC** with 2 public + 2 private (with NAT) subnets in 2 AZs.
+  1. **VPC** with 2 public + 2 private subnets in 2 AZs and NO NAT gateway;
+     Fargate tasks run in the public subnets with a public IP (inbound is
+     closed by the security group) so there is no NAT bill.
   2. **S3 buckets** for canvas WAVs, training data, LoRA artefacts.
   3. **RDS Postgres** (db.t4g.small, single AZ for cost) in private subnets;
      credentials live in a Secrets Manager secret CDK creates automatically.
@@ -71,12 +73,33 @@ class SevimStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # ── 1. Network ────────────────────────────────────────────────
-        # 2 AZ × (public + private-with-NAT) — minimum for ALB.  One NAT
-        # gateway is enough for outbound traffic (saves $32/mo vs 2).
+        # 2 AZ × (public + private) — minimum for ALB.
+        #
+        # NO NAT GATEWAY (2026-08-13).  A NAT is ~$32/mo each plus data
+        # processing, which is the single largest line item on a site that
+        # serves occasional demos.  Fargate tasks therefore run in the
+        # PUBLIC subnets with a public IP and egress straight through the
+        # internet gateway, which costs nothing beyond data transfer.
+        #
+        # This is not a security downgrade: inbound is governed by the
+        # task security group, which only admits the ALB's security group
+        # on 8080.  A public IP with no inbound rule is unreachable.
+        #
+        # The private subnets stay declared — the telemetry RDS instance
+        # lives in them and must not move (changing its subnet group would
+        # replace the database).  They simply have no default route now,
+        # which is fine: RDS needs no egress.
+        #
+        # Everything that runs as a Fargate task must therefore sit in the
+        # public subnets with assign_public_ip enabled.  Without egress a
+        # task cannot fetch its secrets from Secrets Manager and dies at
+        # init, which trips the ECS circuit breaker and rolls the deploy
+        # back — the failure mode is a failed deploy, not a running site
+        # with a broken feature, so it is loud but easy to misread.
         vpc = ec2.Vpc(
             self, "Vpc",
             max_azs=2,
-            nat_gateways=1,
+            nat_gateways=0,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     name="public", subnet_type=ec2.SubnetType.PUBLIC, cidr_mask=24,
@@ -355,7 +378,10 @@ class SevimStack(Stack):
             # start times mean a slow leak won't kill both at once.
             desired_count=2,
             public_load_balancer=True,
-            assign_public_ip=False,
+            # Public subnet + public IP is what replaces the NAT gateway;
+            # see the VPC comment above for why this is safe.
+            assign_public_ip=True,
+            task_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             task_image_options=ecs_patterns.ApplicationLoadBalancedTaskImageOptions(
                 image=ecs.ContainerImage.from_docker_image_asset(image_asset),
                 container_port=8080,
@@ -778,9 +804,9 @@ class SevimStack(Stack):
                         task_count=1,
                         network_configuration=scheduler.CfnSchedule.NetworkConfigurationProperty(
                             awsvpc_configuration=scheduler.CfnSchedule.AwsVpcConfigurationProperty(
-                                subnets=[s.subnet_id for s in vpc.private_subnets],
+                                subnets=[s.subnet_id for s in vpc.public_subnets],
                                 security_groups=[probe_sg.security_group_id],
-                                assign_public_ip="DISABLED",
+                                assign_public_ip="ENABLED",
                             ),
                         ),
                     ),
@@ -882,9 +908,9 @@ class SevimStack(Stack):
                         task_count=1,
                         network_configuration=scheduler.CfnSchedule.NetworkConfigurationProperty(
                             awsvpc_configuration=scheduler.CfnSchedule.AwsVpcConfigurationProperty(
-                                subnets=[s.subnet_id for s in vpc.private_subnets],
+                                subnets=[s.subnet_id for s in vpc.public_subnets],
                                 security_groups=[digest_sg.security_group_id],
-                                assign_public_ip="DISABLED",
+                                assign_public_ip="ENABLED",
                             ),
                         ),
                     ),
