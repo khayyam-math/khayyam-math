@@ -250,6 +250,20 @@ historical rows. Generating fresh ones silently breaks both.
 **Cutover** is repointing the `@` and `www` A records at this host. The
 moment they resolve here, Caddy answers the ACME challenge, obtains the
 certificate and starts serving; first issuance takes a few seconds.
+
+Restart Caddy as part of the cut-over:
+
+```bash
+docker compose up -d caddy && docker compose restart caddy
+```
+
+This is not superstition. If Caddy has been running while the domain
+still pointed at AWS, every issuance attempt failed validation and Caddy
+backed off exponentially — up to roughly a day between retries. It will
+eventually notice the new DNS on its own, but "eventually" can be hours
+after you flipped the record, which looks exactly like a broken
+cut-over. Restarting resets the retry schedule and it issues at once.
+
 Verify before you trust it:
 
 ```bash
