@@ -4,7 +4,7 @@ Runs a representative battery of prompts through the LOCAL build of the
 service and asserts every automatable quality criterion from
 ``quality_criteria.xlsx``.  Exits non-zero on the first regression.
 
-Wired into ``infra/deploy.sh``: a failing gate blocks ``cdk deploy``.
+Wired into ``deploy/selfhost/redeploy.sh``: a failing gate blocks the deploy.
 
 Run manually:
     cd infra && SEVIM_QUALITY_GATE_FAST=1 ./quality_gate.py
@@ -13,7 +13,7 @@ Run manually:
 
 Skip the gate (NOT recommended — only for emergency hotfixes that
 the gate itself is blocking):
-    SEVIM_SKIP_QUALITY_GATE=1 ./deploy.sh
+    SEVIM_SKIP_QUALITY_GATE=1 ./redeploy.sh
 """
 from __future__ import annotations
 

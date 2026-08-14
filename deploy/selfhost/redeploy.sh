@@ -31,11 +31,29 @@ echo "[redeploy] deploying $SEVIM_GIT_SHA"
 # Anything reading .env from bash must parse, never source.
 env_get() { sed -n "s/^$1=//p" ./.env | head -1; }
 
+# ── Model reachability preflight ─────────────────────────────────────
+# Providers retire models on their own schedule and nothing in this repo
+# changes when it happens: on 2026-08-10 the whole *-chat-latest line
+# started returning 404 and the site served no figures for days before
+# anyone read a log.  Ask the API whether the models this deploy pins are
+# still callable, before shipping them.  Needs OPENAI_API_KEY, which the
+# check reads from the environment; it skips with a warning without one.
+if [ -f "$REPO_ROOT/infra/check_models.py" ]; then
+    echo "[redeploy] Checking the configured models are still live…"
+    if ! OPENAI_API_KEY="$(env_get OPENAI_API_KEY)" \
+         python3 "$REPO_ROOT/infra/check_models.py"; then
+        echo
+        echo "[redeploy] ❌ A configured model is no longer usable — deploy blocked." >&2
+        echo "[redeploy]    Update deploy/selfhost/compose.yml with a live" >&2
+        echo "[redeploy]    replacement and re-run." >&2
+        exit 2
+    fi
+fi
+
 # ── GeoLite2 refresh ─────────────────────────────────────────────────
 # The mmdb is gitignored, so a fresh clone has no
 # infra/geolite/GeoLite2-City.mmdb and the Docker build fails at that
-# COPY.  infra/deploy.sh refreshes it before every AWS build; do the
-# same here so the two paths cannot drift.
+# COPY.  Refresh it before every build so a fresh clone can build at all.
 echo "[redeploy] Refreshing GeoLite2 database…"
 export MAXMIND_ACCOUNT_ID="$(env_get MAXMIND_ACCOUNT_ID)"
 export MAXMIND_LICENSE_KEY="$(env_get MAXMIND_LICENSE_KEY)"

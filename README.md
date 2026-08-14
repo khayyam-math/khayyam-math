@@ -17,6 +17,21 @@
 
 </div>
 
+> ### 📦 This is the `selfhost` branch — runs on any Docker host
+>
+> One box, no cloud provider: Docker Compose brings up the app, Postgres
+> and Caddy (which gets its own Let's Encrypt certificate). Point a DNS A
+> record at the machine and that is the whole deployment. A €5 VPS, a
+> spare workstation and a rack server are all the same thing to it.
+>
+> **Start at [`deploy/selfhost/README.md`](deploy/selfhost/README.md).**
+>
+> The [`main`](../../tree/main) branch is the **AWS** deployment instead:
+> ECS Fargate, RDS, an ALB and CDK. Same application code; the branches
+> differ only in how it is deployed and configured. See
+> [Deployment branches](#deployment-branches) below for what diverges.
+
+
 > *"draw a DFA for the language L = (a|b)\* ending in ab"* →
 > a clean state diagram, sub-10 seconds, with synchronised audio
 > narration. Try it: **[khayyammath.com](https://khayyammath.com)**
@@ -344,13 +359,11 @@ structural checks (empty or malformed SVG, text outside the viewBox,
 oversized elements, overlapping or duplicated labels, leaked internals,
 generation errors), and emails the operator only when something is wrong.
 A clean run is silent, so the inbox carries real problems only. The
-implementation is `studio/quality_probe.py`; the AWS deployment wires it
-to EventBridge Scheduler in `infra/sevim_stack.py`.
+implementation is `studio/quality_probe.py`; this branch wires it to a
+systemd timer (`deploy/selfhost/systemd/khayyam-probe.timer`).
 
-**How it executes.** Amazon EventBridge Scheduler holds a
-`rate(6 hours)` schedule with a hard `EndDate`. On each firing it
-launches a single short-lived ECS Fargate task from the *same* container
-image the website runs, in the private subnets. The task runs
+**How it executes.** A systemd timer fires every 6 hours and runs a
+short-lived container from the *same* image the website runs. It runs
 `python -m studio.quality_probe`, which picks one prompt from a rotating
 pool, calls `express_figure`, runs the structural checks, emails on a
 problem, and exits. Cost is one brief task four times a day (cents per
@@ -393,6 +406,57 @@ The admin dashboard whitelist follows the same rule:
 `SEVIM_ADMIN_EMAILS` comes only from the deploying environment, never from
 committed source. Unset means the admin route is invisible (404) to
 everyone.
+
+## Deployment branches
+
+The application code is identical on both branches. What differs is how
+it is deployed and, in two places, how it is configured. Keeping the
+divergence this small is deliberate: a bug fix cherry-picks cleanly in
+either direction.
+
+| | [`main`](../../tree/main) — AWS | `selfhost` — anywhere |
+|---|---|---|
+| Compute | ECS Fargate, 2 tasks | `app` container, uvicorn workers |
+| Database | RDS Postgres | `db` container + named volume |
+| Object storage | S3 (`S3Storage`) | a named volume (`FileStorage`) |
+| TLS + routing | ALB + ACM + Route 53 | Caddy + Let's Encrypt + an A record |
+| Secrets | Secrets Manager | `.env`, mode 600 |
+| Scheduled jobs | EventBridge Scheduler | systemd timers |
+| Mail | SES | any SMTP relay |
+| Deploy command | `infra/deploy.sh` | `deploy/selfhost/redeploy.sh` |
+| Provisioning | CDK (`infra/sevim_stack.py`) | `deploy/selfhost/provision.sh` |
+
+### The two behavioural differences
+
+Everything above is packaging. These two change what a visitor
+experiences, so they are worth stating plainly:
+
+**1. Sign-in.** `main` requires a magic link (`SEVIM_AUTH_REQUIRED=1`);
+this branch is anonymous (`=0`). No email is asked for and none is
+needed to use the tutor.
+
+**2. What replaces the sign-in gate.** The daily spend cap is keyed on
+`session_id`, a localStorage UUID. Behind sign-in that identifies a
+verified person; anonymously, clearing site data would hand out a fresh
+budget, so this branch also caps spend per IP
+(`SEVIM_COST_GUARD_BY_IP=1`, `Telemetry.ip_cost()`) and tightens the
+per-IP rate bucket. Either ceiling rejects on its own.
+
+Two consequences follow, and neither is a bug:
+
+- **Distinct-people counts degrade to IP hashes.** A classroom behind one
+  NAT reads as one person; one person on a phone and a laptop reads as
+  two. Any user count quoted from an anonymous deployment must say so.
+- **A NAT-shared network is the expected false positive** of IP-keyed
+  limits. Raise `SEVIM_RATE_IP_CAPACITY` / `SEVIM_RATE_IP_DAILY_MAX` to
+  relieve it; both are env vars, so it needs no redeploy.
+
+`/studio/admin` is unaffected and still fails **closed**: it needs a
+signed cookie, so an anonymous visitor gets a 404 rather than a
+dashboard. Reaching it does require SMTP configured, since the cookie
+arrives by magic link.
+
+---
 
 ## How it's built
 

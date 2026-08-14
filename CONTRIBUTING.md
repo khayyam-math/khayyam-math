@@ -87,7 +87,8 @@ These are listed roughly in order of "easy first issue" → "hardest":
 
 ### Project-specific rules new contributors often get wrong
 
-- **Always deploy via `infra/deploy.sh`**, never bare `cdk deploy`.
+- **Always deploy via `deploy/selfhost/redeploy.sh`** — it runs the
+  model preflight and the quality gate, and auto-rolls-back a bad build.
   The wrapper preserves HTTPS / ACM / Route 53 config that bare CDK
   would otherwise drop. See [docs/DEPLOY.md](docs/DEPLOY.md).
 - **No fallback to LLM-drawn SVG from a deterministic route.** Every
