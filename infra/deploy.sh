@@ -106,7 +106,7 @@ case "$cmd" in
         if ! (cd .. && uv run python infra/check_models.py); then
             echo
             echo "[deploy.sh] ❌ A configured model is no longer usable — deploy blocked."
-            echo "[deploy.sh] Update infra/sevim_stack.py + deploy/selfhost/compose.yml"
+            echo "[deploy.sh] Update infra/sevim_stack.py with live replacements"
             echo "[deploy.sh] with live replacements and re-run."
             exit 2
         fi

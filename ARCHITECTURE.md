@@ -662,8 +662,11 @@ Which topology the code takes is a function of four env vars:
 No code branches on "am I on AWS" beyond these. Reverting is therefore
 a configuration change, not a migration.
 
-- Everything lives in `deploy/selfhost/`.
-- Runbook: [`deploy/selfhost/README.md`](deploy/selfhost/README.md).
+- It lives on the [`selfhost`](../../tree/selfhost) branch, under
+  `deploy/selfhost/`, together with its own runbook.
+- The application code there is identical to this branch. Only packaging
+  and two configuration choices differ; see "Deployment branches" in the
+  README.
 
 ---
 

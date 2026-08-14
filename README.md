@@ -17,6 +17,20 @@
 
 </div>
 
+> ### ☁️ This is the `main` branch — the AWS deployment
+>
+> ECS Fargate behind an ALB, RDS Postgres, S3, Secrets Manager and
+> EventBridge, all provisioned by CDK. Deploy with
+> [`infra/deploy.sh`](infra/deploy.sh).
+>
+> Want to run it on **one box, with no cloud provider**? Use the
+> [`selfhost`](../../tree/selfhost) branch: Docker Compose brings up the
+> app, Postgres and Caddy with its own Let's Encrypt certificate, and a
+> DNS A record is the whole deployment. Same application code; the
+> branches differ only in packaging and two configuration choices. See
+> [Deployment branches](#deployment-branches) below.
+
+
 > *"draw a DFA for the language L = (a|b)\* ending in ab"* →
 > a clean state diagram, sub-10 seconds, with synchronised audio
 > narration. Try it: **[khayyammath.com](https://khayyammath.com)**
@@ -393,6 +407,41 @@ The admin dashboard whitelist follows the same rule:
 `SEVIM_ADMIN_EMAILS` comes only from the deploying environment, never from
 committed source. Unset means the admin route is invisible (404) to
 everyone.
+
+## Deployment branches
+
+The application code is identical on both branches. What differs is how
+it is deployed and, in two places, how it is configured. Keeping the
+divergence this small is deliberate: a bug fix cherry-picks cleanly in
+either direction.
+
+| | `main` — AWS | [`selfhost`](../../tree/selfhost) — anywhere |
+|---|---|---|
+| Compute | ECS Fargate, 2 tasks | `app` container, uvicorn workers |
+| Database | RDS Postgres | `db` container + named volume |
+| Object storage | S3 (`S3Storage`) | a named volume (`FileStorage`) |
+| TLS + routing | ALB + ACM + Route 53 | Caddy + Let's Encrypt + an A record |
+| Secrets | Secrets Manager | `.env`, mode 600 |
+| Scheduled jobs | EventBridge Scheduler | systemd timers |
+| Mail | SES | any SMTP relay |
+| Deploy command | `infra/deploy.sh` | `deploy/selfhost/redeploy.sh` |
+| Provisioning | CDK (`infra/sevim_stack.py`) | `deploy/selfhost/provision.sh` |
+
+### The two behavioural differences
+
+Everything above is packaging. These two change what a visitor
+experiences:
+
+**1. Sign-in.** This branch requires a magic link
+(`SEVIM_AUTH_REQUIRED=1`), and the captured email is what lets distinct
+people be counted in telemetry. The `selfhost` branch is anonymous.
+
+**2. The spend cap.** Here the daily cap is keyed on `session_id` alone,
+which is sound because sign-in ties a session to a verified person. The
+anonymous branch additionally caps per IP, because without sign-in a
+visitor could reset the session key by clearing site data.
+
+---
 
 ## How it's built
 

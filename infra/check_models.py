@@ -17,9 +17,9 @@ So this check asks the API directly, before a deploy goes out:
   * the TTS model is checked against the listing (a synthesis call would
     cost real money for no extra signal).
 
-Model ids are read out of the two files that actually configure a
-deployment, so AWS and the self-hosted box are both covered and neither
-can drift into a dead model unnoticed.
+Model ids are read out of whichever deployment config files exist in
+the tree, so a branch that carries only one of them is covered just the
+same.  Missing files are skipped, not an error.
 
 Exit codes: 0 = all reachable (or skipped for lack of a key), 1 = at
 least one model is dead.  Run standalone with::
