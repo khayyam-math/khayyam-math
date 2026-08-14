@@ -88,7 +88,38 @@ services:
       SEVIM_COST_GUARD: "1"
       SEVIM_COST_DAILY_MAX_USD: "10.00"
       SEVIM_CONTENT_FILTER: "1"
-      SEVIM_AUTH_REQUIRED: "1"
+
+      # ── Anonymous access, defended per IP ──────────────────────────
+      # This is where the self-hosted stack DIVERGES from AWS, which
+      # keeps SEVIM_AUTH_REQUIRED=1.  Magic-link sign-in is off here, so
+      # there is no mail dependency in the request path and visitors
+      # reach the tutor with no wall.
+      #
+      # What sign-in was silently providing, and what replaces it:
+      #
+      #   * A ceiling on spend.  The cost guard is keyed on session_id,
+      #     a localStorage UUID that a visitor can reset by clearing site
+      #     data — decorative without auth.  SEVIM_COST_GUARD_BY_IP=1
+      #     adds the same cap per IP, which costs real effort to rotate.
+      #   * Distinct-people counts.  Telemetry now falls back to IP
+      #     hashes: a school behind one NAT reads as one person, and one
+      #     person on phone + laptop reads as two.  Anything quoting
+      #     user counts from this deployment must say so.
+      #
+      # /studio/admin still needs a signed cookie, so it fails CLOSED
+      # (404) rather than opening up.  Reaching it needs a magic link,
+      # which needs SMTP configured — admin-only, not user-facing.
+      SEVIM_AUTH_REQUIRED: "0"
+      SEVIM_COST_GUARD_BY_IP: "1"
+      # Anonymous means the IP bucket is the primary brake, so it is
+      # tighter than the signed-in defaults (burst 10, 30/hr, 30/day).
+      # Kept generous enough for a genuine lesson: a burst of 6 and 20
+      # figures an hour is well past what one learner asks for, while a
+      # scripted scrape hits it in a minute.  Raise if a classroom behind
+      # one NAT reports being blocked — that is the expected false
+      # positive of IP-keyed limits, and the reason auth existed.
+      SEVIM_RATE_IP_CAPACITY: "6"
+      SEVIM_RATE_IP_DAILY_MAX: "20"
       # Caddy puts the real client IP in the leftmost X-Forwarded-For
       # entry, exactly as the ALB and the Cloudflare Tunnel both did, so
       # studio/sessions.py:_client_ip() needs no change.

@@ -1116,7 +1116,9 @@ async def chat(
     # "clear localStorage to refresh session_id" bypass.
     rl_msg = get_rate_limiter().check(session_id, ip_hash=ip_hash_value)
     if rl_msg is None:
-        rl_msg = check_cost_guard(session_id)
+        # ip_hash matters here when sign-in is off: the session cap alone
+        # is reset by clearing site data (SEVIM_COST_GUARD_BY_IP).
+        rl_msg = check_cost_guard(session_id, ip_hash=ip_hash_value)
     if rl_msg is not None:
         async def limit_stream():
             yield {"event": "text", "data": json.dumps({"text": rl_msg})}

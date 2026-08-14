@@ -1358,6 +1358,30 @@ class Telemetry:
         )
         return float(rows[0][0]) if rows else 0.0
 
+    def ip_cost(self, ip_hash: str, since_s: float = 86400.0) -> float:
+        """Total spend across every session seen from one IP.
+
+        The session-keyed cap is keyed on a localStorage UUID, which a
+        visitor can reset by clearing site data.  That is tolerable when
+        sign-in ties a session to a verified person; with anonymous
+        access it makes the daily cap decorative.  Summing per IP gives
+        the cap something that costs real effort to rotate.
+
+        ``ip_hash`` is the salted hash stored on `sessions`, never a raw
+        address, so this reads exactly what telemetry already keeps.
+        """
+        cutoff = time.time() - since_s
+        rows = self.query(
+            """
+            SELECT COALESCE(SUM(t.cost_usd_estimate), 0)
+              FROM turns t
+              JOIN sessions s ON s.session_id = t.session_id
+             WHERE s.ip_hash = ? AND t.timestamp >= ?
+            """,
+            (ip_hash, cutoff),
+        )
+        return float(rows[0][0]) if rows else 0.0
+
     def session_request_count(self, session_id: str, since_s: float) -> int:
         cutoff = time.time() - since_s
         rows = self.query(

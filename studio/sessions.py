@@ -224,9 +224,25 @@ def get_rate_limiter() -> RateLimiter:
 
 # ── Cost guard ──────────────────────────────────────────────────────────
 
-def check_cost_guard(session_id: str) -> str | None:
-    """Look up the session's last-24h spend in the telemetry DB.  Reject
-    if it exceeds the daily cap.  Returns ``None`` when allowed."""
+def is_cost_guarded_by_ip() -> bool:
+    """Also cap spend per IP, not only per session.
+
+    OFF by default, so a deployment that requires sign-in behaves exactly
+    as before.  Turn it ON wherever access is anonymous: the session cap
+    is keyed on a localStorage UUID, and clearing site data hands out a
+    fresh budget, so per-session is not a real ceiling without auth.
+    """
+    return os.environ.get("SEVIM_COST_GUARD_BY_IP", "0") not in (
+        "0", "", "false", "no")
+
+
+def check_cost_guard(session_id: str, ip_hash: str | None = None) -> str | None:
+    """Look up the last-24h spend in the telemetry DB.  Reject if it
+    exceeds the daily cap.  Returns ``None`` when allowed.
+
+    Checks the session always, and the IP too when
+    ``SEVIM_COST_GUARD_BY_IP=1``.  Either ceiling rejects on its own.
+    """
     if not is_cost_guarded():
         return None
     if not session_id:
@@ -235,6 +251,19 @@ def check_cost_guard(session_id: str) -> str | None:
     tel = get_telemetry()
     if tel is None:
         return None
+    cap = _cost_daily_max_usd()
+    if is_cost_guarded_by_ip() and ip_hash:
+        try:
+            ip_spent = tel.ip_cost(ip_hash, since_s=86400.0)
+        except Exception as exc:  # noqa: BLE001
+            # Same fail-open reasoning as below: a telemetry hiccup must
+            # never 500 the chat endpoint.
+            print(f"[cost-guard] ip spend read failed, allowing request: "
+                  f"{type(exc).__name__}: {exc}", flush=True, file=sys.stderr)
+        else:
+            if ip_spent >= cap:
+                return (f"This network has hit the $/day cost cap "
+                        f"(${ip_spent:.2f} / ${cap:.2f}).  Try again tomorrow.")
     try:
         spent = tel.session_cost(session_id, since_s=86400.0)
     except Exception as exc:  # noqa: BLE001
@@ -245,7 +274,6 @@ def check_cost_guard(session_id: str) -> str | None:
         print(f"[cost-guard] telemetry read failed, allowing request: "
               f"{type(exc).__name__}: {exc}", flush=True, file=sys.stderr)
         return None
-    cap = _cost_daily_max_usd()
     if spent >= cap:
         return (f"This session has hit the $/day cost cap "
                 f"(${spent:.2f} / ${cap:.2f}).  Try again tomorrow.")
