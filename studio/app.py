@@ -1911,7 +1911,15 @@ _LOGIN_HTML = """<!doctype html>
 
 
 @router.get("/auth/login", response_class=HTMLResponse)
-def login_page() -> HTMLResponse:
+def login_page():
+    # With sign-in off, this page is a dead end: it asks for an email
+    # that buys the visitor nothing.  Bookmarks, search results and
+    # cached copies of the old landing page all still point here, so
+    # forward them into the tutor rather than showing a form that will
+    # never arrive anywhere.
+    from studio.auth import is_required as _auth_required
+    if not _auth_required():
+        return RedirectResponse(url="/studio", status_code=302)
     return HTMLResponse(_LOGIN_HTML.replace("__NOTICE__", ""))
 
 

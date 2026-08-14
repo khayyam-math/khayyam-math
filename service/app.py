@@ -257,10 +257,42 @@ def root():
     if not landing.exists():
         from fastapi.responses import RedirectResponse
         return RedirectResponse(url="/studio", status_code=302)
+    # Every CTA on the landing page points at the sign-in route, which is
+    # correct only where sign-in exists.  With SEVIM_AUTH_REQUIRED=0 that
+    # sends a visitor to an email form they never needed, which reads as
+    # "this site wants my address before it will do anything" — the exact
+    # friction anonymous access was meant to remove.  Send them into the
+    # tutor instead.  The button copy ("Open Studio", "Try it free")
+    # already reads correctly either way, so only the href moves.
+    from studio.auth import is_required as _auth_required
+    if not _auth_required():
+        return HTMLResponse(
+            _landing_html_anonymous(landing),
+            headers={"cache-control": "public, max-age=300"},
+        )
     return FileResponse(
         landing, media_type="text/html",
         headers={"cache-control": "public, max-age=300"},
     )
+
+
+_LANDING_ANON_CACHE: dict[str, str] = {}
+
+
+def _landing_html_anonymous(landing: Path) -> str:
+    """landing.html with its sign-in links retargeted at Studio.
+
+    Cached on the file's mtime so this is one rewrite per deploy, not one
+    per request.
+    """
+    key = f"{landing.stat().st_mtime_ns}"
+    hit = _LANDING_ANON_CACHE.get(key)
+    if hit is None:
+        hit = landing.read_text(encoding="utf-8").replace(
+            "/studio/auth/login", "/studio")
+        _LANDING_ANON_CACHE.clear()
+        _LANDING_ANON_CACHE[key] = hit
+    return hit
 
 
 @app.get("/screenshots/{name}", include_in_schema=False)
